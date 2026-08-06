@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Header } from "@/components/Header";
-import { Footer } from "@/components/Footer";
+import { AppShell } from "@/components/layout/AppShell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,9 +14,19 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MARTKET — Buy & sell locally",
-  description: "A simple marketplace to buy and sell items locally.",
+  title: "Market Intelligence AI — Transparent Market Scanning",
+  description:
+    "Explainable market intelligence combining fundamentals, sentiment, positioning, seasonality and technicals into one transparent scoring system. For informational purposes only — not investment advice.",
 };
+
+const themeInitScript = `
+try {
+  var stored = localStorage.getItem('mi-theme');
+  if (stored === 'light' || stored === 'dark') {
+    document.documentElement.setAttribute('data-theme', stored);
+  }
+} catch (e) {}
+`;
 
 export default function RootLayout({
   children,
@@ -25,14 +34,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">
-        <Header />
-        {children}
-        <Footer />
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

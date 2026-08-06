@@ -1,0 +1,81 @@
+import { allMarketRows } from "@/lib/market-data";
+import { AUDIT_LOGS, API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY } from "@/lib/demo/admin";
+import { AdminClient } from "./AdminClient";
+import { Card } from "@/components/ui/Card";
+import { StatTile } from "@/components/ui/StatTile";
+import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
+import { factorLabel } from "@/lib/scoring";
+import { formatDate, formatRelative } from "@/lib/time";
+import Link from "next/link";
+
+export const metadata = { title: "Admin — Market Intelligence AI" };
+
+export default function AdminPage() {
+  const rows = allMarketRows();
+  const dataQualityIssues = rows.flatMap((r) =>
+    r.score.factors
+      .filter((f) => f.freshness !== "live")
+      .map((f) => ({ symbol: r.instrument.symbol, factor: f }))
+  );
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">Admin</h1>
+        <p className="text-sm text-(--text-faint) mt-1">Configure the scoring engine, review data quality, and audit every change. Every weight and threshold edit here is versioned.</p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatTile label="Daily active users" value={USER_ACTIVITY.dailyActiveUsers.toLocaleString()} />
+        <StatTile label="Free / Pro / Professional" value={`${USER_ACTIVITY.freeUsers.toLocaleString()} / ${USER_ACTIVITY.proUsers.toLocaleString()} / ${USER_ACTIVITY.professionalUsers.toLocaleString()}`} />
+        <StatTile label="API requests today" value={API_USAGE.requestsToday.toLocaleString()} sub={`${API_USAGE.activeApiKeys} active keys`} />
+        <StatTile label="Rate limit" value={`${API_USAGE.rateLimitPerMin}/min`} />
+      </div>
+
+      <AdminClient initialAuditLog={AUDIT_LOGS} />
+
+      <Card title="Data quality — non-live factors" subtitle="Stale or estimated data is automatically down-weighted in scoring">
+        {dataQualityIssues.length === 0 ? (
+          <p className="text-sm text-(--text-faint)">All factor data is currently live.</p>
+        ) : (
+          <div className="space-y-2">
+            {dataQualityIssues.map(({ symbol, factor }) => (
+              <div key={`${symbol}-${factor.key}`} className="flex items-center justify-between text-sm py-1.5 border-b border-(--border) last:border-0">
+                <div>
+                  <Link href={`/markets/${symbol}`} className="font-medium hover:text-(--accent)">{symbol}</Link>
+                  <span className="text-(--text-faint)"> · {factorLabel(factor.key)}</span>
+                </div>
+                <DataFreshnessTag freshness={factor.freshness} lastUpdated={factor.lastUpdated} />
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title="Failed data jobs">
+        <div className="space-y-2">
+          {FAILED_JOBS.map((j) => (
+            <div key={j.id} className="text-sm py-1.5 border-b border-(--border) last:border-0">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">{j.job}</span>
+                <span className="text-xs text-(--text-faint)">{formatRelative(j.failedAt)} · {j.retries} retries</span>
+              </div>
+              <p className="text-xs text-rose-400 mt-0.5">{j.error}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card title="System announcements">
+        <ul className="space-y-2">
+          {SYSTEM_ANNOUNCEMENTS.map((a) => (
+            <li key={a.id} className="text-sm flex items-center justify-between">
+              <span>{a.title}</span>
+              <span className="text-xs text-(--text-faint)">{formatDate(a.publishedAt)}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
