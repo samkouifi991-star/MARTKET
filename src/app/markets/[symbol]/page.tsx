@@ -16,9 +16,10 @@ import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { Card } from "@/components/ui/Card";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
+import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
-import { formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
+import { factorContributionColorClass, factorSentiment, formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
 import { formatDateTime, formatRelative } from "@/lib/time";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 
@@ -92,14 +93,15 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
             {score.factors.map((f) => (
               <div key={f.key} className="border-b border-(--border) last:border-0 pb-3 last:pb-0">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium">{factorLabel(f.key)}</span>
+                    <FactorSentimentBadge sentiment={factorSentiment(f.contribution)} />
                     <DataFreshnessTag freshness={f.freshness} lastUpdated={f.lastUpdated} />
                   </div>
                   <div className="flex items-center gap-3 text-xs text-(--text-faint) tabular-nums">
                     <span>raw {formatSigned(f.rawScore)}</span>
                     <span>weight {(f.weight * 100).toFixed(0)}%</span>
-                    <span className={`font-semibold ${scoreColorClass(f.contribution)}`}>{formatSigned(f.contribution)}</span>
+                    <span className={`font-semibold ${factorContributionColorClass(f.contribution)}`}>{formatSigned(f.contribution)}</span>
                   </div>
                 </div>
                 <p className="text-xs text-(--text-dim) mt-1 leading-relaxed">{f.explanation}</p>

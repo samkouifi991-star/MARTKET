@@ -37,3 +37,32 @@ export function scoreColorClass(value: number): string {
   if (value <= -4) return "text-rose-400";
   return "text-slate-300";
 }
+
+export type FactorSentiment = "Bullish" | "Bearish" | "Neutral";
+
+/** Per-factor (not total-score) sentiment: any positive contribution is
+ * Bullish, any negative is Bearish, exactly zero is Neutral. Distinct from
+ * scoreColorClass's ±4 bands, which are calibrated for the -10..+10 total
+ * score, not a single factor's much smaller weighted contribution. */
+export function factorSentiment(contribution: number): FactorSentiment {
+  if (contribution > 0) return "Bullish";
+  if (contribution < 0) return "Bearish";
+  return "Neutral";
+}
+
+export function factorSentimentBadgeClasses(sentiment: FactorSentiment): string {
+  switch (sentiment) {
+    case "Bullish":
+      return "text-emerald-400 bg-emerald-500/10 border-emerald-500/25";
+    case "Bearish":
+      return "text-rose-400 bg-rose-500/10 border-rose-500/25";
+    case "Neutral":
+      return "text-slate-400 bg-slate-500/10 border-slate-500/25";
+  }
+}
+
+export function factorContributionColorClass(contribution: number): string {
+  if (contribution > 0) return "text-emerald-400";
+  if (contribution < 0) return "text-rose-400";
+  return "text-slate-400";
+}
