@@ -42,7 +42,11 @@ export const FACTOR_LABELS: Record<ScoreFactorKey, string> = {
   news: "News & geopolitical risk",
 };
 
-export type DataFreshness = "live" | "delayed" | "estimated" | "stale";
+// "estimated" is a demo-mode-only label (aggregated/synthetic value shown
+// honestly as such). "unavailable" / "error" are the live-pipeline states a
+// factor must fall into when its provider has no data or the request
+// failed — never silently substituted with demo data.
+export type DataFreshness = "live" | "delayed" | "estimated" | "stale" | "unavailable" | "error";
 
 export type ScoreFactor = {
   key: ScoreFactorKey;

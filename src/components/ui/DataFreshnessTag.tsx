@@ -6,6 +6,8 @@ const LABELS: Record<DataFreshness, { text: string; classes: string }> = {
   delayed: { text: "Delayed", classes: "text-amber-400 bg-amber-500/10" },
   estimated: { text: "Estimated", classes: "text-sky-400 bg-sky-500/10" },
   stale: { text: "Stale", classes: "text-rose-400 bg-rose-500/10" },
+  unavailable: { text: "Unavailable", classes: "text-(--text-faint) bg-slate-500/10" },
+  error: { text: "Error", classes: "text-rose-400 bg-rose-500/15" },
 };
 
 export function DataFreshnessTag({ freshness, lastUpdated }: { freshness: DataFreshness; lastUpdated?: string }) {
