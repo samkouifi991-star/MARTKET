@@ -49,6 +49,18 @@ export default async function AdminPage() {
       <AdminClient initialAuditLog={AUDIT_LOGS} />
 
       <Card
+        title="GBPUSD dependency-chain validation"
+        subtitle="Live reference market — every provider/dataset behind the GBPUSD score, checked individually"
+        action={<Link href="/admin/gbpusd-validation" className="text-xs text-(--accent) hover:underline">Open validation page →</Link>}
+      >
+        <p className="text-sm text-(--text-faint)">
+          {DATA_MODE === "demo"
+            ? "Becomes callable once DATA_MODE is set to hybrid or live."
+            : "Live-calls FMP, CFTC, FRED, Myfxbook, and IG specifically for GBPUSD and cross-checks against real database row counts — distinct from the aggregate provider health table below."}
+        </p>
+      </Card>
+
+      <Card
         title="Provider health"
         subtitle={
           DATA_MODE === "demo"
