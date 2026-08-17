@@ -61,9 +61,9 @@ export async function upsertPositioning(symbol: string, pos: CftcPositioningResu
     .onConflictDoNothing({ target: [institutionalPositioning.symbol, institutionalPositioning.classification, institutionalPositioning.reportDate] });
 }
 
-export async function insertRetailSentiment(symbol: string, pctLong: number, pctShort: number, status: string): Promise<void> {
+export async function insertRetailSentiment(symbol: string, pctLong: number, pctShort: number, status: string, provider?: string, source?: string): Promise<void> {
   const db = getDb();
-  await db.insert(retailSentiment).values({ symbol, pctLong, pctShort, status });
+  await db.insert(retailSentiment).values({ symbol, pctLong, pctShort, status, ...(provider ? { provider } : {}), ...(source ? { source } : {}) });
 }
 
 export async function upsertEconomicIndicator(country: string, indicator: FredIndicatorKey, seriesId: string, date: string, value: number): Promise<void> {

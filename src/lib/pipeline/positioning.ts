@@ -2,7 +2,7 @@ import { getInstrument } from "@/lib/instruments";
 import { institutionalFactor as demoInstitutionalFactor } from "@/lib/scoring";
 import { computeInstitutionalMomentum, detectDivergenceSignal, DivergenceInput, SmartMoneySignal } from "@/lib/engines/smart-money";
 import * as cftc from "@/services/market-data/cftc";
-import * as ig from "@/services/market-data/ig";
+import * as retailSentiment from "@/services/market-data/retail-sentiment";
 import * as fmp from "@/services/market-data/fmp";
 import { demoFallbackFactor, errorFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { DataMode } from "@/services/data-mode";
@@ -59,7 +59,7 @@ export type SmartMoneyResolution = {
 };
 
 export async function resolveSmartMoney(symbol: string): Promise<SmartMoneyResolution> {
-  const [positioning, sentiment, quote] = await Promise.all([cftc.getInstitutionalPositioning(symbol), ig.getRetailSentiment(symbol), fmp.getQuote(symbol)]);
+  const [positioning, sentiment, quote] = await Promise.all([cftc.getInstitutionalPositioning(symbol), retailSentiment.getRetailSentiment(symbol), fmp.getQuote(symbol)]);
 
   if (positioning.status !== "live" || !positioning.value) {
     return { signal: "None", confidence: 0, explanation: "Institutional positioning data is unavailable for this market, so Smart Money cannot be evaluated.", provider: "cftc", freshness: "unavailable" };
@@ -83,7 +83,7 @@ export async function resolveSmartMoney(symbol: string): Promise<SmartMoneyResol
     signal: divergence.signal,
     confidence: divergence.confidence,
     explanation,
-    provider: "cftc" + (sentiment.status === "live" ? "+ig" : ""),
+    provider: "cftc" + (sentiment.status === "live" ? `+${sentiment.provider}` : ""),
     freshness: "live",
   };
 }

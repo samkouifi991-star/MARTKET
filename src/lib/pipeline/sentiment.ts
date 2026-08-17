@@ -1,10 +1,8 @@
 import { getInstrument } from "@/lib/instruments";
 import { DEFAULT_RETAIL_SENTIMENT_CONFIG } from "@/lib/config";
-import * as ig from "@/services/market-data/ig";
+import * as retailSentiment from "@/services/market-data/retail-sentiment";
 import { errorFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { DataMode } from "@/services/data-mode";
-
-const SOURCE = "IG Client Sentiment";
 
 function clamp(v: number, min = -10, max = 10): number {
   return Math.max(min, Math.min(max, v));
@@ -18,13 +16,14 @@ function clamp(v: number, min = -10, max = 10): number {
 export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMode): Promise<ResolvedFactor> {
   void _mode;
   const instrument = getInstrument(symbol);
-  if (!instrument) return unavailableFactor("retailSentiment", SOURCE, `Unknown instrument ${symbol}`);
+  if (!instrument) return unavailableFactor("retailSentiment", "Retail Sentiment", `Unknown instrument ${symbol}`);
 
-  const sentiment = await ig.getRetailSentiment(symbol);
+  const sentiment = await retailSentiment.getRetailSentiment(symbol);
+  const SOURCE = sentiment.source;
   if (sentiment.status !== "live" || !sentiment.value) {
     return sentiment.status === "error"
       ? errorFactor("retailSentiment", SOURCE, sentiment.error ?? "request failed")
-      : unavailableFactor("retailSentiment", SOURCE, "Retail sentiment unavailable — IG does not cover this market");
+      : unavailableFactor("retailSentiment", SOURCE, sentiment.error ?? "Retail sentiment unavailable — no configured provider covers this market");
   }
 
   const { extremeLongThreshold, extremeShortThreshold } = DEFAULT_RETAIL_SENTIMENT_CONFIG;
@@ -46,7 +45,7 @@ export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMo
     rawScore: clamp(raw),
     explanation,
     source: SOURCE,
-    provider: "ig",
+    provider: sentiment.provider,
     freshness: "live",
     lastUpdated: sentiment.sourceUpdatedAt ?? new Date().toISOString(),
     nextUpdate: new Date().toISOString(),
