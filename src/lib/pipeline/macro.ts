@@ -5,7 +5,7 @@ import { FredIndicatorKey } from "@/services/market-data/fred-series";
 import * as fred from "@/services/market-data/fred";
 import { FredSeriesPoint } from "@/services/types";
 import { demoFallbackFactor, ResolvedFactor, unavailableFactor } from "./types";
-import { DataMode } from "@/services/data-mode";
+import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 import { Instrument, ScoreFactorKey } from "@/lib/types";
 
 const GROWTH_INDICATORS: FredIndicatorKey[] = ["realGdp", "gdpGrowth", "industrialProduction", "retailSales"];
@@ -65,7 +65,7 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
     const differential = computeFxDifferential(baseVal, quoteVal);
 
     if (differential === null) {
-      return mode === "hybrid" ? fallback() : unavailableFactor(meta.key, source, `Insufficient verified FRED coverage for ${base} and/or ${quote} ${category} indicators`);
+      return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor(meta.key, source, `Insufficient verified FRED coverage for ${base} and/or ${quote} ${category} indicators`);
     }
 
     return {
@@ -83,7 +83,7 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
   const weight = instrument.assetClass === "Indices" ? 0.8 : instrument.assetClass === "Crypto" ? 0.35 : 0.45;
   const usScores = await fetchCountryScores("US", meta.indicators);
   const usVal = category === "growth" ? usScores.growthScore : category === "labor" ? usScores.laborScore : usScores.inflationScore;
-  if (usVal === null) return mode === "hybrid" ? fallback() : unavailableFactor(meta.key, source, "Insufficient verified FRED coverage for US indicators");
+  if (usVal === null) return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor(meta.key, source, "Insufficient verified FRED coverage for US indicators");
 
   return {
     key: meta.key,
@@ -116,7 +116,7 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode)
     const [base, quote] = instrument.currencies;
     const [baseRates, quoteRates] = await Promise.all([fetchLatestRates(CCY_TO_COUNTRY[base]), fetchLatestRates(CCY_TO_COUNTRY[quote])]);
     if (baseRates.policyRate === null || quoteRates.policyRate === null) {
-      return mode === "hybrid" ? fallback() : unavailableFactor("interestRates", source, `Missing verified policy-rate series for ${base} and/or ${quote}`);
+      return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor("interestRates", source, `Missing verified policy-rate series for ${base} and/or ${quote}`);
     }
     const diff = clamp((baseRates.policyRate - quoteRates.policyRate) * 4);
     return {
@@ -132,7 +132,7 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode)
   }
 
   const usRates = await fetchLatestRates("US");
-  if (usRates.policyRate === null) return mode === "hybrid" ? fallback() : unavailableFactor("interestRates", source, "Missing verified US policy-rate series");
+  if (usRates.policyRate === null) return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor("interestRates", source, "Missing verified US policy-rate series");
   const scale = instrument.assetClass === "Crypto" ? 0.7 : instrument.assetClass === "Indices" ? 0.8 : 0.9;
   // Without a stance classifier from FRED alone, use the rate's own recent
   // trend direction as a simple hawkish(+)/dovish(-) proxy for non-FX assets.

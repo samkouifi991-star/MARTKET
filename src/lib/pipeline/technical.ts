@@ -3,7 +3,7 @@ import { technicalFactor as demoTechnicalFactor } from "@/lib/scoring";
 import { computeTechnicalTrend } from "@/lib/engines/technical-trend";
 import * as fmp from "@/services/market-data/fmp";
 import { demoFallbackFactor, errorFactor, ResolvedFactor, unavailableFactor } from "./types";
-import { DataMode } from "@/services/data-mode";
+import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 
 const SOURCE = "Price & indicator engine (FMP daily/4H/1H candles)";
 
@@ -13,7 +13,7 @@ export async function resolveTechnicalFactor(symbol: string, mode: DataMode): Pr
 
   const daily = await fmp.getDailyCandles(symbol);
   if (daily.status !== "live" || !daily.value) {
-    if (mode === "hybrid") {
+    if (allowsDemoFallback(mode, symbol)) {
       const fallback = demoTechnicalFactor(instrument);
       return demoFallbackFactor({ key: "technical", rawScore: fallback.raw, explanation: fallback.explanation, source: fallback.source, lastUpdated: new Date().toISOString(), nextUpdate: new Date().toISOString() });
     }
@@ -28,7 +28,7 @@ export async function resolveTechnicalFactor(symbol: string, mode: DataMode): Pr
   });
 
   if (!result) {
-    if (mode === "hybrid") {
+    if (allowsDemoFallback(mode, symbol)) {
       const fallback = demoTechnicalFactor(instrument);
       return demoFallbackFactor({ key: "technical", rawScore: fallback.raw, explanation: fallback.explanation, source: fallback.source, lastUpdated: new Date().toISOString(), nextUpdate: new Date().toISOString() });
     }

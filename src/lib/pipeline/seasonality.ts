@@ -3,7 +3,7 @@ import { seasonalityFactor as demoSeasonalityFactor } from "@/lib/scoring";
 import { computeCurrentMonthStat } from "@/lib/engines/seasonality";
 import * as fmp from "@/services/market-data/fmp";
 import { demoFallbackFactor, errorFactor, ResolvedFactor, unavailableFactor } from "./types";
-import { DataMode } from "@/services/data-mode";
+import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 
 const SOURCE = "Historical daily closes (FMP)";
 const MIN_YEARS_FOR_LIVE = 2; // below this, the sample is too thin to be more than noise
@@ -16,13 +16,13 @@ export async function resolveSeasonalityFactor(symbol: string, mode: DataMode): 
   // years it actually finds, so over-requesting is safe and never fabricates.
   const history = await fmp.getDailyCandles(symbol, 20 * 365);
   if (history.status !== "live" || !history.value) {
-    if (mode === "hybrid") return demoFallback(instrument);
+    if (allowsDemoFallback(mode, symbol)) return demoFallback(instrument);
     return history.status === "error" ? errorFactor("seasonality", SOURCE, history.error ?? "request failed") : unavailableFactor("seasonality", SOURCE, "FMP historical candles unavailable");
   }
 
   const stat = computeCurrentMonthStat(history.value);
   if (!stat || stat.years < MIN_YEARS_FOR_LIVE) {
-    if (mode === "hybrid") return demoFallback(instrument);
+    if (allowsDemoFallback(mode, symbol)) return demoFallback(instrument);
     return unavailableFactor("seasonality", SOURCE, `Only ${stat?.years ?? 0} year(s) of history available — below the ${MIN_YEARS_FOR_LIVE}-year minimum for a live seasonality read`);
   }
 

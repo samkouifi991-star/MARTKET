@@ -220,7 +220,30 @@ describe("GBPUSD end-to-end live pipeline", () => {
     expect(score.confidence).toBeLessThan(30);
   });
 
-  it("in hybrid mode, falls back to clearly-labeled demo data per factor instead of showing unavailable", async () => {
+  it("in hybrid mode, ordinary markets fall back to clearly-labeled demo data per factor instead of showing unavailable", async () => {
+    const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
+    vi.mocked(fmp.getQuote).mockResolvedValue(down);
+    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
+    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
+    vi.mocked(fred.getSeries).mockResolvedValue(down);
+    mockIgUnavailable();
+
+    // EURUSD, not GBPUSD: the reference market has stricter no-fallback
+    // rules (see the next test), so this proves ordinary markets keep the
+    // normal hybrid leniency.
+    const score = await computeLiveMarketScore("EURUSD", "hybrid");
+
+    const nonRetailFactors = score.factors.filter((f) => f.key !== "retailSentiment");
+    expect(nonRetailFactors.every((f) => f.freshness === "estimated")).toBe(true);
+    // Retail sentiment has no demo-fallback path here because IG explicitly
+    // has no epic for this market — hybrid must not invent a percentage either.
+    const retail = score.factors.find((f) => f.key === "retailSentiment")!;
+    expect(retail.freshness).toBe("unavailable");
+  });
+
+  it("in hybrid mode, GBPUSD (the strict-live reference market) never falls back to demo data — it shows unavailable and confidence drops", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
     vi.mocked(fmp.getQuote).mockResolvedValue(down);
     vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
@@ -232,11 +255,10 @@ describe("GBPUSD end-to-end live pipeline", () => {
 
     const score = await computeLiveMarketScore("GBPUSD", "hybrid");
 
-    const nonRetailFactors = score.factors.filter((f) => f.key !== "retailSentiment");
-    expect(nonRetailFactors.every((f) => f.freshness === "estimated")).toBe(true);
-    // Retail sentiment has no demo-fallback path here because IG explicitly
-    // has no epic for this market — hybrid must not invent a percentage either.
-    const retail = score.factors.find((f) => f.key === "retailSentiment")!;
-    expect(retail.freshness).toBe("unavailable");
+    // No factor may be silently backed by demo data for GBPUSD, even in
+    // hybrid mode — every factor must honestly read unavailable/error.
+    expect(score.factors.every((f) => f.freshness === "unavailable" || f.freshness === "error")).toBe(true);
+    expect(score.factors.every((f) => f.contribution === 0)).toBe(true);
+    expect(score.confidence).toBeLessThan(30);
   });
 });

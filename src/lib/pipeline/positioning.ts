@@ -5,7 +5,7 @@ import * as cftc from "@/services/market-data/cftc";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
 import * as fmp from "@/services/market-data/fmp";
 import { demoFallbackFactor, errorFactor, ResolvedFactor, unavailableFactor } from "./types";
-import { DataMode } from "@/services/data-mode";
+import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 
 const SOURCE = "CFTC Commitments of Traders";
 
@@ -19,7 +19,7 @@ export async function resolveInstitutionalFactor(symbol: string, mode: DataMode)
 
   const positioning = await cftc.getInstitutionalPositioning(symbol);
   if (positioning.status !== "live" || !positioning.value) {
-    if (mode === "hybrid") {
+    if (allowsDemoFallback(mode, symbol)) {
       const fallback = demoInstitutionalFactor(instrument);
       return demoFallbackFactor({ key: "institutional", rawScore: fallback.raw, explanation: fallback.explanation, source: fallback.source, lastUpdated: new Date().toISOString(), nextUpdate: new Date().toISOString() });
     }

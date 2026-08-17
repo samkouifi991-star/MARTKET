@@ -12,7 +12,7 @@ import * as fmp from "@/services/market-data/fmp";
 import { NormalizedNewsArticle } from "@/services/types";
 import { articleMentionsInstrument as engineArticleMentionsInstrument, classifyHeadline } from "@/lib/engines/news-classifier";
 import { demoFallbackFactor, errorFactor, ResolvedFactor, unavailableFactor } from "./types";
-import { DataMode } from "@/services/data-mode";
+import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 
 const SOURCE = "FMP forex/stock news (keyword classifier v1)";
 const classify = classifyHeadline;
@@ -27,7 +27,7 @@ export async function resolveNewsFactor(symbol: string, mode: DataMode): Promise
 
   const news = await fmp.getForexAndMarketNews(100);
   if (news.status !== "live" || !news.value) {
-    if (mode === "hybrid") {
+    if (allowsDemoFallback(mode, symbol)) {
       const fallback = demoNewsFactor(instrument);
       return demoFallbackFactor({ key: "news", rawScore: fallback.raw, explanation: fallback.explanation, source: "News Intelligence engine (demo)", lastUpdated: new Date().toISOString(), nextUpdate: new Date().toISOString() });
     }

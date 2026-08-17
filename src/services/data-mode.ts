@@ -33,7 +33,25 @@ export function allowsLiveProviders(): boolean {
   return DATA_MODE === "live" || DATA_MODE === "hybrid";
 }
 
-/** In live mode a missing provider must surface as unavailable, never fall back to demo data. */
-export function allowsDemoFallback(): boolean {
-  return DATA_MODE === "hybrid";
+// GBPUSD is the live reference market: it must prove the real pipeline end
+// to end, so hybrid mode's usual "fall back to demo, but flag it" leniency
+// is deliberately withheld for it. A strict-live symbol that hits a missing
+// or failed provider goes straight to unavailable/error, same as live mode,
+// so it's never possible to mistake a demo GBPUSD factor for a real one.
+// Add a symbol here only once it is being actively verified end-to-end.
+const STRICT_LIVE_SYMBOLS = new Set<string>(["GBPUSD"]);
+
+export function isStrictLiveSymbol(symbol: string): boolean {
+  return STRICT_LIVE_SYMBOLS.has(symbol);
+}
+
+/** In live mode — or hybrid mode for a strict-live symbol — a missing
+ * provider must surface as unavailable, never fall back to demo data.
+ * Takes `mode` explicitly (the same per-call value resolvers already
+ * receive from computeLiveMarketScore) rather than reading the module-level
+ * DATA_MODE constant, so this stays correct under test and for any future
+ * caller that computes a score for an explicit mode different from the
+ * process-wide default. */
+export function allowsDemoFallback(mode: DataMode, symbol: string): boolean {
+  return mode === "hybrid" && !isStrictLiveSymbol(symbol);
 }
