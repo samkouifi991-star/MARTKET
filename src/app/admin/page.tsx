@@ -1,22 +1,36 @@
 import { allMarketRows } from "@/lib/market-data";
 import { AUDIT_LOGS, API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY } from "@/lib/demo/admin";
 import { AdminClient } from "./AdminClient";
+import { ProviderHealthTable } from "./ProviderHealthTable";
 import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { factorLabel } from "@/lib/scoring";
 import { formatDate, formatRelative } from "@/lib/time";
+import { DATA_MODE } from "@/services/data-mode";
+import { getProviderHealth, ProviderHealthRow } from "@/db/queries/provider-health";
 import Link from "next/link";
 
 export const metadata = { title: "Admin — Market Intelligence AI" };
+export const dynamic = "force-dynamic";
 
-export default function AdminPage() {
+async function loadProviderHealth(): Promise<{ rows: ProviderHealthRow[]; error: string | null }> {
+  if (DATA_MODE === "demo") return { rows: [], error: null };
+  try {
+    return { rows: await getProviderHealth(), error: null };
+  } catch (err) {
+    return { rows: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export default async function AdminPage() {
   const rows = allMarketRows();
   const dataQualityIssues = rows.flatMap((r) =>
     r.score.factors
       .filter((f) => f.freshness !== "live")
       .map((f) => ({ symbol: r.instrument.symbol, factor: f }))
   );
+  const { rows: providerHealthRows, error: providerHealthError } = await loadProviderHealth();
 
   return (
     <div className="space-y-6">
@@ -33,6 +47,27 @@ export default function AdminPage() {
       </div>
 
       <AdminClient initialAuditLog={AUDIT_LOGS} />
+
+      <Card
+        title="Provider health"
+        subtitle={
+          DATA_MODE === "demo"
+            ? "Becomes live once DATA_MODE is set to hybrid or live and a database is connected"
+            : "Status, last success/failure, markets covered, latency and request volume per provider"
+        }
+      >
+        {DATA_MODE === "demo" ? (
+          <p className="text-sm text-(--text-faint)">
+            Provider health tracking is populated by the scheduled ingestion jobs once <code className="text-(--text-dim)">DATA_MODE</code> is
+            <code className="text-(--text-dim)"> hybrid</code> or <code className="text-(--text-dim)">live</code> and{" "}
+            <code className="text-(--text-dim)">DATABASE_URL</code> is configured. Currently running in demo mode — nothing to show.
+          </p>
+        ) : providerHealthError ? (
+          <p className="text-sm text-rose-400">Data temporarily unavailable: {providerHealthError}</p>
+        ) : (
+          <ProviderHealthTable rows={providerHealthRows} />
+        )}
+      </Card>
 
       <Card title="Data quality — non-live factors" subtitle="Stale or estimated data is automatically down-weighted in scoring">
         {dataQualityIssues.length === 0 ? (

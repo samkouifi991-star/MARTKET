@@ -10,39 +10,15 @@ import { getInstrument } from "@/lib/instruments";
 import { newsFactor as demoNewsFactor } from "@/lib/scoring";
 import * as fmp from "@/services/market-data/fmp";
 import { NormalizedNewsArticle } from "@/services/types";
+import { articleMentionsInstrument as engineArticleMentionsInstrument, classifyHeadline } from "@/lib/engines/news-classifier";
 import { demoFallbackFactor, errorFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { DataMode } from "@/services/data-mode";
 
 const SOURCE = "FMP forex/stock news (keyword classifier v1)";
-
-const BULLISH_TERMS = ["rally", "surge", "beats", "beat expectations", "strengthens", "gains", "optimism", "hawkish", "outperform", "record high", "upgrade", "rebound", "rises", "climbs"];
-const BEARISH_TERMS = ["falls", "drops", "misses", "miss expectations", "weakens", "losses", "concern", "dovish", "underperform", "record low", "downgrade", "selloff", "slumps", "plunges"];
-const HIGH_IMPORTANCE_TERMS = ["fed", "federal reserve", "ecb", "central bank", "rate decision", "inflation", "cpi", "nonfarm payrolls", "gdp", "war", "geopolitical", "crisis"];
-
-function classify(headline: string): { interpretation: "Bullish" | "Bearish" | "Mixed" | "Neutral"; importance: number; confidence: number } {
-  const lower = headline.toLowerCase();
-  const bullishHits = BULLISH_TERMS.filter((t) => lower.includes(t)).length;
-  const bearishHits = BEARISH_TERMS.filter((t) => lower.includes(t)).length;
-  const importantHits = HIGH_IMPORTANCE_TERMS.filter((t) => lower.includes(t)).length;
-
-  let interpretation: "Bullish" | "Bearish" | "Mixed" | "Neutral" = "Neutral";
-  if (bullishHits > 0 && bearishHits === 0) interpretation = "Bullish";
-  else if (bearishHits > 0 && bullishHits === 0) interpretation = "Bearish";
-  else if (bullishHits > 0 && bearishHits > 0) interpretation = "Mixed";
-
-  const importance = Math.min(90, 30 + importantHits * 20 + (bullishHits + bearishHits) * 8);
-  // Deliberately capped — a keyword match is weaker evidence than a real
-  // NLP/LLM read of the full article, so this must never claim high confidence.
-  const confidence = Math.min(55, 20 + (bullishHits + bearishHits) * 10);
-
-  return { interpretation, importance, confidence };
-}
+const classify = classifyHeadline;
 
 function articleMentionsInstrument(article: NormalizedNewsArticle, symbol: string, currencies: [string, string] | undefined): boolean {
-  const haystack = (article.headline + " " + article.symbols.join(" ")).toLowerCase();
-  if (haystack.includes(symbol.toLowerCase())) return true;
-  if (currencies) return currencies.some((c) => haystack.includes(c.toLowerCase()));
-  return false;
+  return engineArticleMentionsInstrument(article.headline, article.symbols, symbol, currencies);
 }
 
 export async function resolveNewsFactor(symbol: string, mode: DataMode): Promise<ResolvedFactor> {
