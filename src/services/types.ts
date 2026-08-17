@@ -19,11 +19,29 @@ export type Provenance<T> = {
   error?: string;
 };
 
-export function unavailable<T>(provider: ProviderName, source: string, error?: string): Provenance<T> {
+/** A structural, expected gap: the provider doesn't cover this market, isn't
+ * configured, or an upstream series is intentionally unverified — never a
+ * failed request. `reason` is purely descriptive, not an error signal. */
+export function unavailable<T>(provider: ProviderName, source: string, reason?: string): Provenance<T> {
   return {
     provider,
     source,
-    status: error ? "error" : "unavailable",
+    status: "unavailable",
+    fetchedAt: new Date().toISOString(),
+    sourceUpdatedAt: null,
+    nextExpectedUpdate: null,
+    value: null,
+    error: reason,
+  };
+}
+
+/** A request was actually attempted and failed (network error, non-2xx
+ * response, unparseable payload) — distinct from unavailable() above. */
+export function errorResult<T>(provider: ProviderName, source: string, error: string): Provenance<T> {
+  return {
+    provider,
+    source,
+    status: "error",
     fetchedAt: new Date().toISOString(),
     sourceUpdatedAt: null,
     nextExpectedUpdate: null,

@@ -3,7 +3,7 @@
 // Requires FRED_API_KEY (free, instant self-serve at
 // https://fred.stlouisfed.org/docs/api/api_key.html).
 import { FredIndicatorKey, getFredSeriesId } from "./fred-series";
-import { FredSeriesPoint, Provenance, unavailable } from "../types";
+import { errorResult, FredSeriesPoint, Provenance, unavailable } from "../types";
 
 const FRED_BASE = "https://api.stlouisfed.org/fred";
 const SOURCE = "FRED (Federal Reserve Economic Data)";
@@ -63,7 +63,7 @@ export async function getSeries(country: string, indicator: FredIndicatorKey, li
       raw: data,
     };
   } catch (err) {
-    return unavailable("fred", SOURCE, err instanceof Error ? err.message : String(err));
+    return errorResult("fred", SOURCE, err instanceof Error ? err.message : String(err));
   }
 }
 

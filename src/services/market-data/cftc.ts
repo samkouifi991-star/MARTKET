@@ -15,7 +15,7 @@
 // client intentionally tries multiple name candidates and returns
 // "unavailable" rather than a wrong number if none match.
 import { getSymbolMapping, CftcReportType } from "./symbol-map";
-import { Provenance, unavailable } from "../types";
+import { errorResult, Provenance, unavailable } from "../types";
 
 const CFTC_BASE = "https://publicreporting.cftc.gov/resource";
 const SOURCE_LABEL: Record<CftcReportType, string> = {
@@ -105,6 +105,8 @@ export type CftcPositioningResult = {
   percentile3y: number | null;
   direction: "Bullish" | "Bearish" | "Neutral";
   strength: "Extreme" | "Strong" | "Moderate" | "Light";
+  /** Newest-first weekly net-positioning history, for the Smart Money momentum engine. */
+  netHistory: { reportDate: string; netPositioning: number }[];
 };
 
 export async function getInstitutionalPositioning(internalSymbol: string): Promise<Provenance<CftcPositioningResult>> {
@@ -122,13 +124,15 @@ export async function getInstitutionalPositioning(internalSymbol: string): Promi
     const rows = await fetchReportRows(reportType, reportName, 160); // ~3 years of weekly reports
     if (rows.length === 0) return unavailable("cftc", source, `No CFTC rows found for "${reportName}" — confirm exact market name / dataset ID`);
 
-    const netSeries = rows
+    const netHistory = rows
       .map((row) => {
         const long = pickNumericField(row, primary.longCandidates);
         const short = pickNumericField(row, primary.shortCandidates);
-        return long !== null && short !== null ? long - short : null;
+        const reportDate = String(row["report_date_as_yyyy_mm_dd"] ?? row["report_date"] ?? "");
+        return long !== null && short !== null ? { reportDate, netPositioning: long - short } : null;
       })
-      .filter((v): v is number => v !== null);
+      .filter((v): v is { reportDate: string; netPositioning: number } => v !== null);
+    const netSeries = netHistory.map((h) => h.netPositioning);
 
     if (netSeries.length === 0) {
       return unavailable("cftc", source, `Could not read ${primary.classification} long/short fields — column names likely need updating (see file header)`);
@@ -178,11 +182,12 @@ export async function getInstitutionalPositioning(internalSymbol: string): Promi
         percentile3y,
         direction,
         strength,
+        netHistory,
       },
       raw: latestRow,
     };
   } catch (err) {
-    return unavailable("cftc", source, err instanceof Error ? err.message : String(err));
+    return errorResult("cftc", source, err instanceof Error ? err.message : String(err));
   }
 }
 

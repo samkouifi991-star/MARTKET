@@ -10,7 +10,7 @@
 // https://site.financialmodelingprep.com/developer/docs before going live,
 // since provider APIs do drift.
 import { getSymbolMapping } from "./symbol-map";
-import { NormalizedCandle, NormalizedEconomicEvent, NormalizedNewsArticle, NormalizedQuote, Provenance, unavailable } from "../types";
+import { errorResult, NormalizedCandle, NormalizedEconomicEvent, NormalizedNewsArticle, NormalizedQuote, Provenance, unavailable } from "../types";
 
 const FMP_BASE = "https://financialmodelingprep.com/api/v3";
 const SOURCE = "Financial Modeling Prep";
@@ -55,7 +55,7 @@ export async function getQuote(internalSymbol: string): Promise<Provenance<Norma
       raw: row,
     };
   } catch (err) {
-    return unavailable("fmp", SOURCE, err instanceof Error ? err.message : String(err));
+    return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -92,7 +92,35 @@ export async function getDailyCandles(internalSymbol: string, days = 260): Promi
       value: candles,
     };
   } catch (err) {
-    return unavailable("fmp", SOURCE, err instanceof Error ? err.message : String(err));
+    return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
+  }
+}
+
+export async function getIntradayCandles(internalSymbol: string, interval: "1hour" | "4hour"): Promise<Provenance<NormalizedCandle[]>> {
+  const mapping = getSymbolMapping(internalSymbol);
+  if (!mapping) return unavailable("fmp", SOURCE, `No FMP symbol mapping for ${internalSymbol}`);
+
+  try {
+    type FmpIntraday = { date: string; open: number; high: number; low: number; close: number; volume: number }[];
+    const data = await fmpGet<FmpIntraday>(`/historical-chart/${interval}/${encodeURIComponent(mapping.fmp.ticker)}`);
+    if (!data?.length) return unavailable("fmp", SOURCE, `No ${interval} data returned`);
+
+    const candles: NormalizedCandle[] = [...data]
+      .reverse() // FMP returns newest-first
+      .map((h) => ({ date: new Date(h.date).toISOString(), open: h.open, high: h.high, low: h.low, close: h.close, volume: h.volume ?? null }));
+
+    const now = new Date().toISOString();
+    return {
+      provider: "fmp",
+      source: SOURCE,
+      status: "live",
+      fetchedAt: now,
+      sourceUpdatedAt: candles[candles.length - 1]?.date ?? now,
+      nextExpectedUpdate: null,
+      value: candles,
+    };
+  } catch (err) {
+    return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -126,7 +154,7 @@ export async function getEconomicCalendar(fromISO: string, toISO: string): Promi
     const now = new Date().toISOString();
     return { provider: "fmp", source: SOURCE, status: "live", fetchedAt: now, sourceUpdatedAt: now, nextExpectedUpdate: null, value: events };
   } catch (err) {
-    return unavailable("fmp", SOURCE, err instanceof Error ? err.message : String(err));
+    return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -150,6 +178,6 @@ export async function getForexAndMarketNews(limit = 50): Promise<Provenance<Norm
     const now = new Date().toISOString();
     return { provider: "fmp", source: SOURCE, status: "live", fetchedAt: now, sourceUpdatedAt: now, nextExpectedUpdate: null, value: articles };
   } catch (err) {
-    return unavailable("fmp", SOURCE, err instanceof Error ? err.message : String(err));
+    return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
   }
 }

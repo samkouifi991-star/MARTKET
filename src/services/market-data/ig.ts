@@ -13,7 +13,7 @@
 // returns "unavailable" for it, per this project's spec: never estimate or
 // substitute a percentage when the real source doesn't cover a market.
 import { getSymbolMapping } from "./symbol-map";
-import { Provenance, unavailable } from "../types";
+import { errorResult, Provenance, unavailable } from "../types";
 
 const IG_BASE = process.env.IG_ENVIRONMENT === "live" ? "https://api.ig.com/gateway/deal" : "https://demo-api.ig.com/gateway/deal";
 const SOURCE = "IG Client Sentiment";
@@ -90,6 +90,6 @@ export async function getRetailSentiment(internalSymbol: string): Promise<Proven
       raw: data,
     };
   } catch (err) {
-    return unavailable("ig", SOURCE, err instanceof Error ? err.message : String(err));
+    return errorResult("ig", SOURCE, err instanceof Error ? err.message : String(err));
   }
 }

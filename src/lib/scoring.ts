@@ -58,7 +58,7 @@ function currencyPairInfo(instrument: Instrument): [string, string] | null {
 
 // ---- Factor computations -------------------------------------------------
 
-function institutionalFactor(instrument: Instrument) {
+export function institutionalFactor(instrument: Instrument) {
   const pos = generatePositioning(instrument);
   const skew = clamp(((pos.pctLong - 50) / 50) * 10);
   const momentum = clamp((pos.netWeeklyChange / Math.max(1, Math.abs(pos.netPositioning) || 1)) * 10);
@@ -74,7 +74,7 @@ function institutionalFactor(instrument: Instrument) {
   return { raw, explanation, source: "CFTC-style Commitment of Traders (weekly)", cadenceHours: 168 };
 }
 
-function retailSentimentFactor(instrument: Instrument) {
+export function retailSentimentFactor(instrument: Instrument) {
   const retail = generateRetailSentiment(instrument);
   const { extremeLongThreshold, extremeShortThreshold } = DEFAULT_RETAIL_SENTIMENT_CONFIG;
   let raw = 0;
@@ -92,7 +92,7 @@ function retailSentimentFactor(instrument: Instrument) {
   return { raw: clamp(raw), explanation, source: "Aggregated retail broker positioning (estimate)", cadenceHours: 24 };
 }
 
-function technicalFactor(instrument: Instrument) {
+export function technicalFactor(instrument: Instrument) {
   const price = generatePriceData(instrument);
   const mas: [string, number][] = [
     ["20 EMA", price.ema20],
@@ -120,14 +120,14 @@ function technicalFactor(instrument: Instrument) {
   return { raw, explanation, source: "Price & indicator engine (daily bars)", cadenceHours: 24 };
 }
 
-function seasonalityFactor(instrument: Instrument) {
+export function seasonalityFactor(instrument: Instrument) {
   const stat = currentMonthStat(instrument);
   const raw = clamp(stat.avgReturn * 3);
   const explanation = `${stat.period} has averaged ${stat.avgReturn > 0 ? "+" : ""}${stat.avgReturn.toFixed(2)}% over ${stat.years} years, positive in ${stat.pctPositive}% of years (range ${stat.worstReturn.toFixed(1)}% to +${stat.bestReturn.toFixed(1)}%). Used as one contributing factor, not a standalone signal.`;
   return { raw, explanation, source: `${stat.years}-year seasonal history`, cadenceHours: 720 };
 }
 
-const CCY_TO_COUNTRY: Record<string, string> = {
+export const CCY_TO_COUNTRY: Record<string, string> = {
   USD: "US",
   EUR: "EU",
   GBP: "GB",
@@ -138,7 +138,7 @@ const CCY_TO_COUNTRY: Record<string, string> = {
   CAD: "CA",
 };
 
-function macroFactor(
+export function macroFactor(
   instrument: Instrument,
   metric: "growthScore" | "laborScore" | "inflationScore",
   label: "economic growth" | "labor market strength" | "inflation surprises"
@@ -159,7 +159,7 @@ function macroFactor(
   return { raw, explanation };
 }
 
-function inflationFactorFor(instrument: Instrument) {
+export function inflationFactorFor(instrument: Instrument) {
   const pair = currencyPairInfo(instrument);
   if (pair) {
     const [base, quote] = pair;
@@ -193,7 +193,7 @@ function inflationFactorFor(instrument: Instrument) {
   return { raw, explanation };
 }
 
-function interestRateFactor(instrument: Instrument) {
+export function interestRateFactor(instrument: Instrument) {
   const pair = currencyPairInfo(instrument);
   if (pair) {
     const [base, quote] = pair;
@@ -212,7 +212,7 @@ function interestRateFactor(instrument: Instrument) {
   return { raw, explanation };
 }
 
-function newsFactor(instrument: Instrument) {
+export function newsFactor(instrument: Instrument) {
   const related = NEWS_ARTICLES.filter((n) => n.affectedMarkets.includes(instrument.symbol));
   if (related.length === 0) {
     return { raw: 0, explanation: "No significant recent news flow tagged to this market.", cadenceHours: 6, itemCount: 0 };
