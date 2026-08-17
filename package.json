@@ -12,6 +12,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:fmp-coverage": "tsx scripts/fmp-coverage-test.ts",
+    "test:cftc-verify": "tsx scripts/cftc-verify.ts",
+    "test:fred-verify": "tsx scripts/fred-verify.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
