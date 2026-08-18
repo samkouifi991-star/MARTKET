@@ -1,12 +1,12 @@
 {
   "crons": [
-    { "path": "/api/cron/prices", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/prices", "schedule": "0 3 * * *" },
     { "path": "/api/cron/candles", "schedule": "0 1 * * *" },
     { "path": "/api/cron/positioning", "schedule": "0 6 * * 6" },
-    { "path": "/api/cron/retail-sentiment", "schedule": "*/30 * * * *" },
+    { "path": "/api/cron/retail-sentiment", "schedule": "0 4 * * *" },
     { "path": "/api/cron/macro", "schedule": "0 2 * * *" },
-    { "path": "/api/cron/calendar", "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/news", "schedule": "*/15 * * * *" },
-    { "path": "/api/cron/scores", "schedule": "*/15 * * * *" }
+    { "path": "/api/cron/calendar", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/news", "schedule": "0 7 * * *" },
+    { "path": "/api/cron/scores", "schedule": "0 8 * * *" }
   ]
 }
