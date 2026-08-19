@@ -11,6 +11,16 @@
 // correct them if Myfxbook's actual field names differ. This client
 // deliberately tries multiple field-name candidates and returns
 // "unavailable"/"error" rather than a silently-wrong percentage if none match.
+//
+// Session handling: no cross-invocation caching. Myfxbook sessions appear
+// to be tied to the calling IP (undocumented), and Vercel serverless
+// invocations don't share memory or a stable outbound IP reliably — a
+// session cached from one invocation is routinely rejected by the next
+// ("Invalid session"), which is exactly the failure mode this was rewritten
+// to fix. Every call logs in, then immediately uses that session in the
+// same execution; nothing is persisted between calls. A rejected session
+// (rare but possible even within one execution, e.g. a race on Myfxbook's
+// side) is retried once with a second fresh login before giving up.
 import { getSymbolMapping } from "../symbol-map";
 import { errorResult, Provenance, unavailable } from "../../types";
 import { NormalizedRetailSentiment, RetailSentimentProvider } from "./types";
@@ -18,22 +28,14 @@ import { NormalizedRetailSentiment, RetailSentimentProvider } from "./types";
 const MYFXBOOK_BASE = "https://www.myfxbook.com/api";
 const SOURCE = "Myfxbook Community Outlook";
 
-type MyfxbookSession = { session: string; expiresAt: number };
-// Module-level cache is best-effort only: serverless invocations don't
-// share memory reliably, and Myfxbook's sessions appear to be tied to the
-// calling IP (undocumented) — a session minted by one invocation can be
-// rejected by the next if Vercel serves it from a different IP. Every
-// caller must treat "invalid session" as a normal, expected condition (not
-// a hard failure) and re-authenticate once, not just trust the cache TTL.
-let cachedSession: MyfxbookSession | null = null;
-
 function credentialsConfigured(): boolean {
   return Boolean(process.env.MYFXBOOK_EMAIL && process.env.MYFXBOOK_PASSWORD);
 }
 
-async function login(forceFresh = false): Promise<string> {
-  if (!forceFresh && cachedSession && cachedSession.expiresAt > Date.now()) return cachedSession.session;
-
+// URLSearchParams.set() already percent-encodes the value it's given
+// (spaces, @, +, etc. in an email/password all come out correctly encoded
+// in the resulting query string) — this is not something to hand-roll.
+async function login(): Promise<string> {
   const url = new URL(`${MYFXBOOK_BASE}/login.json`);
   url.searchParams.set("email", process.env.MYFXBOOK_EMAIL!);
   url.searchParams.set("password", process.env.MYFXBOOK_PASSWORD!);
@@ -42,14 +44,7 @@ async function login(forceFresh = false): Promise<string> {
   if (!res.ok) throw new Error(`Myfxbook login failed: ${res.status} ${res.statusText}`);
   const data = (await res.json()) as { error: boolean; message?: string; session?: string };
   if (data.error || !data.session) throw new Error(`Myfxbook login rejected: ${data.message ?? "no session returned"}`);
-
-  // Myfxbook doesn't document an explicit session TTL; re-login every 30
-  // minutes rather than assume a lifetime that hasn't been confirmed. This
-  // is a ceiling, not a guarantee — fetchOutlook() re-authenticates
-  // immediately (bypassing this cache) the moment Myfxbook itself reports
-  // the session invalid, rather than waiting for this TTL to elapse.
-  cachedSession = { session: data.session, expiresAt: Date.now() + 30 * 60_000 };
-  return cachedSession.session;
+  return data.session;
 }
 
 function isInvalidSessionError(message: string): boolean {
@@ -69,6 +64,14 @@ function pickNumber(row: OutlookRow, candidates: string[]): number | undefined {
   return undefined;
 }
 
+function pickString(row: OutlookRow, candidates: string[]): string | undefined {
+  for (const key of candidates) {
+    const v = row[key];
+    if (typeof v === "string") return v;
+  }
+  return undefined;
+}
+
 const FIELD_CANDIDATES = {
   name: ["name", "symbol"],
   longPct: ["longPercentage", "buyPercentage", "long_percentage"],
@@ -81,27 +84,28 @@ const FIELD_CANDIDATES = {
   avgShortPrice: ["averageOpenPriceOfShorts", "avgShortPrice", "average_open_price_of_shorts"],
 };
 
-async function fetchOutlookOnce(session: string): Promise<{ error: boolean; message?: string; symbols?: OutlookRow[] }> {
+type OutlookResponse = { error: boolean; message?: string; symbols?: OutlookRow[] };
+
+async function fetchOutlookOnce(session: string): Promise<OutlookResponse> {
   const url = new URL(`${MYFXBOOK_BASE}/get-community-outlook.json`);
   url.searchParams.set("session", session);
 
   const res = await fetch(url.toString(), { next: { revalidate: 0 } });
   if (!res.ok) throw new Error(`Myfxbook community outlook request failed: ${res.status} ${res.statusText}`);
-  return (await res.json()) as { error: boolean; message?: string; symbols?: OutlookRow[] };
+  return (await res.json()) as OutlookResponse;
 }
 
-/** Myfxbook rejects a session as invalid/expired far more often than its
- * documented (nonexistent) TTL would suggest — most likely because sessions
- * are tied to the calling IP and Vercel serverless functions don't keep a
- * stable one. Re-authenticate once and retry rather than surfacing that as
- * a hard failure the first time it happens. */
-async function fetchOutlook(): Promise<OutlookRow[]> {
+/** Logs in and immediately fetches the outlook within this same call —
+ * login and outlook are never split across separate invocations. If the
+ * session Myfxbook just issued is itself rejected, logs in again once
+ * (fresh credentials each time, never reusing a session) before giving up. */
+async function loginAndFetchOutlook(): Promise<OutlookRow[]> {
   const session = await login();
   let data = await fetchOutlookOnce(session);
 
   if (data.error && isInvalidSessionError(data.message ?? "")) {
-    const freshSession = await login(true);
-    data = await fetchOutlookOnce(freshSession);
+    const retrySession = await login();
+    data = await fetchOutlookOnce(retrySession);
   }
 
   if (data.error) throw new Error(`Myfxbook community outlook rejected: ${data.message ?? "unknown error"}`);
@@ -118,7 +122,7 @@ async function getRetailSentiment(internalSymbol: string): Promise<Provenance<No
   }
 
   try {
-    const symbols = await fetchOutlook();
+    const symbols = await loginAndFetchOutlook();
     const row = symbols.find((s) => {
       const name = pickString(s, FIELD_CANDIDATES.name);
       return name?.toUpperCase() === mapping.myfxbookSymbol!.toUpperCase();
@@ -157,12 +161,43 @@ async function getRetailSentiment(internalSymbol: string): Promise<Provenance<No
   }
 }
 
-function pickString(row: OutlookRow, candidates: string[]): string | undefined {
-  for (const key of candidates) {
-    const v = row[key];
-    if (typeof v === "string") return v;
+export type MyfxbookDiagnostic = {
+  loginSuccessful: boolean;
+  sessionReceived: boolean;
+  communityOutlookSuccessful: boolean;
+  symbolFound: boolean;
+  error?: string; // never the password or the session value itself
+};
+
+/** Step-by-step connection diagnostic for the admin validation page — tells
+ * you exactly which stage fails (login vs. session vs. outlook vs. symbol
+ * lookup) instead of a single opaque "unavailable". Never returns the
+ * password or session token, even inside `error`. */
+export async function diagnoseMyfxbookConnection(symbol: string): Promise<MyfxbookDiagnostic> {
+  if (!credentialsConfigured()) {
+    return { loginSuccessful: false, sessionReceived: false, communityOutlookSuccessful: false, symbolFound: false, error: "MYFXBOOK_EMAIL / MYFXBOOK_PASSWORD not configured" };
   }
-  return undefined;
+
+  let session: string;
+  try {
+    session = await login();
+  } catch (err) {
+    return { loginSuccessful: false, sessionReceived: false, communityOutlookSuccessful: false, symbolFound: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  const sessionReceived = Boolean(session);
+
+  try {
+    const outlook = await fetchOutlookOnce(session);
+    if (outlook.error) {
+      return { loginSuccessful: true, sessionReceived, communityOutlookSuccessful: false, symbolFound: false, error: outlook.message ?? "community outlook rejected" };
+    }
+    const mapping = getSymbolMapping(symbol);
+    const targetName = mapping?.myfxbookSymbol ?? symbol;
+    const row = (outlook.symbols ?? []).find((s) => pickString(s, FIELD_CANDIDATES.name)?.toUpperCase() === targetName.toUpperCase());
+    return { loginSuccessful: true, sessionReceived, communityOutlookSuccessful: true, symbolFound: Boolean(row) };
+  } catch (err) {
+    return { loginSuccessful: true, sessionReceived, communityOutlookSuccessful: false, symbolFound: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export const myfxbookProvider: RetailSentimentProvider = {

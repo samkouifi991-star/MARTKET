@@ -15,9 +15,10 @@ export const dynamic = "force-dynamic";
 // currently says, so a human decides readiness from real evidence.
 function summarize(rows: ValidationRow[]) {
   const live = rows.filter((r) => r.status === "live").length;
+  const degraded = rows.filter((r) => r.status === "stale" || r.status === "delayed").length;
   const unavailable = rows.filter((r) => r.status === "unavailable").length;
   const error = rows.filter((r) => r.status === "error").length;
-  return { total: rows.length, live, unavailable, error, allLive: rows.length > 0 && live === rows.length };
+  return { total: rows.length, live, degraded, unavailable, error, allLive: rows.length > 0 && live === rows.length };
 }
 
 export default async function GbpusdValidationPage() {
@@ -53,14 +54,15 @@ export default async function GbpusdValidationPage() {
 }
 
 async function GbpusdValidationBody() {
-  const { rows, dbCounts, dbError } = await getGbpusdValidation();
+  const { rows, dbCounts, dbError, myfxbookDiagnostic } = await getGbpusdValidation();
   const summary = summarize(rows);
 
   return (
     <>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <StatTile label="Dependencies checked" value={String(summary.total)} />
         <StatTile label="Live" value={String(summary.live)} valueClassName="text-emerald-400" />
+        <StatTile label="Stale/Delayed" value={String(summary.degraded)} valueClassName="text-amber-400" />
         <StatTile label="Unavailable" value={String(summary.unavailable)} valueClassName="text-(--text-faint)" />
         <StatTile label="Error" value={String(summary.error)} valueClassName="text-rose-400" />
       </div>
@@ -76,9 +78,30 @@ async function GbpusdValidationBody() {
         <GbpusdValidationTable rows={rows} />
       </Card>
 
+      <Card title="Myfxbook connection diagnostic" subtitle="Step-by-step, so a failure is traceable to exactly one stage — never logs the password or session token">
+        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-sm">
+          <DiagnosticStep label="Login successful" ok={myfxbookDiagnostic.loginSuccessful} />
+          <DiagnosticStep label="Session received" ok={myfxbookDiagnostic.sessionReceived} />
+          <DiagnosticStep label="Community outlook successful" ok={myfxbookDiagnostic.communityOutlookSuccessful} />
+          <DiagnosticStep label="GBPUSD found" ok={myfxbookDiagnostic.symbolFound} />
+        </dl>
+        {myfxbookDiagnostic.error && <p className="text-xs text-rose-400 mt-3">{myfxbookDiagnostic.error}</p>}
+      </Card>
+
       <Card title="Database write/read check" subtitle="Real GBPUSD row counts in raw storage, not just 'tables exist'">
         {dbError ? (
-          <p className="text-sm text-rose-400">Data temporarily unavailable: {dbError}</p>
+          <div className="text-sm text-rose-400">
+            <p>Data temporarily unavailable: {dbError}</p>
+            {/relation .* does not exist/i.test(dbError) ? (
+              <p className="text-xs text-(--text-faint) mt-2">
+                This specific error means DATABASE_URL connects fine, but the tables haven&apos;t been created yet. Run{" "}
+                <code className="text-(--text-dim)">npx drizzle-kit push</code> with the real DATABASE_URL (from wherever it was originally set —
+                this value can&apos;t be read back once stored as a Vercel &quot;sensitive&quot; variable) to create them.
+              </p>
+            ) : (
+              <p className="text-xs text-(--text-faint) mt-2">Confirm DATABASE_URL is correct and the database is reachable from Vercel&apos;s network.</p>
+            )}
+          </div>
         ) : dbCounts ? (
           <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-sm">
             <Row label="market_prices" value={dbCounts.marketPrices} />
@@ -95,6 +118,15 @@ async function GbpusdValidationBody() {
         )}
       </Card>
     </>
+  );
+}
+
+function DiagnosticStep({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <div>
+      <dt className="text-[11px] text-(--text-faint) uppercase tracking-wide">{label}</dt>
+      <dd className={`text-sm font-semibold ${ok ? "text-emerald-400" : "text-rose-400"}`}>{ok ? "Yes" : "No"}</dd>
+    </div>
   );
 }
 

@@ -73,6 +73,20 @@ function pickNumericField(row: CftcRow, candidates: string[]): number | null {
   return null;
 }
 
+// The one field name this client is most confident about (it's a stable,
+// widely-documented Socrata column across every CFTC COT dataset) — still
+// kept as a candidate list, not a bare string, because the $order clause
+// below is not trusted blindly: see fetchReportRows.
+const REPORT_DATE_CANDIDATES = ["report_date_as_yyyy_mm_dd", "report_date"];
+
+function pickDateField(row: CftcRow): string | null {
+  for (const key of REPORT_DATE_CANDIDATES) {
+    const v = row[key];
+    if (v !== undefined && v !== null && v !== "") return String(v);
+  }
+  return null;
+}
+
 async function fetchReportRows(reportType: CftcReportType, marketName: string, limit: number): Promise<CftcRow[]> {
   const url = new URL(`${CFTC_BASE}/${DATASET_IDS[reportType]}.json`);
   url.searchParams.set("$where", `market_and_exchange_names='${marketName.replace(/'/g, "''")}'`);
@@ -81,7 +95,37 @@ async function fetchReportRows(reportType: CftcReportType, marketName: string, l
 
   const res = await fetch(url.toString(), { next: { revalidate: 0 } });
   if (!res.ok) throw new Error(`CFTC request failed: ${res.status} ${res.statusText}`);
-  return (await res.json()) as CftcRow[];
+  const rows = (await res.json()) as CftcRow[];
+
+  // Never trust the server-side $order alone: if the column name is
+  // subtly wrong, or Socrata silently ignores an invalid sort clause, the
+  // response can come back in an arbitrary (e.g. insertion) order — which
+  // is exactly how a multi-year-old row ends up read as "the latest
+  // report". Re-sort explicitly on the client by the actual parsed date.
+  return [...rows].sort((a, b) => {
+    const da = pickDateField(a);
+    const db = pickDateField(b);
+    if (!da && !db) return 0;
+    if (!da) return 1; // rows with no readable date sort last
+    if (!db) return -1;
+    return new Date(db).getTime() - new Date(da).getTime(); // newest first
+  });
+}
+
+// CFTC publishes weekly on Friday. A report should never be more than
+// ~10 days old under normal conditions; allow slack for holiday delays
+// before calling it stale, and treat anything far older as a sign the
+// query matched the wrong data entirely (wrong market-name string, wrong
+// sort, wrong dataset) rather than a merely-delayed real report.
+const FRESH_WINDOW_DAYS = 10;
+const STALE_WINDOW_DAYS = 45;
+
+function classifyCftcFreshness(reportDateIso: string): "live" | "stale" | "invalid" {
+  const ageDays = (Date.now() - new Date(reportDateIso).getTime()) / 86_400_000;
+  if (ageDays < 0) return "invalid"; // a "future" report date is itself a sign something's wrong
+  if (ageDays <= FRESH_WINDOW_DAYS) return "live";
+  if (ageDays <= STALE_WINDOW_DAYS) return "stale";
+  return "invalid";
 }
 
 function percentileOf(currentNet: number, history: number[]): number | null {
@@ -128,7 +172,7 @@ export async function getInstitutionalPositioning(internalSymbol: string): Promi
       .map((row) => {
         const long = pickNumericField(row, primary.longCandidates);
         const short = pickNumericField(row, primary.shortCandidates);
-        const reportDate = String(row["report_date_as_yyyy_mm_dd"] ?? row["report_date"] ?? "");
+        const reportDate = pickDateField(row) ?? "";
         return long !== null && short !== null ? { reportDate, netPositioning: long - short } : null;
       })
       .filter((v): v is { reportDate: string; netPositioning: number } => v !== null);
@@ -139,11 +183,25 @@ export async function getInstitutionalPositioning(internalSymbol: string): Promi
     }
 
     const latestRow = rows[0];
+    const reportDate = pickDateField(latestRow);
+    if (!reportDate) {
+      return unavailable("cftc", source, "Could not read a report date from the latest CFTC row — column names likely need updating (see file header)");
+    }
+
+    const freshness = classifyCftcFreshness(new Date(reportDate).toISOString());
+    if (freshness === "invalid") {
+      const ageDays = Math.round((Date.now() - new Date(reportDate).getTime()) / 86_400_000);
+      return unavailable(
+        "cftc",
+        source,
+        `Latest matched CFTC report is from ${reportDate} (~${ageDays}d old) — rejected as too old to be the current week's report. This usually means the reportName in symbol-map.ts no longer matches CFTC's current market-and-exchange-names string, or the $order/date field needs correcting; see file header.`
+      );
+    }
+
     const longContracts = pickNumericField(latestRow, primary.longCandidates)!;
     const shortContracts = pickNumericField(latestRow, primary.shortCandidates)!;
     const netPositioning = longContracts - shortContracts;
     const openInterest = pickNumericField(latestRow, ["open_interest_all"]) ?? 0;
-    const reportDate = String(latestRow["report_date_as_yyyy_mm_dd"] ?? latestRow["report_date"] ?? "");
 
     const priorNet = netSeries[1] ?? netPositioning;
     const netWeeklyChange = netPositioning - priorNet;
@@ -164,13 +222,13 @@ export async function getInstitutionalPositioning(internalSymbol: string): Promi
     return {
       provider: "cftc",
       source,
-      status: "live",
+      status: freshness, // "live" or "stale" — "invalid" already returned above
       fetchedAt: now,
-      sourceUpdatedAt: reportDate ? new Date(reportDate).toISOString() : now,
+      sourceUpdatedAt: new Date(reportDate).toISOString(),
       nextExpectedUpdate: nextFridayISO(),
       value: {
         classification: primary.classification,
-        reportDate: reportDate ? new Date(reportDate).toISOString() : now,
+        reportDate: new Date(reportDate).toISOString(),
         longContracts,
         shortContracts,
         netPositioning,

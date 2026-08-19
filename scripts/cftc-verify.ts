@@ -35,11 +35,11 @@ const DATASET_IDS: Record<CftcReportType, string> = {
 
 type RawRow = Record<string, string | number | undefined>;
 
-async function fetchRawRows(reportType: CftcReportType, marketName: string): Promise<RawRow[]> {
+async function fetchRawRows(reportType: CftcReportType, marketName: string, limit = 3): Promise<RawRow[]> {
   const url = new URL(`${CFTC_BASE}/${DATASET_IDS[reportType]}.json`);
   url.searchParams.set("$where", `market_and_exchange_names='${marketName.replace(/'/g, "''")}'`);
   url.searchParams.set("$order", "report_date_as_yyyy_mm_dd DESC");
-  url.searchParams.set("$limit", "3");
+  url.searchParams.set("$limit", String(limit));
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return (await res.json()) as RawRow[];
@@ -52,7 +52,7 @@ async function verifyMarket(symbol: string, detailed: boolean): Promise<{ symbol
 
   let rows: RawRow[];
   try {
-    rows = await fetchRawRows(reportType, reportName);
+    rows = await fetchRawRows(reportType, reportName, detailed ? 20 : 3);
   } catch (err) {
     return { symbol, ok: false, note: `request failed: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -70,15 +70,39 @@ async function verifyMarket(symbol: string, detailed: boolean): Promise<{ symbol
           .join(", ")
     );
 
+    // Diagnoses the exact "1648 days old" symptom: if the server's own
+    // $order DESC actually worked, rows[0]'s date should be the newest and
+    // the age-of-newest-row should be small. If the newest row found here
+    // is still ancient, or the batch's date range spans years, the
+    // reportName is almost certainly matching a stale/renamed market
+    // string rather than the sort clause being broken.
+    const dates = rows
+      .map((r) => String(r["report_date_as_yyyy_mm_dd"] ?? r["report_date"] ?? ""))
+      .filter(Boolean)
+      .map((d) => new Date(d));
+    if (dates.length > 0) {
+      const newest = new Date(Math.max(...dates.map((d) => d.getTime())));
+      const oldest = new Date(Math.min(...dates.map((d) => d.getTime())));
+      const ageDaysOfNewest = Math.round((Date.now() - newest.getTime()) / 86_400_000);
+      console.log(`\n  Date range across the ${rows.length} rows fetched: ${oldest.toISOString().slice(0, 10)} to ${newest.toISOString().slice(0, 10)}`);
+      console.log(`  Newest row is ~${ageDaysOfNewest}d old.${ageDaysOfNewest > 10 ? " EXPECTED <= ~10d for a live weekly report — investigate reportName / dataset before trusting this market." : " Looks like a normal weekly-fresh report."}`);
+      if (String(rows[0]["report_date_as_yyyy_mm_dd"] ?? rows[0]["report_date"] ?? "") !== newest.toISOString().slice(0, 10) && rows[0] !== undefined) {
+        console.log("  NOTE: the server's own $order DESC did NOT return the newest row first — the app's client-side re-sort (see cftc.ts) is compensating for this.");
+      }
+    }
+
     console.log(`\n  Running the app's real getInstitutionalPositioning("${symbol}") against this same data:`);
     const parsed = await cftc.getInstitutionalPositioning(symbol);
-    if (parsed.status === "live" && parsed.value) {
+    if (parsed.value) {
       const v = parsed.value;
-      console.log(`    classification=${v.classification} reportDate=${v.reportDate}`);
+      console.log(`    status=${parsed.status} classification=${v.classification} reportDate=${v.reportDate}`);
       console.log(`    long=${v.longContracts} short=${v.shortContracts} net=${v.netPositioning} netWeeklyChange=${v.netWeeklyChange}`);
       console.log(`    pctLong=${v.pctLong.toFixed(1)} pctShort=${v.pctShort.toFixed(1)} openInterest=${v.openInterest}`);
       console.log(`    percentile1y=${v.percentile1y} percentile3y=${v.percentile3y} direction=${v.direction} strength=${v.strength}`);
       console.log("    -> Compare long/short/net above against the raw row's own numbers before trusting this for scoring.");
+    } else if (parsed.status === "unavailable" && /too old/i.test(parsed.error ?? "")) {
+      console.log(`    getInstitutionalPositioning rejected the matched report as too old: ${parsed.error}`);
+      console.log("    -> Fields parsed fine; the freshness gate is doing its job. Fix the reportName/dataset match above so it finds a current report.");
     } else {
       console.log(`    getInstitutionalPositioning FAILED to parse this row: status=${parsed.status} error=${parsed.error ?? "(none)"}`);
       console.log("    -> The dataset/market name resolved, but FIELD_CANDIDATES in cftc.ts could not read the long/short columns.");

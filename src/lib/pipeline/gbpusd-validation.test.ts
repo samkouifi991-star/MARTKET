@@ -10,7 +10,7 @@ vi.mock("@/db/queries/gbpusd-validation");
 import * as fmp from "@/services/market-data/fmp";
 import * as cftc from "@/services/market-data/cftc";
 import * as fred from "@/services/market-data/fred";
-import { myfxbookProvider } from "@/services/market-data/retail-sentiment/myfxbook";
+import { diagnoseMyfxbookConnection, myfxbookProvider } from "@/services/market-data/retail-sentiment/myfxbook";
 import { igProvider } from "@/services/market-data/retail-sentiment/ig-provider";
 import { getGbpusdRecordCounts } from "@/db/queries/gbpusd-validation";
 import { getGbpusdValidation } from "./gbpusd-validation";
@@ -27,18 +27,20 @@ beforeEach(() => {
   vi.mocked(fred.getSeries).mockResolvedValue(down);
   vi.mocked(myfxbookProvider.getRetailSentiment).mockResolvedValue(down);
   vi.mocked(igProvider.getRetailSentiment).mockResolvedValue(down);
+  vi.mocked(diagnoseMyfxbookConnection).mockResolvedValue({ loginSuccessful: false, sessionReceived: false, communityOutlookSuccessful: false, symbolFound: false, error: "MYFXBOOK_EMAIL / MYFXBOOK_PASSWORD not configured" });
 });
 
 describe("getGbpusdValidation", () => {
   it("never throws even when every provider and the database are unreachable", async () => {
     vi.mocked(getGbpusdRecordCounts).mockRejectedValue(new Error("DATABASE_URL is not configured"));
 
-    const { rows, dbCounts, dbError } = await getGbpusdValidation();
+    const { rows, dbCounts, dbError, myfxbookDiagnostic } = await getGbpusdValidation();
 
     expect(rows.length).toBe(18);
     expect(rows.every((r) => r.status === "unavailable" || r.status === "error")).toBe(true);
     expect(dbCounts).toBeNull();
     expect(dbError).toBe("DATABASE_URL is not configured");
+    expect(myfxbookDiagnostic.loginSuccessful).toBe(false);
   });
 
   it("reports live rows and real DB counts when providers and the database succeed", async () => {

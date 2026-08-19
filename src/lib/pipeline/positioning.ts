@@ -18,13 +18,16 @@ export async function resolveInstitutionalFactor(symbol: string, mode: DataMode)
   if (!instrument) return unavailableFactor("institutional", SOURCE, `Unknown instrument ${symbol}`);
 
   const positioning = await cftc.getInstitutionalPositioning(symbol);
-  if (positioning.status !== "live" || !positioning.value) {
+  if (!positioning.value) {
     if (allowsDemoFallback(mode, symbol)) {
       const fallback = demoInstitutionalFactor(instrument);
       return demoFallbackFactor({ key: "institutional", rawScore: fallback.raw, explanation: fallback.explanation, source: fallback.source, lastUpdated: new Date().toISOString(), nextUpdate: new Date().toISOString() });
     }
-    return positioning.status === "error" ? errorFactor("institutional", positioning.source, positioning.error ?? "request failed") : unavailableFactor("institutional", positioning.source, `No CFTC coverage for ${symbol}`);
+    return positioning.status === "error" ? errorFactor("institutional", positioning.source, positioning.error ?? "request failed") : unavailableFactor("institutional", positioning.source, positioning.error ?? `No CFTC coverage for ${symbol}`);
   }
+  // status is "live" or "stale" here — both carry a real (not fabricated)
+  // value; a too-old report was already rejected to unavailable() inside
+  // getInstitutionalPositioning and never reaches this branch with a value.
 
   const pos = positioning.value;
   const skew = clamp(((pos.pctLong - 50) / 50) * 10);
@@ -44,7 +47,7 @@ export async function resolveInstitutionalFactor(symbol: string, mode: DataMode)
     explanation,
     source: positioning.source,
     provider: "cftc",
-    freshness: "live",
+    freshness: positioning.status === "stale" ? "stale" : "live",
     lastUpdated: positioning.sourceUpdatedAt ?? new Date().toISOString(),
     nextUpdate: positioning.nextExpectedUpdate ?? new Date().toISOString(),
   };
@@ -55,13 +58,13 @@ export type SmartMoneyResolution = {
   confidence: number;
   explanation: string;
   provider: string;
-  freshness: "live" | "unavailable" | "error";
+  freshness: "live" | "stale" | "unavailable" | "error";
 };
 
 export async function resolveSmartMoney(symbol: string): Promise<SmartMoneyResolution> {
   const [positioning, sentiment, quote] = await Promise.all([cftc.getInstitutionalPositioning(symbol), retailSentiment.getRetailSentiment(symbol), fmp.getQuote(symbol)]);
 
-  if (positioning.status !== "live" || !positioning.value) {
+  if (!positioning.value) {
     return { signal: "None", confidence: 0, explanation: "Institutional positioning data is unavailable for this market, so Smart Money cannot be evaluated.", provider: "cftc", freshness: "unavailable" };
   }
 
@@ -84,6 +87,6 @@ export async function resolveSmartMoney(symbol: string): Promise<SmartMoneyResol
     confidence: divergence.confidence,
     explanation,
     provider: "cftc" + (sentiment.status === "live" ? `+${sentiment.provider}` : ""),
-    freshness: "live",
+    freshness: positioning.status === "stale" ? "stale" : "live",
   };
 }

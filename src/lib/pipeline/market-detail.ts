@@ -56,7 +56,7 @@ const MIN_YEARS_FOR_LIVE_SEASONALITY = 2;
 
 async function institutionalCard(symbol: string, mode: DataMode): Promise<CardResult<InstitutionalCardData>> {
   const result = await cftc.getInstitutionalPositioning(symbol);
-  if (result.status === "live" && result.value) {
+  if (result.value) {
     const v = result.value;
     return {
       data: {
@@ -71,7 +71,7 @@ async function institutionalCard(symbol: string, mode: DataMode): Promise<CardRe
         strength: v.strength,
         reportDate: v.reportDate,
       },
-      freshness: "live",
+      freshness: result.status, // "live" or "stale" — a too-old report never reaches here with a value
       source: result.source,
       lastUpdated: result.sourceUpdatedAt,
     };

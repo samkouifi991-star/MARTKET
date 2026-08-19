@@ -10,7 +10,7 @@ import { DataFreshness } from "@/lib/types";
 import * as fmp from "@/services/market-data/fmp";
 import * as cftc from "@/services/market-data/cftc";
 import * as fred from "@/services/market-data/fred";
-import { myfxbookProvider } from "@/services/market-data/retail-sentiment/myfxbook";
+import { diagnoseMyfxbookConnection, MyfxbookDiagnostic, myfxbookProvider } from "@/services/market-data/retail-sentiment/myfxbook";
 import { igProvider } from "@/services/market-data/retail-sentiment/ig-provider";
 import { getGbpusdRecordCounts, GbpusdRecordCounts } from "@/db/queries/gbpusd-validation";
 
@@ -33,7 +33,7 @@ function toRow(provider: string, dataset: string, p: Fetched, records: number | 
   return { provider, dataset, status: p.status, lastFetch: p.fetchedAt, sourceTimestamp: p.sourceUpdatedAt, records, factorUsing, detail: p.error };
 }
 
-export async function getGbpusdValidation(): Promise<{ rows: ValidationRow[]; dbCounts: GbpusdRecordCounts | null; dbError: string | null }> {
+export async function getGbpusdValidation(): Promise<{ rows: ValidationRow[]; dbCounts: GbpusdRecordCounts | null; dbError: string | null; myfxbookDiagnostic: MyfxbookDiagnostic }> {
   const [
     quote,
     daily,
@@ -53,6 +53,7 @@ export async function getGbpusdValidation(): Promise<{ rows: ValidationRow[]; db
     gbGdpGrowth,
     myfxbook,
     ig,
+    myfxbookDiagnostic,
   ] = await Promise.all([
     fmp.getQuote(SYMBOL),
     fmp.getDailyCandles(SYMBOL),
@@ -72,6 +73,7 @@ export async function getGbpusdValidation(): Promise<{ rows: ValidationRow[]; db
     fred.getSeries("GB", "gdpGrowth"),
     myfxbookProvider.getRetailSentiment(SYMBOL),
     igProvider.getRetailSentiment(SYMBOL),
+    diagnoseMyfxbookConnection(SYMBOL),
   ]);
 
   let dbCounts: GbpusdRecordCounts | null = null;
@@ -104,5 +106,5 @@ export async function getGbpusdValidation(): Promise<{ rows: ValidationRow[]; db
     toRow("IG", "GBPUSD Client Sentiment", ig, "—", "Retail Sentiment (secondary, optional)"),
   ];
 
-  return { rows, dbCounts, dbError };
+  return { rows, dbCounts, dbError, myfxbookDiagnostic };
 }

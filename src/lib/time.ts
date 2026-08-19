@@ -12,7 +12,14 @@ export function daysAgo(days: number): string {
 }
 
 export function formatRelative(iso: string): string {
-  const diffMs = NOW.getTime() - new Date(iso).getTime();
+  // Real wall-clock time, not the frozen demo anchor above: relative-time
+  // display is inherently "relative to when the user is looking at this",
+  // and using NOW here made every live (non-demo) timestamp newer than the
+  // frozen anchor render as nonsense future offsets ("in 13d") once real
+  // time moved past it. The demo generators still use NOW as their own
+  // internal anchor for producing synthetic dates — only the *display* of
+  // relative time needs the real clock.
+  const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);
   if (mins < 0) {
     const futureMins = -mins;

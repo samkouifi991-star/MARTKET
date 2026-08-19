@@ -28,6 +28,16 @@ function apiKey(): string | null {
   return process.env.FMP_API_KEY?.trim() || null;
 }
 
+/** Carries the HTTP status so callers can distinguish "your plan doesn't
+ * include this endpoint" (402) from a genuine request failure — FMP
+ * returns 402 Payment Required for endpoints above the caller's plan tier,
+ * which is a structural/expected gap, not an error to retry or alarm on. */
+class FmpHttpError extends Error {
+  constructor(public status: number, statusText: string, path: string) {
+    super(`FMP request failed: ${status} ${statusText} (${path})`);
+  }
+}
+
 async function fmpGet<T>(path: string, params: Record<string, string> = {}): Promise<T> {
   const key = apiKey();
   if (!key) throw new Error("FMP_API_KEY is not configured");
@@ -37,9 +47,13 @@ async function fmpGet<T>(path: string, params: Record<string, string> = {}): Pro
 
   const res = await fetch(url.toString(), { next: { revalidate: 0 } });
   if (!res.ok) {
-    throw new Error(`FMP request failed: ${res.status} ${res.statusText} (${path})`);
+    throw new FmpHttpError(res.status, res.statusText, path);
   }
   return (await res.json()) as T;
+}
+
+function isPlanLimited(err: unknown): boolean {
+  return err instanceof FmpHttpError && err.status === 402;
 }
 
 /** Stable-endpoint list responses are bare arrays; some older/legacy shapes
@@ -128,6 +142,10 @@ export async function getDailyCandles(internalSymbol: string, days = 260): Promi
   }
 }
 
+/** FMP returns 402 Payment Required (not 401/403) for an endpoint above the
+ * caller's plan tier — a structural, expected gap for that account, not a
+ * failed request. Reported this way so callers (technical.ts) can degrade
+ * to daily-only rather than treating it as a transient error. */
 export async function getIntradayCandles(internalSymbol: string, interval: "1hour" | "4hour"): Promise<Provenance<NormalizedCandle[]>> {
   const mapping = getSymbolMapping(internalSymbol);
   if (!mapping) return unavailable("fmp", SOURCE, `No FMP symbol mapping for ${internalSymbol}`);
@@ -153,6 +171,7 @@ export async function getIntradayCandles(internalSymbol: string, interval: "1hou
       value: candles,
     };
   } catch (err) {
+    if (isPlanLimited(err)) return unavailable("fmp", SOURCE, `provider plan does not include intraday candles (${interval})`);
     return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
   }
 }
@@ -193,29 +212,34 @@ export async function getEconomicCalendar(fromISO: string, toISO: string): Promi
   }
 }
 
+type FmpNews = { title: string; site?: string; publisher?: string; publishedDate: string; url: string; symbol?: string };
+
+async function fetchNewsLeg(path: string, limit: number): Promise<FmpNews[]> {
+  const data = await fmpGet<FmpNews[] | { news: FmpNews[] }>(path, { limit: String(limit) });
+  return extractArray<FmpNews>(data, ["news"]);
+}
+
 export async function getForexAndMarketNews(limit = 50): Promise<Provenance<NormalizedNewsArticle[]>> {
-  try {
-    type FmpNews = { title: string; site?: string; publisher?: string; publishedDate: string; url: string; symbol?: string };
-    const [forexNews, stockNews] = await Promise.all([
-      fmpGet<FmpNews[] | { news: FmpNews[] }>("/forex-news", { limit: String(limit) }),
-      fmpGet<FmpNews[] | { news: FmpNews[] }>("/stock-news", { limit: String(limit) }),
-    ]);
+  // Fetched independently: a broken/renamed endpoint on one leg (this is
+  // exactly what happened to forex-news, moved to /news/forex-latest under
+  // FMP's stable API) must not take down the other, which may still be
+  // working fine.
+  const [forex, stock] = await Promise.allSettled([fetchNewsLeg("/news/forex-latest", limit), fetchNewsLeg("/stock-news", limit)]);
 
-    const forexRows = extractArray<FmpNews>(forexNews, ["news"]);
-    const stockRows = extractArray<FmpNews>(stockNews, ["news"]);
-
-    const articles: NormalizedNewsArticle[] = [...forexRows, ...stockRows].map((n, i) => ({
-      id: `fmp-news-${i}-${n.publishedDate}`,
-      headline: n.title,
-      source: n.site ?? n.publisher ?? SOURCE,
-      publishedAt: new Date(n.publishedDate).toISOString(),
-      url: n.url,
-      symbols: n.symbol ? [n.symbol] : [],
-    }));
-
-    const now = new Date().toISOString();
-    return { provider: "fmp", source: SOURCE, status: "live", fetchedAt: now, sourceUpdatedAt: now, nextExpectedUpdate: null, value: articles };
-  } catch (err) {
-    return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
+  if (forex.status === "rejected" && stock.status === "rejected") {
+    return errorResult("fmp", SOURCE, forex.reason instanceof Error ? forex.reason.message : String(forex.reason));
   }
+
+  const rows = [...(forex.status === "fulfilled" ? forex.value : []), ...(stock.status === "fulfilled" ? stock.value : [])];
+  const articles: NormalizedNewsArticle[] = rows.map((n, i) => ({
+    id: `fmp-news-${i}-${n.publishedDate}`,
+    headline: n.title,
+    source: n.site ?? n.publisher ?? SOURCE,
+    publishedAt: new Date(n.publishedDate).toISOString(),
+    url: n.url,
+    symbols: n.symbol ? [n.symbol] : [],
+  }));
+
+  const now = new Date().toISOString();
+  return { provider: "fmp", source: SOURCE, status: "live", fetchedAt: now, sourceUpdatedAt: now, nextExpectedUpdate: null, value: articles };
 }
