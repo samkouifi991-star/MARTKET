@@ -16,6 +16,7 @@
 // "unavailable" rather than a wrong number if none match.
 import { getSymbolMapping, CftcReportType } from "./symbol-map";
 import { errorResult, Provenance, unavailable } from "../types";
+import { cached } from "./request-cache";
 
 const CFTC_BASE = "https://publicreporting.cftc.gov/resource";
 const SOURCE_LABEL: Record<CftcReportType, string> = {
@@ -112,6 +113,75 @@ async function fetchReportRows(reportType: CftcReportType, marketName: string, l
   });
 }
 
+// ---- Contract discovery ----
+// symbol-map.ts's `reportName` used to be the exact, hand-guessed
+// `market_and_exchange_names` string used directly in the data query — and
+// that's exactly how a 4-year-old report ("2022-02-01" for GBP) got read as
+// "current": CFTC occasionally changes the exact market/exchange string for
+// a contract (exchange rebrand, product renumbering), which silently
+// strands an old hardcoded string pointed at a name that stopped receiving
+// new reports years ago. The freshness guard below already rejects reading
+// that stale data as live — this section fixes the actual cause: instead of
+// querying by the guessed exact string, query CFTC for every row whose name
+// contains a much more stable anchor (the base commodity/currency name,
+// e.g. "BRITISH POUND STERLING" — derived from the existing reportName by
+// stripping its " - EXCHANGE" suffix, not a newly-guessed value), group by
+// the exact market_and_exchange_names string, and resolve to whichever
+// group's most recent report is actually the newest — i.e. the contract
+// CFTC is currently publishing under. GBPUSD -> GBP futures contract ->
+// exact CFTC contract identifier -> latest TFF report.
+const DISCOVERY_TTL_MS = 24 * 60 * 60_000; // contract identifiers change rarely; re-discover about once/day
+
+function searchAnchorFor(reportName: string): string {
+  return reportName.split(" - ")[0].trim();
+}
+
+export type CftcContractIdentifier = {
+  marketAndExchangeName: string;
+  cftcContractMarketCode: string | null;
+  latestReportDate: string;
+};
+
+async function discoverCftcContract(reportType: CftcReportType, searchAnchor: string): Promise<CftcContractIdentifier | null> {
+  return cached(`cftc:discover:${reportType}:${searchAnchor}`, DISCOVERY_TTL_MS, async () => {
+    const url = new URL(`${CFTC_BASE}/${DATASET_IDS[reportType]}.json`);
+    // Socrata SoQL: case-insensitive substring match, not an exact string —
+    // the whole point is to find every current/former naming variant.
+    url.searchParams.set("$where", `upper(market_and_exchange_names) like upper('%${searchAnchor.replace(/'/g, "''").replace(/%/g, "")}%')`);
+    url.searchParams.set("$order", "report_date_as_yyyy_mm_dd DESC");
+    url.searchParams.set("$limit", "1000");
+
+    const res = await fetch(url.toString(), { next: { revalidate: 0 } });
+    if (!res.ok) throw new Error(`CFTC discovery request failed: ${res.status} ${res.statusText}`);
+    const rows = (await res.json()) as CftcRow[];
+    if (rows.length === 0) return null;
+
+    // Group by the exact market_and_exchange_names string and track each
+    // group's most recent report date — never trust a single row or the
+    // server's own ordering as "the" answer.
+    const byName = new Map<string, { latestDate: string; contractCode: string | null }>();
+    for (const row of rows) {
+      const name = row["market_and_exchange_names"];
+      if (typeof name !== "string") continue;
+      const date = pickDateField(row);
+      if (!date) continue;
+      const existing = byName.get(name);
+      if (!existing || new Date(date).getTime() > new Date(existing.latestDate).getTime()) {
+        const codeRaw = row["cftc_contract_market_code"];
+        byName.set(name, { latestDate: date, contractCode: codeRaw !== undefined && codeRaw !== null ? String(codeRaw) : null });
+      }
+    }
+
+    let best: (CftcContractIdentifier & { name: string }) | null = null;
+    for (const [name, info] of byName) {
+      if (!best || new Date(info.latestDate).getTime() > new Date(best.latestReportDate).getTime()) {
+        best = { name, marketAndExchangeName: name, cftcContractMarketCode: info.contractCode, latestReportDate: info.latestDate };
+      }
+    }
+    return best;
+  });
+}
+
 // CFTC publishes weekly on Friday. A report should never be more than
 // ~10 days old under normal conditions; allow slack for holiday delays
 // before calling it stale, and treat anything far older as a sign the
@@ -151,6 +221,12 @@ export type CftcPositioningResult = {
   strength: "Extreme" | "Strong" | "Moderate" | "Light";
   /** Newest-first weekly net-positioning history, for the Smart Money momentum engine. */
   netHistory: { reportDate: string; netPositioning: number }[];
+  /** The contract identifier discoverCftcContract() resolved to, not a
+   * hardcoded guess — surfaced so provenance/validation views can show
+   * exactly which CFTC market/exchange string and contract code produced
+   * this result. */
+  marketAndExchangeName: string;
+  cftcContractMarketCode: string | null;
 };
 
 export async function getInstitutionalPositioning(internalSymbol: string): Promise<Provenance<CftcPositioningResult>> {
@@ -165,8 +241,14 @@ export async function getInstitutionalPositioning(internalSymbol: string): Promi
   const primary = CLASSIFICATIONS[reportType][0];
 
   try {
-    const rows = await fetchReportRows(reportType, reportName, 160); // ~3 years of weekly reports
-    if (rows.length === 0) return unavailable("cftc", source, `No CFTC rows found for "${reportName}" — confirm exact market name / dataset ID`);
+    const searchAnchor = searchAnchorFor(reportName);
+    const contract = await discoverCftcContract(reportType, searchAnchor);
+    if (!contract) {
+      return unavailable("cftc", source, `Contract discovery found no CFTC rows matching "${searchAnchor}" in dataset ${DATASET_IDS[reportType]} — the anchor or dataset ID likely needs updating`);
+    }
+
+    const rows = await fetchReportRows(reportType, contract.marketAndExchangeName, 160); // ~3 years of weekly reports
+    if (rows.length === 0) return unavailable("cftc", source, `No CFTC rows found for discovered contract "${contract.marketAndExchangeName}"`);
 
     const netHistory = rows
       .map((row) => {
@@ -194,7 +276,7 @@ export async function getInstitutionalPositioning(internalSymbol: string): Promi
       return unavailable(
         "cftc",
         source,
-        `Latest matched CFTC report is from ${reportDate} (~${ageDays}d old) — rejected as too old to be the current week's report. This usually means the reportName in symbol-map.ts no longer matches CFTC's current market-and-exchange-names string, or the $order/date field needs correcting; see file header.`
+        `Latest matched CFTC report is from ${reportDate} (~${ageDays}d old) — rejected as too old to be the current week's report, even after contract discovery resolved to "${contract.marketAndExchangeName}". This means CFTC has genuinely not published a recent report under any name matching "${searchAnchor}", not a wrong mapping.`
       );
     }
 
@@ -241,6 +323,8 @@ export async function getInstitutionalPositioning(internalSymbol: string): Promi
         direction,
         strength,
         netHistory,
+        marketAndExchangeName: contract.marketAndExchangeName,
+        cftcContractMarketCode: contract.cftcContractMarketCode,
       },
       raw: latestRow,
     };

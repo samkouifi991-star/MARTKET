@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   if (!verifyCronAuth(req)) return unauthorized();
   if (isDemoMode()) return demoModeSkip();
 
-  const { okCount, failCount } = await runJobForEachSymbol("fmp", INSTRUMENTS.map((i) => i.symbol), async (symbol) => {
+  const { okCount, failCount } = await runJobForEachSymbol("fmp:quote", INSTRUMENTS.map((i) => i.symbol), async (symbol) => {
     const quote = await fmp.getQuote(symbol);
     if (quote.status !== "live" || !quote.value) throw new Error(quote.error ?? "quote unavailable");
     await upsertMarketPrice(symbol, quote.value, "fmp");

@@ -96,6 +96,8 @@ function mockCftcLive() {
       direction: "Bullish",
       strength: "Strong",
       netHistory,
+      marketAndExchangeName: "BRITISH POUND STERLING - CHICAGO MERCANTILE EXCHANGE",
+      cftcContractMarketCode: "096742",
     },
   });
 }

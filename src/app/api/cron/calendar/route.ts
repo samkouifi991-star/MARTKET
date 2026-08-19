@@ -47,14 +47,14 @@ export async function GET(req: NextRequest) {
 
   const calendar = await fmp.getEconomicCalendar(from, to);
   if (calendar.status !== "live" || !calendar.value) {
-    await recordProviderCheck({ provider: "fmp", ok: false, latencyMs: Date.now() - t0, error: calendar.error ?? "calendar unavailable" }).catch(() => {});
+    await recordProviderCheck({ provider: "fmp:calendar", ok: false, latencyMs: Date.now() - t0, error: calendar.error ?? "calendar unavailable" }).catch(() => {});
     return NextResponse.json({ job: "calendar", okCount: 0, failCount: 1, error: calendar.error }, { status: 502 });
   }
 
   for (const event of calendar.value) {
     await upsertEconomicEvent(event, affectedMarketsFor(event.country));
   }
-  await recordProviderCheck({ provider: "fmp", ok: true, latencyMs: Date.now() - t0 }).catch(() => {});
+  await recordProviderCheck({ provider: "fmp:calendar", ok: true, latencyMs: Date.now() - t0 }).catch(() => {});
 
   return NextResponse.json({ job: "calendar", okCount: calendar.value.length, failCount: 0 });
 }

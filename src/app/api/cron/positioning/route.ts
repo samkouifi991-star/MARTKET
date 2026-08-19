@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
 
   const symbols = INSTRUMENTS.filter((i) => getSymbolMapping(i.symbol)?.cftc).map((i) => i.symbol);
 
-  const { okCount, failCount } = await runJobForEachSymbol("cftc", symbols, async (symbol) => {
+  const { okCount, failCount } = await runJobForEachSymbol("cftc:positioning", symbols, async (symbol) => {
     const positioning = await cftc.getInstitutionalPositioning(symbol);
     if (positioning.status !== "live" || !positioning.value) throw new Error(positioning.error ?? "CFTC data unavailable");
     await upsertPositioning(symbol, positioning.value, positioning.source);

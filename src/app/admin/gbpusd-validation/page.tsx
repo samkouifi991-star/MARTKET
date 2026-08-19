@@ -2,24 +2,17 @@ import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
 import { DATA_MODE, isDemoOnly } from "@/services/data-mode";
-import { getGbpusdValidation, ValidationRow } from "@/lib/pipeline/gbpusd-validation";
+import { getGbpusdValidationSnapshot, summarizeValidation } from "@/lib/pipeline/gbpusd-validation";
 import { GbpusdValidationTable } from "./GbpusdValidationTable";
+import { RunLiveValidationButton } from "./RunLiveValidationButton";
 import { ArrowLeft } from "lucide-react";
 
 export const metadata = { title: "GBPUSD Validation — Admin — Market Intelligence AI" };
-export const dynamic = "force-dynamic";
-
-// The Definition of Done requires every dependency to be genuinely live —
-// an API request merely succeeding is not enough. This page never asserts
-// "GBPUSD is LIVE" on its own; it only reports what each dependency
-// currently says, so a human decides readiness from real evidence.
-function summarize(rows: ValidationRow[]) {
-  const live = rows.filter((r) => r.status === "live").length;
-  const degraded = rows.filter((r) => r.status === "stale" || r.status === "delayed").length;
-  const unavailable = rows.filter((r) => r.status === "unavailable").length;
-  const error = rows.filter((r) => r.status === "error").length;
-  return { total: rows.length, live, degraded, unavailable, error, allLive: rows.length > 0 && live === rows.length };
-}
+// Storage-first by default: this page reads the database and provider
+// health table, not live providers, so per-request revalidation is cheap
+// and safe again (this was previously force-dynamic + a full live-provider
+// battery on every render — the root cause of the FMP 429 storm).
+export const revalidate = 30;
 
 export default async function GbpusdValidationPage() {
   const demoMode = isDemoOnly();
@@ -33,15 +26,17 @@ export default async function GbpusdValidationPage() {
       <div>
         <h1 className="text-xl font-semibold">GBPUSD dependency-chain validation</h1>
         <p className="text-sm text-(--text-faint) mt-1">
-          Live-calls every real dependency behind the GBPUSD score, specifically for GBPUSD — distinct from the general Provider Health page, which
-          reports aggregate status across all 25 markets. DATA_MODE is currently <code className="text-(--text-dim)">{DATA_MODE}</code>.
+          Reads the stored provider-health and database records for every real dependency behind the GBPUSD score — distinct from the general Provider
+          Health page, which reports aggregate status across all 25 markets. This page no longer calls providers on render; use{" "}
+          <span className="text-(--text-dim)">Run Live Validation</span> below for an on-demand live check. DATA_MODE is currently{" "}
+          <code className="text-(--text-dim)">{DATA_MODE}</code>.
         </p>
       </div>
 
       {demoMode ? (
         <Card title="Dependency chain">
           <p className="text-sm text-(--text-faint)">
-            This page calls real providers directly and only runs when <code className="text-(--text-dim)">DATA_MODE</code> is{" "}
+            This page reports real provider/database status and only runs when <code className="text-(--text-dim)">DATA_MODE</code> is{" "}
             <code className="text-(--text-dim)">hybrid</code> or <code className="text-(--text-dim)">live</code>. Currently running in demo mode —
             nothing to validate.
           </p>
@@ -54,39 +49,31 @@ export default async function GbpusdValidationPage() {
 }
 
 async function GbpusdValidationBody() {
-  const { rows, dbCounts, dbError, myfxbookDiagnostic } = await getGbpusdValidation();
-  const summary = summarize(rows);
+  const { rows, dbCounts, dbError } = await getGbpusdValidationSnapshot();
+  const summary = summarizeValidation(rows);
 
   return (
     <>
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <StatTile label="Dependencies checked" value={String(summary.total)} />
-        <StatTile label="Live" value={String(summary.live)} valueClassName="text-emerald-400" />
+        <StatTile label="Required live" value={`${summary.requiredLive}/${summary.requiredTotal}`} valueClassName={summary.allRequiredLive ? "text-emerald-400" : "text-amber-400"} />
+        <StatTile label="Optional live" value={`${summary.optionalLive}/${summary.optionalTotal}`} />
         <StatTile label="Stale/Delayed" value={String(summary.degraded)} valueClassName="text-amber-400" />
         <StatTile label="Unavailable" value={String(summary.unavailable)} valueClassName="text-(--text-faint)" />
         <StatTile label="Error" value={String(summary.error)} valueClassName="text-rose-400" />
       </div>
 
       <Card
-        title={summary.allLive ? "GBPUSD is fully live" : "GBPUSD is not yet fully live"}
+        title={summary.allRequiredLive ? "GBPUSD is fully live" : "GBPUSD is not yet fully live"}
         subtitle={
-          summary.allLive
-            ? "Every dependency below reports LIVE. This is evidence, not a guarantee — re-run after any credential or schema change."
-            : "At least one dependency below is not LIVE. Per the Definition of Done, GBPUSD is not considered fully live until every row here reports LIVE."
+          summary.allRequiredLive
+            ? `Every REQUIRED dependency below is live. ${summary.requiredTotal - summary.requiredLive === 0 && summary.optionalTotal - summary.optionalLive > 0 ? `${summary.optionalTotal - summary.optionalLive} OPTIONAL dependency(ies) are still degraded — confidence reflects that, but it does not block readiness.` : "This is evidence, not a guarantee — re-run after any credential or schema change."}`
+            : "At least one REQUIRED dependency below is not live. Per the Definition of Done, GBPUSD is not considered fully live until every REQUIRED row reports LIVE — OPTIONAL rows (1H/4H confirmation, retail sentiment, secondary news) may legitimately stay unavailable without blocking readiness."
         }
       >
         <GbpusdValidationTable rows={rows} />
       </Card>
 
-      <Card title="Myfxbook connection diagnostic" subtitle="Step-by-step, so a failure is traceable to exactly one stage — never logs the password or session token">
-        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-sm">
-          <DiagnosticStep label="Login successful" ok={myfxbookDiagnostic.loginSuccessful} />
-          <DiagnosticStep label="Session received" ok={myfxbookDiagnostic.sessionReceived} />
-          <DiagnosticStep label="Community outlook successful" ok={myfxbookDiagnostic.communityOutlookSuccessful} />
-          <DiagnosticStep label="GBPUSD found" ok={myfxbookDiagnostic.symbolFound} />
-        </dl>
-        {myfxbookDiagnostic.error && <p className="text-xs text-rose-400 mt-3">{myfxbookDiagnostic.error}</p>}
-      </Card>
+      <RunLiveValidationButton />
 
       <Card title="Database write/read check" subtitle="Real GBPUSD row counts in raw storage, not just 'tables exist'">
         {dbError ? (
@@ -118,15 +105,6 @@ async function GbpusdValidationBody() {
         )}
       </Card>
     </>
-  );
-}
-
-function DiagnosticStep({ label, ok }: { label: string; ok: boolean }) {
-  return (
-    <div>
-      <dt className="text-[11px] text-(--text-faint) uppercase tracking-wide">{label}</dt>
-      <dd className={`text-sm font-semibold ${ok ? "text-emerald-400" : "text-rose-400"}`}>{ok ? "Yes" : "No"}</dd>
-    </div>
   );
 }
 

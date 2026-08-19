@@ -13,19 +13,22 @@ export async function GET(req: NextRequest) {
 
   const symbols = INSTRUMENTS.map((i) => i.symbol);
 
-  const daily = await runJobForEachSymbol("fmp", symbols, async (symbol) => {
+  // Keyed per dataset (not a shared "fmp" row) so the GBPUSD validation page
+  // can show daily/4H/1H status independently instead of one job
+  // overwriting another's health row.
+  const daily = await runJobForEachSymbol("fmp:daily", symbols, async (symbol) => {
     const candles = await fmp.getDailyCandles(symbol, 20 * 365);
     if (candles.status !== "live" || !candles.value) throw new Error(candles.error ?? "daily candles unavailable");
     await upsertCandles(symbol, "1d", candles.value, "fmp");
   });
 
-  const h4 = await runJobForEachSymbol("fmp", symbols, async (symbol) => {
+  const h4 = await runJobForEachSymbol("fmp:4h", symbols, async (symbol) => {
     const candles = await fmp.getIntradayCandles(symbol, "4hour");
     if (candles.status !== "live" || !candles.value) throw new Error(candles.error ?? "4H candles unavailable");
     await upsertCandles(symbol, "4h", candles.value, "fmp");
   });
 
-  const h1 = await runJobForEachSymbol("fmp", symbols, async (symbol) => {
+  const h1 = await runJobForEachSymbol("fmp:1h", symbols, async (symbol) => {
     const candles = await fmp.getIntradayCandles(symbol, "1hour");
     if (candles.status !== "live" || !candles.value) throw new Error(candles.error ?? "1H candles unavailable");
     await upsertCandles(symbol, "1h", candles.value, "fmp");

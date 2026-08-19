@@ -28,10 +28,18 @@ export async function GET(req: NextRequest) {
         }
         okCount++;
         countriesCovered.add(country);
-        await recordProviderCheck({ provider: "fred", ok: true, latencyMs: Date.now() - t0 }).catch(() => {});
+        // Keyed per country+indicator (e.g. "fred:GB:gdpGrowth") so the
+        // GBPUSD validation page can show each required macro series
+        // independently instead of one blanket "fred" row.
+        await recordProviderCheck({ provider: `fred:${country}:${indicatorKey}`, ok: true, latencyMs: Date.now() - t0 }).catch(() => {});
       } catch (err) {
         failCount++;
-        await recordProviderCheck({ provider: "fred", ok: false, latencyMs: Date.now() - t0, error: err instanceof Error ? err.message : String(err) }).catch(() => {});
+        await recordProviderCheck({
+          provider: `fred:${country}:${indicatorKey}`,
+          ok: false,
+          latencyMs: Date.now() - t0,
+          error: err instanceof Error ? err.message : String(err),
+        }).catch(() => {});
       }
     }
   }
