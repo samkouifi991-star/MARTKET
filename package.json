@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/myfxbook-diagnose-oneoff.ts; next build",
+    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/score-verify-oneoff.ts; next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
