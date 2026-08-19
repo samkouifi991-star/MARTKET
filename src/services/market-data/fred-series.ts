@@ -58,19 +58,42 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     yield10y: { id: "IRLTLT01EZM156N", verified: false },
   },
   GB: {
-    // realGdp/gdpGrowth were previously unmapped entirely (Economic Growth
-    // had zero GB-side coverage). Candidates found via FRED's own series
-    // pages, not guessed: NGDPRSAXDCGBQ is IMF-sourced real GDP for Great
-    // Britain (seasonally adjusted); NAEXKP01GBQ657S is an OECD-sourced
-    // quarter-over-quarter growth-rate series, matching gdpGrowth's
-    // semantics the way US's A191RL1Q225SBEA does (a rate, not a level).
-    // Both still need confirming against a live FRED response
-    // (npm run test:fred-verify) before flipping verified:true.
-    realGdp: { id: "NGDPRSAXDCGBQ", verified: false },
-    gdpGrowth: { id: "NAEXKP01GBQ657S", verified: false },
-    cpi: { id: "GBRCPIALLMINMEI", verified: false },
-    unemploymentRate: { id: "LRHUTTTTGBM156S", verified: false },
-    policyRate: { id: "IUDSOIA", verified: false },
+    // Verified against the real FRED API (npm run test:fred-verify +
+    // test:fred-metadata) — both observations and full series metadata
+    // (title/units/frequency) confirmed to match the intended factor:
+    //   realGdp (NGDPRSAXDCGBQ): "Real Gross Domestic Product for Great
+    //     Britain", Millions of Domestic Currency, Quarterly, Seasonally
+    //     Adjusted, observations through 2026-01-01. Matches Economic Growth.
+    //   gdpGrowth (NAEXKP01GBQ657S): "...GDP by Expenditure: Constant
+    //     Prices: GDP: Total for United Kingdom", units "Growth rate
+    //     previous period", Quarterly, Seasonally Adjusted — a rate, not a
+    //     level, matching gdpGrowth's semantics the way US's
+    //     A191RL1Q225SBEA does. Matches Economic Growth.
+    //   cpi (GBRCPIALLMINMEI): "Consumer Price Indices... Total for United
+    //     Kingdom", Index 2015=100, Monthly. Matches Inflation, but FRED's
+    //     own last observation is 2025-03-01 (~17 months stale as of this
+    //     verification) — the pipeline's own staleness classification
+    //     (classifyByAge in gbpusd-validation.ts) will correctly surface
+    //     this as "stale", not "live"; kept verified since the series
+    //     itself is the right one, not a wrong mapping.
+    //   unemploymentRate (LRHUTTTTGBM156S): "...Monthly Unemployment Rate
+    //     Total: 15 Years or over for United Kingdom", Percent, Monthly,
+    //     Seasonally Adjusted, observations through 2026-04-01. Matches
+    //     Labor Market.
+    //   policyRate (IUDSOIA): "Daily Sterling Overnight Index Average
+    //     (SONIA) Rate", Percent, Daily, observations through 2026-08-17 —
+    //     the UK's actual reference overnight rate. Matches Interest Rates.
+    realGdp: { id: "NGDPRSAXDCGBQ", verified: true },
+    gdpGrowth: { id: "NAEXKP01GBQ657S", verified: true },
+    cpi: { id: "GBRCPIALLMINMEI", verified: true },
+    unemploymentRate: { id: "LRHUTTTTGBM156S", verified: true },
+    policyRate: { id: "IUDSOIA", verified: true },
+    // yield10y is not consumed by any GBPUSD scoring factor (macro.ts uses
+    // cpi/coreCpi/pce/corePce/ppi for Inflation, realGdp/gdpGrowth/
+    // industrialProduction/retailSales for Growth, unemploymentRate/
+    // payrolls/initialClaims/wageGrowth/laborParticipation for Labor, and
+    // policyRate directly for Interest Rates) — left unverified until an
+    // actual consumer needs it, consistent with not expanding scope here.
     yield10y: { id: "IRLTLT01GBM156N", verified: false },
   },
   JP: {

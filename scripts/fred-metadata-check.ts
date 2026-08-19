@@ -1,8 +1,10 @@
-// One-off: fetch full series metadata (title/units/frequency/seasonal
-// adjustment/last_updated) for the GB series fred-verify.ts already
-// confirmed resolve, so "verified:true" means "the metadata matches the
-// intended factor," not just "observations exist." Temporary — wired into
-// vercel-build for exactly one deploy, then removed.
+// Fetches full series metadata (title/units/frequency/seasonal
+// adjustment/last_updated) for series fred-verify.ts confirmed resolve, so
+// flipping verified:true means "the metadata matches the intended factor,"
+// not just "observations exist." Run this before adding any new country's
+// series to fred-series.ts.
+//
+// Usage: FRED_API_KEY=xxx npm run test:fred-metadata
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
 loadEnv();
