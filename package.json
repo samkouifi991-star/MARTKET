@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/cftc-find-gbp.ts; next build",
+    "vercel-build": "tsx scripts/migrate.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -14,6 +14,7 @@
     "test:coverage": "vitest run --coverage",
     "test:fmp-coverage": "tsx scripts/fmp-coverage-test.ts",
     "test:cftc-verify": "tsx scripts/cftc-verify.ts",
+    "test:cftc-find": "tsx scripts/cftc-find-gbp.ts",
     "test:fred-verify": "tsx scripts/fred-verify.ts",
     "test:fred-metadata": "tsx scripts/fred-metadata-check.ts",
     "db:generate": "drizzle-kit generate",

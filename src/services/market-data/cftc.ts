@@ -132,8 +132,19 @@ async function fetchReportRows(reportType: CftcReportType, marketName: string, l
 // exact CFTC contract identifier -> latest TFF report.
 const DISCOVERY_TTL_MS = 24 * 60 * 60_000; // contract identifiers change rarely; re-discover about once/day
 
+// Verified against a live query (see project history): CFTC renamed GBP
+// futures' market_and_exchange_names from "BRITISH POUND STERLING -
+// CHICAGO MERCANTILE EXCHANGE" (dead since 2022-02-01) to "BRITISH POUND -
+// CHICAGO MERCANTILE EXCHANGE" (current, same cftc_contract_market_code
+// 096742) at some point after that — the full pre-exchange-suffix name
+// ("BRITISH POUND STERLING") is exactly the kind of string CFTC changes,
+// while a shorter 1-2 word root ("BRITISH POUND") survived the rename
+// unchanged. Anchoring on the first two words is deliberately looser than
+// the full name for this reason, not a shortcut — a broader match still
+// resolves correctly because discovery always picks the freshest group.
 function searchAnchorFor(reportName: string): string {
-  return reportName.split(" - ")[0].trim();
+  const base = reportName.split(" - ")[0].trim();
+  return base.split(" ").slice(0, 2).join(" ");
 }
 
 export type CftcContractIdentifier = {
@@ -146,8 +157,17 @@ async function discoverCftcContract(reportType: CftcReportType, searchAnchor: st
   return cached(`cftc:discover:${reportType}:${searchAnchor}`, DISCOVERY_TTL_MS, async () => {
     const url = new URL(`${CFTC_BASE}/${DATASET_IDS[reportType]}.json`);
     // Socrata SoQL: case-insensitive substring match, not an exact string —
-    // the whole point is to find every current/former naming variant.
-    url.searchParams.set("$where", `upper(market_and_exchange_names) like upper('%${searchAnchor.replace(/'/g, "''").replace(/%/g, "")}%')`);
+    // the whole point is to find every current/former naming variant. Also
+    // checked against commodity_name and contract_market_name, not just
+    // market_and_exchange_names: verified live that CFTC's exchange-name
+    // string is the one that gets cosmetically renamed, while
+    // contract_market_name ("BRITISH POUND") stayed identical across the
+    // 2022 rename — matching all three catches a rename in any of them.
+    const escaped = searchAnchor.replace(/'/g, "''").replace(/%/g, "");
+    const clause = ["market_and_exchange_names", "commodity_name", "contract_market_name"]
+      .map((field) => `upper(${field}) like upper('%${escaped}%')`)
+      .join(" OR ");
+    url.searchParams.set("$where", clause);
     url.searchParams.set("$order", "report_date_as_yyyy_mm_dd DESC");
     url.searchParams.set("$limit", "1000");
 

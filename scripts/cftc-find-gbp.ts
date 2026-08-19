@@ -1,10 +1,16 @@
-// One-off diagnostic: cftc-verify.ts just proved that searching
-// market_and_exchange_names for "BRITISH POUND STERLING" only turns up rows
-// through 2022-02-01, even via the new discoverCftcContract() logic — i.e.
-// CFTC's current naming for GBP futures likely no longer contains that
-// exact substring at all (a rename, not a data gap). This queries the raw
-// financial_futures dataset for anything GBP/pound-related by
-// commodity_name/contract_market_name instead, to find today's real string.
+// Diagnostic used to find the real cause of the GBP futures staleness bug:
+// searching market_and_exchange_names for "BRITISH POUND STERLING" only
+// turned up rows through 2022-02-01 — CFTC had renamed the contract's
+// exchange-name string to "BRITISH POUND - CHICAGO MERCANTILE EXCHANGE"
+// (same cftc_contract_market_code, "STERLING" dropped) at some point after
+// that. Queries the raw financial_futures dataset for anything GBP/pound-
+// related by commodity_name/contract_market_name (fields that turned out to
+// be more rename-resistant than market_and_exchange_names) to surface every
+// current naming variant directly, rather than assuming a search anchor.
+// Kept as a reusable tool for diagnosing the same kind of rename on other
+// markets later.
+//
+// Usage: npm run test:cftc-find
 const CFTC_BASE = "https://publicreporting.cftc.gov/resource";
 const FINANCIAL_FUTURES_DATASET = "gpe5-46if";
 

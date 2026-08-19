@@ -97,6 +97,28 @@ describe("CFTC contract discovery", () => {
     expect(result.value?.cftcContractMarketCode).toBe("096742");
   });
 
+  it("resolves through a real-world rename that drops a word from the anchor (BRITISH POUND STERLING -> BRITISH POUND)", async () => {
+    // The actual bug found by running cftc-verify.ts against the live CFTC
+    // API: GBP futures' market_and_exchange_names was "BRITISH POUND
+    // STERLING - CHICAGO MERCANTILE EXCHANGE" until 2022-02-01, then CFTC
+    // renamed it to "BRITISH POUND - CHICAGO MERCANTILE EXCHANGE" (same
+    // cftc_contract_market_code, "STERLING" dropped). A full-name anchor
+    // ("BRITISH POUND STERLING") never matches the new string at all; the
+    // shortened two-word anchor ("BRITISH POUND") must still find it.
+    const deadName = "BRITISH POUND STERLING - CHICAGO MERCANTILE EXCHANGE";
+    const currentName = "BRITISH POUND - CHICAGO MERCANTILE EXCHANGE";
+    const rows = [
+      { ...MARKET_ROW_BASE, market_and_exchange_names: deadName, cftc_contract_market_code: "096742", report_date_as_yyyy_mm_dd: isoDaysAgo(1661) },
+      { ...MARKET_ROW_BASE, market_and_exchange_names: currentName, cftc_contract_market_code: "096742", report_date_as_yyyy_mm_dd: isoDaysAgo(8) },
+    ];
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(rows));
+
+    const result = await getInstitutionalPositioning("GBPUSD");
+
+    expect(result.status).toBe("live");
+    expect(result.value?.marketAndExchangeName).toBe(currentName);
+  });
+
   it("reports unavailable, not error, when discovery finds no matching rows at all", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse([]));
     const result = await getInstitutionalPositioning("GBPUSD");
