@@ -1,9 +1,12 @@
-// One-off: run computeLiveMarketScore("GBPUSD") for real, inside a Vercel
-// build (this sandbox cannot reach any of FMP/CFTC/FRED/Myfxbook/Neon
-// directly), to confirm the full chain — real provider data -> stored in
-// Neon -> read back -> factor calculated -> score stored -> readable —
-// actually completes end to end after the database/FRED/CFTC fixes. Will
-// be removed after the result is captured.
+// Runs computeLiveMarketScore("GBPUSD") for real, confirming the full
+// chain — real provider data -> stored in Neon -> read back -> factor
+// calculated -> score stored -> readable — completes end to end. Needs an
+// environment with real network access to FMP/CFTC/FRED/Neon (this
+// project's dev sandbox cannot reach any of them directly), so this only
+// produces a meaningful result run from Vercel or a machine with real
+// internet access.
+//
+// Usage: npm run test:score-verify
 import { computeLiveMarketScore } from "../src/lib/pipeline/scoring-engine";
 import { DATA_MODE } from "../src/services/data-mode";
 
