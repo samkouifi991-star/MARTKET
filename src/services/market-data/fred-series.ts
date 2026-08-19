@@ -58,6 +58,16 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     yield10y: { id: "IRLTLT01EZM156N", verified: false },
   },
   GB: {
+    // realGdp/gdpGrowth were previously unmapped entirely (Economic Growth
+    // had zero GB-side coverage). Candidates found via FRED's own series
+    // pages, not guessed: NGDPRSAXDCGBQ is IMF-sourced real GDP for Great
+    // Britain (seasonally adjusted); NAEXKP01GBQ657S is an OECD-sourced
+    // quarter-over-quarter growth-rate series, matching gdpGrowth's
+    // semantics the way US's A191RL1Q225SBEA does (a rate, not a level).
+    // Both still need confirming against a live FRED response
+    // (npm run test:fred-verify) before flipping verified:true.
+    realGdp: { id: "NGDPRSAXDCGBQ", verified: false },
+    gdpGrowth: { id: "NAEXKP01GBQ657S", verified: false },
     cpi: { id: "GBRCPIALLMINMEI", verified: false },
     unemploymentRate: { id: "LRHUTTTTGBM156S", verified: false },
     policyRate: { id: "IUDSOIA", verified: false },

@@ -19,14 +19,20 @@ const MYFXBOOK_BASE = "https://www.myfxbook.com/api";
 const SOURCE = "Myfxbook Community Outlook";
 
 type MyfxbookSession = { session: string; expiresAt: number };
+// Module-level cache is best-effort only: serverless invocations don't
+// share memory reliably, and Myfxbook's sessions appear to be tied to the
+// calling IP (undocumented) — a session minted by one invocation can be
+// rejected by the next if Vercel serves it from a different IP. Every
+// caller must treat "invalid session" as a normal, expected condition (not
+// a hard failure) and re-authenticate once, not just trust the cache TTL.
 let cachedSession: MyfxbookSession | null = null;
 
 function credentialsConfigured(): boolean {
   return Boolean(process.env.MYFXBOOK_EMAIL && process.env.MYFXBOOK_PASSWORD);
 }
 
-async function login(): Promise<string> {
-  if (cachedSession && cachedSession.expiresAt > Date.now()) return cachedSession.session;
+async function login(forceFresh = false): Promise<string> {
+  if (!forceFresh && cachedSession && cachedSession.expiresAt > Date.now()) return cachedSession.session;
 
   const url = new URL(`${MYFXBOOK_BASE}/login.json`);
   url.searchParams.set("email", process.env.MYFXBOOK_EMAIL!);
@@ -38,9 +44,16 @@ async function login(): Promise<string> {
   if (data.error || !data.session) throw new Error(`Myfxbook login rejected: ${data.message ?? "no session returned"}`);
 
   // Myfxbook doesn't document an explicit session TTL; re-login every 30
-  // minutes rather than assume a lifetime that hasn't been confirmed.
+  // minutes rather than assume a lifetime that hasn't been confirmed. This
+  // is a ceiling, not a guarantee — fetchOutlook() re-authenticates
+  // immediately (bypassing this cache) the moment Myfxbook itself reports
+  // the session invalid, rather than waiting for this TTL to elapse.
   cachedSession = { session: data.session, expiresAt: Date.now() + 30 * 60_000 };
   return cachedSession.session;
+}
+
+function isInvalidSessionError(message: string): boolean {
+  return /invalid session|session.*(expired|invalid)|not logged in/i.test(message);
 }
 
 type OutlookRow = Record<string, number | string | undefined>;
@@ -68,14 +81,29 @@ const FIELD_CANDIDATES = {
   avgShortPrice: ["averageOpenPriceOfShorts", "avgShortPrice", "average_open_price_of_shorts"],
 };
 
-async function fetchOutlook(): Promise<OutlookRow[]> {
-  const session = await login();
+async function fetchOutlookOnce(session: string): Promise<{ error: boolean; message?: string; symbols?: OutlookRow[] }> {
   const url = new URL(`${MYFXBOOK_BASE}/get-community-outlook.json`);
   url.searchParams.set("session", session);
 
   const res = await fetch(url.toString(), { next: { revalidate: 0 } });
   if (!res.ok) throw new Error(`Myfxbook community outlook request failed: ${res.status} ${res.statusText}`);
-  const data = (await res.json()) as { error: boolean; message?: string; symbols?: OutlookRow[] };
+  return (await res.json()) as { error: boolean; message?: string; symbols?: OutlookRow[] };
+}
+
+/** Myfxbook rejects a session as invalid/expired far more often than its
+ * documented (nonexistent) TTL would suggest — most likely because sessions
+ * are tied to the calling IP and Vercel serverless functions don't keep a
+ * stable one. Re-authenticate once and retry rather than surfacing that as
+ * a hard failure the first time it happens. */
+async function fetchOutlook(): Promise<OutlookRow[]> {
+  const session = await login();
+  let data = await fetchOutlookOnce(session);
+
+  if (data.error && isInvalidSessionError(data.message ?? "")) {
+    const freshSession = await login(true);
+    data = await fetchOutlookOnce(freshSession);
+  }
+
   if (data.error) throw new Error(`Myfxbook community outlook rejected: ${data.message ?? "unknown error"}`);
   return data.symbols ?? [];
 }
