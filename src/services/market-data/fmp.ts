@@ -361,6 +361,9 @@ export async function getForexAndMarketNews(limit = 50): Promise<Provenance<Norm
     if (isRateLimited(forex.reason) || isRateLimited(stock.reason)) {
       return unavailable("fmp", SOURCE, rateLimitMessage(isRateLimited(forex.reason) ? forex.reason : stock.reason));
     }
+    if (isPlanLimited(forex.reason) || isPlanLimited(stock.reason)) {
+      return unavailable("fmp", SOURCE, "provider plan does not include this news endpoint");
+    }
     return errorResult("fmp", SOURCE, forex.reason instanceof Error ? forex.reason.message : String(forex.reason));
   }
 
