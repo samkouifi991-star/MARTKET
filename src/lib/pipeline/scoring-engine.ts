@@ -49,7 +49,7 @@ export function contributionFor(factor: ResolvedFactor, weight: number): number 
   return Number(contribution.toFixed(2));
 }
 
-export async function computeLiveMarketScore(symbol: string, mode: DataMode): Promise<MarketScore> {
+export async function computeLiveMarketScore(symbol: string, mode: DataMode, options: { persist?: boolean } = {}): Promise<MarketScore> {
   const instrument = getInstrument(symbol);
   if (!instrument) throw new Error(`Unknown instrument ${symbol}`);
   if (mode === "demo") throw new Error("computeLiveMarketScore should only be called for hybrid/live — use computeMarketScore from lib/scoring.ts for demo mode");
@@ -106,10 +106,19 @@ export async function computeLiveMarketScore(symbol: string, mode: DataMode): Pr
     lastUpdated: now,
   };
 
-  // Best-effort persistence: never let a DB outage break score computation
-  // or serving. In live/hybrid mode with no DB configured yet, this is
-  // expected to fail silently until DATABASE_URL is set.
-  recordScoreHistory(score).catch(() => {});
+  // Persistence is opt-in (options.persist), not automatic on every call.
+  // computeLiveMarketScore also runs on every dynamic page render for the
+  // market detail page — if it recorded a row unconditionally, the score
+  // history chart would fill up with one point per page view/build instead
+  // of genuine independent market observations (this was confirmed as the
+  // real cause behind "many market_scores rows that aren't really distinct
+  // observations": the page used to be statically prerendered once per
+  // deploy, so every test deployment this session wrote its own row).
+  // Only the periodic scores cron (src/app/api/cron/scores/route.ts) passes
+  // persist:true — it's the sole source of truth for score history.
+  // Best-effort either way: never let a DB outage break score computation
+  // or serving.
+  if (options.persist) recordScoreHistory(score).catch(() => {});
 
   return score;
 }

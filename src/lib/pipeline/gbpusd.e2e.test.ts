@@ -249,6 +249,27 @@ describe("GBPUSD end-to-end live pipeline", () => {
     expect(score.change24h).toBe(Number((score.totalScore - oldPoint.totalScore).toFixed(2)));
   });
 
+  it("does NOT write a market_scores row by default — only an explicit persist:true does", async () => {
+    // The real bug this locks in: computeLiveMarketScore used to call
+    // recordScoreHistory unconditionally, and the market detail page used
+    // to be statically prerendered once per deploy — so every test
+    // deployment silently wrote its own "observation," polluting the score
+    // history chart with build artifacts instead of genuine periodic market
+    // snapshots. Only the scores cron (which passes persist:true) should
+    // ever write history now; a plain page-render computation must not.
+    mockFmpLive();
+    mockCftcLive();
+    mockFredLive();
+    mockIgUnavailable();
+    const scores = await import("@/db/queries/scores");
+
+    await computeLiveMarketScore("GBPUSD", "live");
+    expect(scores.recordScoreHistory).not.toHaveBeenCalled();
+
+    await computeLiveMarketScore("GBPUSD", "live", { persist: true });
+    expect(scores.recordScoreHistory).toHaveBeenCalledTimes(1);
+  });
+
   it("never fabricates a value when every live provider fails — factors go unavailable and confidence drops", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "simulated outage" };
     vi.mocked(fmp.getQuote).mockResolvedValue(down);

@@ -31,6 +31,14 @@ export function generateStaticParams() {
   return INSTRUMENTS.map((i) => ({ symbol: i.symbol }));
 }
 
+// Without this, Next prerenders every /markets/[symbol] page exactly once at
+// build time (confirmed via .next/prerender-manifest.json: compute:'static',
+// initialRevalidateSeconds:false) and serves that same frozen HTML to every
+// visitor until the next deploy — defeating the entire storage-first
+// last-known-good architecture, which assumes each visit reads Neon's
+// current state. force-dynamic makes this route render per-request instead.
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = await params;
   const instrument = getInstrument(symbol);
@@ -256,7 +264,13 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
       <div className="grid lg:grid-cols-2 gap-4">
         <Card
           title="Seasonality"
-          subtitle={demoMode ? `${currentMonthStat(instrument).period} · ${currentMonthStat(instrument).years}-year history` : live!.seasonality.data ? `${live!.seasonality.data.period} · ${live!.seasonality.data.years}-year history` : undefined}
+          subtitle={
+            demoMode
+              ? `${currentMonthStat(instrument).period} · ${currentMonthStat(instrument).years}-year history`
+              : live!.seasonality.data
+                ? `${live!.seasonality.data.period} · ${live!.seasonality.data.sampleDepth?.yearsSpanned ?? live!.seasonality.data.years}-year history`
+                : undefined
+          }
           action={!demoMode ? <DataFreshnessTag freshness={live!.seasonality.freshness} /> : undefined}
         >
           {demoMode ? (
@@ -270,6 +284,12 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
                 <Row label="Best / worst" value={`${formatSignedPct(live!.seasonality.data.bestReturn)} / ${formatSignedPct(live!.seasonality.data.worstReturn)}`} />
                 <Row label="10y average" value={formatSignedPct(live!.seasonality.data.avg10y)} />
                 <Row label="Max drawdown" value={formatSignedPct(live!.seasonality.data.maxDrawdown)} />
+                {live!.seasonality.data.sampleDepth && (
+                  <Row
+                    label="Sample"
+                    value={`${live!.seasonality.data.sampleDepth.observations} candles, ${live!.seasonality.data.sampleDepth.earliestDate.slice(0, 10)} to ${live!.seasonality.data.sampleDepth.latestDate.slice(0, 10)}`}
+                  />
+                )}
               </dl>
               <p className="text-[10px] text-(--text-faint) mt-2">Source: {live!.seasonality.source}</p>
             </>

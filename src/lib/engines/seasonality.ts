@@ -4,7 +4,7 @@
 // in the candle history actually provided, and 10y/20y averages are null
 // rather than padded when that much history isn't available.
 import { NormalizedCandle } from "@/services/types";
-import { SeasonalityStat } from "@/lib/types";
+import { SeasonalitySampleDepth, SeasonalityStat } from "@/lib/types";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -110,4 +110,48 @@ export function computeWeekdaySeasonality(candles: NormalizedCandle[]): Seasonal
 export function computeCurrentMonthStat(candles: NormalizedCandle[], referenceDate: Date = new Date()): SeasonalityStat | null {
   const stats = computeMonthlySeasonality(candles);
   return stats.find((s) => s.period === MONTH_NAMES[referenceDate.getUTCMonth()]) ?? null;
+}
+
+/** The real depth of the candle sample a seasonality read is based on — the
+ * honest complement to `SeasonalityStat.years` (see its doc comment). Used
+ * both to gate confidence (a thin sample is noise, not a seasonal edge) and
+ * to describe the sample without ever claiming more history than actually
+ * exists in storage. Returns null only when there's nothing to measure. */
+export function computeHistoricalSampleDepth(candles: NormalizedCandle[]): SeasonalitySampleDepth | null {
+  if (candles.length < 2) return null;
+  const sorted = [...candles].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const earliestDate = sorted[0].date;
+  const latestDate = sorted[sorted.length - 1].date;
+  const yearsSpanned = Number(((new Date(latestDate).getTime() - new Date(earliestDate).getTime()) / (365.25 * 86_400_000)).toFixed(2));
+
+  const byYear = new Map<number, NormalizedCandle[]>();
+  for (const c of sorted) {
+    const y = new Date(c.date).getUTCFullYear();
+    const arr = byYear.get(y) ?? [];
+    arr.push(c);
+    byYear.set(y, arr);
+  }
+
+  // Whole-calendar-year (first close -> last close within that year) return,
+  // one observation per calendar year actually present — never padded or
+  // inferred for a partial year at either edge.
+  const annualReturns: number[] = [];
+  for (const yearCandles of byYear.values()) {
+    if (yearCandles.length < 2) continue;
+    const first = yearCandles[0].close;
+    const last = yearCandles[yearCandles.length - 1].close;
+    annualReturns.push(((last - first) / first) * 100);
+  }
+  const positive = annualReturns.filter((r) => r > 0).length;
+
+  return {
+    earliestDate,
+    latestDate,
+    observations: sorted.length,
+    yearsSpanned,
+    calendarYears: byYear.size,
+    positiveYearPct: annualReturns.length ? Math.round((positive / annualReturns.length) * 100) : 0,
+    avgAnnualReturn: annualReturns.length ? Number((annualReturns.reduce((a, b) => a + b, 0) / annualReturns.length).toFixed(2)) : 0,
+    medianAnnualReturn: annualReturns.length ? Number(median(annualReturns).toFixed(2)) : 0,
+  };
 }

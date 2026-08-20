@@ -142,6 +142,23 @@ export type SmartMoneyData = {
   explanation: string;
 };
 
+// Real depth of the underlying daily-candle sample a seasonality read was
+// computed from — distinct from `SeasonalityStat.years` (how many times
+// the specific period, e.g. "August", occurs in that sample). A dataset can
+// report years=2 for August while only spanning ~13 months of real history
+// (August appearing once near each edge) — this is the honest measure used
+// to gate confidence and to describe the sample without overstating it.
+export type SeasonalitySampleDepth = {
+  earliestDate: string; // ISO date of the oldest candle in the sample
+  latestDate: string; // ISO date of the newest candle in the sample
+  observations: number; // total daily candles in the sample
+  yearsSpanned: number; // (latest - earliest) in years, continuous
+  calendarYears: number; // distinct calendar years represented
+  positiveYearPct: number; // % of whole calendar years with a positive close-to-close return
+  avgAnnualReturn: number; // mean of those whole-calendar-year returns
+  medianAnnualReturn: number; // median of those whole-calendar-year returns
+};
+
 export type SeasonalityStat = {
   period: string; // e.g. "August", "Week 32", "Monday"
   avgReturn: number;
@@ -154,6 +171,9 @@ export type SeasonalityStat = {
   avg10y: number;
   avg20y: number | null;
   maxDrawdown: number;
+  // Only populated for live/hybrid reads over real stored/fetched candles —
+  // demo data has no genuine sample to describe.
+  sampleDepth?: SeasonalitySampleDepth;
 };
 
 export type EconomicRelease = {

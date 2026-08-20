@@ -18,7 +18,7 @@ import { generatePositioning } from "@/lib/demo/positioning";
 import { generatePriceData } from "@/lib/demo/price";
 import { currentMonthStat as demoCurrentMonthStat } from "@/lib/demo/seasonality";
 import { upcomingHighImpact } from "@/lib/demo/calendar";
-import { computeCurrentMonthStat } from "@/lib/engines/seasonality";
+import { computeCurrentMonthStat, computeHistoricalSampleDepth } from "@/lib/engines/seasonality";
 import { formatPrice } from "@/lib/format";
 import { DataFreshness, Instrument, MarketScore, PriceData, SeasonalityStat } from "@/lib/types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
@@ -26,6 +26,7 @@ import * as cftc from "@/services/market-data/cftc";
 import { getQuoteWithFallback, getDailyCandlesWithFallback } from "@/services/market-data/last-known-good";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
+import { seasonalityDepthFreshness, worseOf } from "./types";
 import { resolveSmartMoney } from "./positioning";
 import { fetchTechnicalTrend } from "./technical";
 
@@ -52,7 +53,7 @@ export type InstitutionalCardData = {
 
 export type SmartMoneyCardData = { signal: string; confidence: number; explanation: string };
 
-const MIN_YEARS_FOR_LIVE_SEASONALITY = 2;
+const MIN_YEARS_FOR_LIVE_SEASONALITY = 3;
 
 async function institutionalCard(symbol: string, mode: DataMode): Promise<CardResult<InstitutionalCardData>> {
   const result = await cftc.getInstitutionalPositioning(symbol);
@@ -137,12 +138,18 @@ async function seasonalityCard(symbol: string, mode: DataMode): Promise<CardResu
   const history = await getDailyCandlesWithFallback(symbol, 20 * 365);
   if (isUsable(history.status, history.value)) {
     const stat = computeCurrentMonthStat(history.value!);
-    if (stat && stat.years >= MIN_YEARS_FOR_LIVE_SEASONALITY) {
+    // Real span of the sample, not stat.years (which counts occurrences of
+    // the current month and can look multi-year from as little as ~13
+    // months of daily candles) — see pipeline/seasonality.ts for the same
+    // rule applied to the score factor.
+    const depth = computeHistoricalSampleDepth(history.value!);
+    if (stat && depth && depth.yearsSpanned >= MIN_YEARS_FOR_LIVE_SEASONALITY) {
       const fromStorage = history.source.includes("last known good");
+      const freshness = worseOf(history.status, seasonalityDepthFreshness(depth.yearsSpanned));
       return {
-        data: stat,
-        freshness: history.status,
-        source: fromStorage ? `Historical daily closes (FMP) — ${stat.years}-year sample — last known good` : `Historical daily closes (FMP) — ${stat.years}-year sample`,
+        data: { ...stat, sampleDepth: depth },
+        freshness,
+        source: fromStorage ? `Historical daily closes (FMP) — ${depth.yearsSpanned}-year sample — last known good` : `Historical daily closes (FMP) — ${depth.yearsSpanned}-year sample`,
         lastUpdated: history.sourceUpdatedAt,
       };
     }
@@ -150,20 +157,19 @@ async function seasonalityCard(symbol: string, mode: DataMode): Promise<CardResu
       const instrument = getInstrument(symbol)!;
       return { data: demoCurrentMonthStat(instrument), freshness: "estimated", source: "Historical seasonality engine (demo)", lastUpdated: new Date().toISOString() };
     }
-    return { data: null, freshness: "unavailable", source: "Historical daily closes (FMP)", lastUpdated: null, reason: `Only ${stat?.years ?? 0} year(s) of history — below the ${MIN_YEARS_FOR_LIVE_SEASONALITY}-year minimum` };
+    return {
+      data: null,
+      freshness: "unavailable",
+      source: "Historical daily closes (FMP)",
+      lastUpdated: null,
+      reason: `Only ${depth?.yearsSpanned ?? 0} year(s) of real stored history (${depth?.observations ?? 0} candles, ${depth?.earliestDate ?? "n/a"} to ${depth?.latestDate ?? "n/a"}) — below the ${MIN_YEARS_FOR_LIVE_SEASONALITY}-year minimum`,
+    };
   }
   if (allowsDemoFallback(mode, symbol)) {
     const instrument = getInstrument(symbol)!;
     return { data: demoCurrentMonthStat(instrument), freshness: "estimated", source: "Historical seasonality engine (demo)", lastUpdated: new Date().toISOString() };
   }
   return { data: null, freshness: history.status === "error" ? "error" : "unavailable", source: "Historical daily closes (FMP)", lastUpdated: null, reason: history.error };
-}
-
-// Worse of two freshness levels, for combining the price card's two inputs
-// (quote + daily candles) into one badge — live < delayed < stale.
-const FRESHNESS_RANK: Partial<Record<DataFreshness, number>> = { live: 0, delayed: 1, stale: 2 };
-function worseOf(a: DataFreshness, b: DataFreshness): DataFreshness {
-  return (FRESHNESS_RANK[b] ?? 0) > (FRESHNESS_RANK[a] ?? 0) ? b : a;
 }
 
 async function priceCard(symbol: string, mode: DataMode): Promise<CardResult<PriceData>> {

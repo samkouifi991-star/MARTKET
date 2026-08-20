@@ -17,7 +17,10 @@ const dailyCandles: NormalizedCandle[] = buildTrendingCandles({ bars: 260, start
 // A multi-year series so the seasonality card's 2-year minimum is met —
 // mirrors how resolveSeasonalityFactor requests much more history than the
 // technical-trend resolver's default 260-day window.
-const multiYearCandles: NormalizedCandle[] = buildMultiYearDailyCandles({ years: 5, startYear: 2020, startPrice: 1.24, monthBiasPctPerDay: () => 0.02, seed: 55 });
+// 12 years so the sample clears the 10-year "normal confidence" tier —
+// this fixture is meant to test the plain live/no-fallback path, not the
+// sample-depth dampening (that has its own dedicated tests).
+const multiYearCandles: NormalizedCandle[] = buildMultiYearDailyCandles({ years: 12, startYear: 2013, startPrice: 1.24, monthBiasPctPerDay: () => 0.02, seed: 55 });
 
 function mockAllLive() {
   vi.mocked(fmp.getQuote).mockResolvedValue({

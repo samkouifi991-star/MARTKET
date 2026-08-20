@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMonthlySeasonality, computeWeekdaySeasonality, computeCurrentMonthStat } from "./seasonality";
+import { computeMonthlySeasonality, computeWeekdaySeasonality, computeCurrentMonthStat, computeHistoricalSampleDepth } from "./seasonality";
 import { buildMultiYearDailyCandles } from "./__fixtures__/candles";
 
 describe("computeMonthlySeasonality", () => {
@@ -65,5 +65,43 @@ describe("computeCurrentMonthStat", () => {
 
   it("returns null when the candle history has no data at all", () => {
     expect(computeCurrentMonthStat([], new Date())).toBeNull();
+  });
+});
+
+describe("computeHistoricalSampleDepth", () => {
+  it("reports the real span and observation count, not a period-occurrence count", () => {
+    const candles = buildMultiYearDailyCandles({ years: 5, startYear: 2020, startPrice: 1.25, monthBiasPctPerDay: () => 0.01, seed: 8 });
+    const depth = computeHistoricalSampleDepth(candles)!;
+
+    expect(depth).not.toBeNull();
+    expect(depth.observations).toBe(candles.length);
+    expect(depth.earliestDate).toBe(candles[0].date);
+    expect(depth.latestDate).toBe(candles[candles.length - 1].date);
+    expect(depth.yearsSpanned).toBeCloseTo(5, 0);
+    expect(depth.calendarYears).toBe(5);
+  });
+
+  it("computes positive-year percentage and avg/median annual return from whole calendar years only", () => {
+    // A steady positive daily bias -> every whole calendar year should close
+    // higher than it opened, so positiveYearPct should be 100.
+    const candles = buildMultiYearDailyCandles({ years: 4, startYear: 2021, startPrice: 1.0, monthBiasPctPerDay: () => 0.05, seed: 12 });
+    const depth = computeHistoricalSampleDepth(candles)!;
+
+    expect(depth.positiveYearPct).toBe(100);
+    expect(depth.avgAnnualReturn).toBeGreaterThan(0);
+    expect(depth.medianAnnualReturn).toBeGreaterThan(0);
+  });
+
+  it("never overstates a thin sample — ~1 year of data reports yearsSpanned near 1, not a larger number", () => {
+    const candles = buildMultiYearDailyCandles({ years: 1, startYear: 2025, startPrice: 1.27, monthBiasPctPerDay: () => 0.01, seed: 4 });
+    const depth = computeHistoricalSampleDepth(candles)!;
+
+    expect(depth.yearsSpanned).toBeLessThan(1.1);
+    expect(depth.yearsSpanned).toBeGreaterThan(0.9);
+  });
+
+  it("returns null for an empty or single-candle sample — nothing to measure", () => {
+    expect(computeHistoricalSampleDepth([])).toBeNull();
+    expect(computeHistoricalSampleDepth([{ date: "2025-01-01T00:00:00.000Z", open: 1, high: 1, low: 1, close: 1, volume: 0 }])).toBeNull();
   });
 });
