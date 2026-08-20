@@ -18,7 +18,7 @@ import { resolveRetailSentimentFactor } from "./sentiment";
 import { resolveEconomicGrowthFactor, resolveInflationFactor, resolveLaborFactor, resolveInterestRatesFactor } from "./macro";
 import { resolveNewsFactor } from "./news";
 import { computeConfidence } from "./confidence";
-import { recordScoreHistory } from "@/db/queries/scores";
+import { recordScoreHistory, getScoreHistory } from "@/db/queries/scores";
 
 const RESOLVERS: Record<ScoreFactorKey, (symbol: string, mode: DataMode) => Promise<ResolvedFactor>> = {
   institutional: resolveInstitutionalFactor,
@@ -32,9 +32,18 @@ const RESOLVERS: Record<ScoreFactorKey, (symbol: string, mode: DataMode) => Prom
   news: resolveNewsFactor,
 };
 
-function contributionFor(factor: ResolvedFactor, weight: number): number {
+export function contributionFor(factor: ResolvedFactor, weight: number): number {
   let contribution = factor.rawScore * weight;
-  if (factor.freshness === "stale") contribution *= 0.5;
+  // "delayed" now legitimately includes last-known-good data read from
+  // storage after a live refresh failed (see last-known-good.ts) — real,
+  // recent data, just not freshly re-fetched this instant. It was
+  // previously undampened (fell through to full weight), inconsistent with
+  // confidence.ts's own freshness weighting (live 1.0, delayed 0.75, stale
+  // 0.3) — a mild dampening here keeps intelligence available while still
+  // reflecting the gap, per "confidence should decrease based on age/
+  // freshness, but the intelligence should remain available."
+  if (factor.freshness === "delayed") contribution *= 0.85;
+  else if (factor.freshness === "stale") contribution *= 0.5;
   else if (factor.freshness === "estimated") contribution *= 0.7;
   else if (factor.freshness === "unavailable" || factor.freshness === "error") contribution = 0;
   return Number(contribution.toFixed(2));
@@ -69,14 +78,31 @@ export async function computeLiveMarketScore(symbol: string, mode: DataMode): Pr
   const confidence = computeConfidence(resolved);
   const now = new Date().toISOString();
 
+  // Real history from Neon (market_scores), not a hardcoded single point —
+  // this was the actual bug behind "the chart shows one point despite many
+  // stored rows": history was never queried at all, always just
+  // `[{date: now, score: totalScore}]`. Read before this run's own write
+  // (which happens below, fire-and-forget) so there's no race with it —
+  // the just-computed point is appended directly rather than re-read back.
+  // Best-effort: a DB outage must never break score computation or serving.
+  const priorHistory = await getScoreHistory(symbol, 24 * 30).catch(() => []);
+  const history: MarketScore["history"] = [...priorHistory].reverse().map((r) => ({ date: r.computedAt, score: r.totalScore }));
+  history.push({ date: now, score: totalScore });
+
+  // 24h change from the real stored history: the closest prior point at
+  // least ~24h old, not just the previous render.
+  const dayAgo = Date.now() - 24 * 3_600_000;
+  const priorPoint = [...history].reverse().find((p) => new Date(p.date).getTime() <= dayAgo);
+  const change24h = Number((totalScore - (priorPoint?.score ?? totalScore)).toFixed(2));
+
   const score: MarketScore = {
     symbol,
     totalScore,
     bias,
     confidence,
-    change24h: 0, // populated from DB history once enough rows exist — see db/queries/scores.ts
+    change24h,
     factors,
-    history: [{ date: now, score: totalScore }],
+    history,
     lastUpdated: now,
   };
 

@@ -18,11 +18,14 @@ vi.mock("@/services/market-data/fmp");
 vi.mock("@/services/market-data/cftc");
 vi.mock("@/services/market-data/fred");
 vi.mock("@/services/market-data/ig");
+vi.mock("@/db/queries/market-data");
+vi.mock("@/db/queries/scores");
 
 import * as fmp from "@/services/market-data/fmp";
 import * as cftc from "@/services/market-data/cftc";
 import * as fred from "@/services/market-data/fred";
 import * as ig from "@/services/market-data/ig";
+import { getLatestStoredPrice, getLatestStoredDailyCandles } from "@/db/queries/market-data";
 import { computeLiveMarketScore } from "./scoring-engine";
 
 const dailyCandles: NormalizedCandle[] = buildTrendingCandles({ bars: 260, startPrice: 1.24, trendPerBar: 0.0012, noise: 0.0008, seed: 55 });
@@ -155,8 +158,20 @@ function mockIgUnavailable() {
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetAllMocks();
+  // Default: no last-known-good data stored — tests that want to exercise
+  // the fallback set these explicitly. Without this, a live-call failure
+  // would try to hit a real (unconfigured-in-tests) database instead of
+  // taking the "never had data -> unavailable" path.
+  vi.mocked(getLatestStoredPrice).mockResolvedValue(null);
+  vi.mocked(getLatestStoredDailyCandles).mockResolvedValue(null);
+  // computeLiveMarketScore always calls recordScoreHistory(score).catch(...)
+  // — an auto-mocked fn returns undefined, and undefined has no .catch(),
+  // so this needs an explicit resolved-promise mock or every test throws.
+  const scores = await import("@/db/queries/scores");
+  vi.mocked(scores.recordScoreHistory).mockResolvedValue(undefined);
+  vi.mocked(scores.getScoreHistory).mockResolvedValue([]);
 });
 
 describe("GBPUSD end-to-end live pipeline", () => {
@@ -202,6 +217,36 @@ describe("GBPUSD end-to-end live pipeline", () => {
 
     // Confidence should be high with 8/9 factors live and only one honestly unavailable.
     expect(score.confidence).toBeGreaterThan(50);
+  });
+
+  it("builds score.history from real stored market_scores rows, not a hardcoded single point", async () => {
+    // The actual bug: history was always [{date: now, score: totalScore}]
+    // regardless of how many rows market_scores actually had — the DB read
+    // simply never happened.
+    mockFmpLive();
+    mockCftcLive();
+    mockFredLive();
+    mockIgUnavailable();
+    const scores = await import("@/db/queries/scores");
+    const oldPoint = { computedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(), totalScore: 0.5, bias: "Neutral", confidence: 40 };
+    const recentPoint = { computedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), totalScore: 1.0, bias: "Neutral", confidence: 55 };
+    // getScoreHistory's real query orders newest-first (desc) — the mock
+    // must match that ordering for the source's own .reverse() to be tested
+    // correctly, not just happen to pass on already-sorted input.
+    vi.mocked(scores.getScoreHistory).mockResolvedValue([recentPoint, oldPoint]);
+
+    const score = await computeLiveMarketScore("GBPUSD", "live");
+
+    // Real stored points, re-ordered oldest-first, plus the just-computed
+    // current point appended last.
+    expect(score.history).toHaveLength(3);
+    expect(score.history[0].date).toBe(oldPoint.computedAt);
+    expect(score.history[1].date).toBe(recentPoint.computedAt);
+    expect(score.history[2].score).toBe(score.totalScore);
+
+    // change24h computed from the closest real point at least ~24h old,
+    // not hardcoded to 0.
+    expect(score.change24h).toBe(Number((score.totalScore - oldPoint.totalScore).toFixed(2)));
   });
 
   it("never fabricates a value when every live provider fails — factors go unavailable and confidence drops", async () => {

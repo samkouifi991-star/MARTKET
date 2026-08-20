@@ -3,7 +3,7 @@ import { institutionalFactor as demoInstitutionalFactor } from "@/lib/scoring";
 import { computeInstitutionalMomentum, detectDivergenceSignal, DivergenceInput, SmartMoneySignal } from "@/lib/engines/smart-money";
 import * as cftc from "@/services/market-data/cftc";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
-import * as fmp from "@/services/market-data/fmp";
+import { getQuoteWithFallback } from "@/services/market-data/last-known-good";
 import { demoFallbackFactor, errorFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 
@@ -62,7 +62,7 @@ export type SmartMoneyResolution = {
 };
 
 export async function resolveSmartMoney(symbol: string): Promise<SmartMoneyResolution> {
-  const [positioning, sentiment, quote] = await Promise.all([cftc.getInstitutionalPositioning(symbol), retailSentiment.getRetailSentiment(symbol), fmp.getQuote(symbol)]);
+  const [positioning, sentiment, quote] = await Promise.all([cftc.getInstitutionalPositioning(symbol), retailSentiment.getRetailSentiment(symbol), getQuoteWithFallback(symbol)]);
 
   if (!positioning.value) {
     return { signal: "None", confidence: 0, explanation: "Institutional positioning data is unavailable for this market, so Smart Money cannot be evaluated.", provider: "cftc", freshness: "unavailable" };
@@ -75,7 +75,7 @@ export async function resolveSmartMoney(symbol: string): Promise<SmartMoneyResol
     netPositioning: pos.netPositioning,
     netWeeklyChange: pos.netWeeklyChange,
     percentile: pos.percentile3y ?? pos.percentile1y,
-    priceChangePct: quote.status === "live" && quote.value ? quote.value.changePct24h : 0,
+    priceChangePct: (quote.status === "live" || quote.status === "delayed" || quote.status === "stale") && quote.value ? quote.value.changePct24h : 0,
     retail: sentiment.status === "live" && sentiment.value ? { pctLong: sentiment.value.pctLong, pctShort: sentiment.value.pctShort, change7d: 0 } : null,
   };
   const divergence = detectDivergenceSignal(divergenceInput);

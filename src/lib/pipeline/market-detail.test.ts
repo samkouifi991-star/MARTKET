@@ -5,10 +5,12 @@ import type { NormalizedCandle } from "@/services/types";
 vi.mock("@/services/market-data/fmp");
 vi.mock("@/services/market-data/cftc");
 vi.mock("@/services/market-data/retail-sentiment");
+vi.mock("@/db/queries/market-data");
 
 import * as fmp from "@/services/market-data/fmp";
 import * as cftc from "@/services/market-data/cftc";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
+import { getLatestStoredPrice, getLatestStoredDailyCandles } from "@/db/queries/market-data";
 import { getLiveMarketDetail } from "./market-detail";
 
 const dailyCandles: NormalizedCandle[] = buildTrendingCandles({ bars: 260, startPrice: 1.24, trendPerBar: 0.0012, noise: 0.0008, seed: 55 });
@@ -90,6 +92,12 @@ function mockAllLive() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // Default: no last-known-good data stored — tests that want to exercise
+  // the fallback set these explicitly. Without this, a live-call failure
+  // would try to hit a real (unconfigured-in-tests) database instead of
+  // taking the "never had data -> unavailable" path.
+  vi.mocked(getLatestStoredPrice).mockResolvedValue(null);
+  vi.mocked(getLatestStoredDailyCandles).mockResolvedValue(null);
 });
 
 describe("getLiveMarketDetail", () => {

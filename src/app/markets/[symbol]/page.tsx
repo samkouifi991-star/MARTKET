@@ -93,7 +93,12 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
           )}
         </div>
         <div className="text-xs text-(--text-faint) text-right">
-          Last updated {formatRelative(score.lastUpdated)}
+          {/* The actual data timestamp, not the moment this page happened to
+              render — score.lastUpdated is set fresh on every computation
+              regardless of whether any underlying provider call actually
+              succeeded, which is exactly what made this always read "just
+              now" even during an FMP outage. */}
+          Last updated {formatRelative(demoMode ? score.lastUpdated : (live!.price.lastUpdated ?? score.lastUpdated))}
         </div>
       </div>
 

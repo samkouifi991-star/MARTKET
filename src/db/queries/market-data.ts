@@ -2,7 +2,13 @@
 // -> raw storage -> normalization -> ...). Every ingestion cron job writes
 // through these instead of touching Drizzle tables directly, so the upsert/
 // dedupe rules live in one place.
-import { sql } from "drizzle-orm";
+//
+// Read-side "latest stored" queries live here too (not just writes) — they
+// back the last-known-good fallback (see services/market-data/
+// last-known-good.ts): when a live provider call fails, the display/scoring
+// pipeline needs to read back exactly what was last actually stored, not
+// just append to it.
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import { marketPrices, marketCandles, institutionalPositioning, retailSentiment, economicIndicators, economicEvents, newsArticles } from "../schema";
 import { NormalizedCandle, NormalizedEconomicEvent, NormalizedNewsArticle, NormalizedQuote } from "@/services/types";
@@ -111,5 +117,44 @@ export async function insertNewsArticle(article: NormalizedNewsArticle, analysis
       reason: analysis.reason,
     })
     .onConflictDoNothing({ target: newsArticles.url });
+}
+
+export type StoredPrice = {
+  price: number;
+  changePct24h: number;
+  provider: string;
+  sourceUpdatedAt: Date | null;
+  fetchedAt: Date;
+};
+
+/** The single stored row for this symbol (market_prices is upserted, one
+ * row per symbol) — or null if there has never been one, the only case
+ * that should ever surface as UNAVAILABLE to a last-known-good fallback. */
+export async function getLatestStoredPrice(symbol: string): Promise<StoredPrice | null> {
+  const db = getDb();
+  const rows = await db.select().from(marketPrices).where(eq(marketPrices.symbol, symbol)).limit(1);
+  const r = rows[0];
+  if (!r) return null;
+  return { price: r.price, changePct24h: r.changePct24h, provider: r.provider, sourceUpdatedAt: r.sourceUpdatedAt, fetchedAt: r.fetchedAt };
+}
+
+export type StoredDailyCandles = { candles: NormalizedCandle[]; fetchedAt: Date };
+
+/** All stored daily candles for this symbol, oldest first, plus the most
+ * recent `fetched_at` across those rows (when we last successfully wrote
+ * any of them) — the timestamp a last-known-good fallback should report as
+ * "as of", not the moment this function happens to be called. */
+export async function getLatestStoredDailyCandles(symbol: string): Promise<StoredDailyCandles | null> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(marketCandles)
+    .where(and(eq(marketCandles.symbol, symbol), eq(marketCandles.timeframe, "1d")))
+    .orderBy(marketCandles.date);
+  if (rows.length === 0) return null;
+
+  const candles: NormalizedCandle[] = rows.map((r) => ({ date: r.date.toISOString(), open: r.open, high: r.high, low: r.low, close: r.close, volume: r.volume }));
+  const fetchedAt = rows.reduce((max, r) => (r.fetchedAt > max ? r.fetchedAt : max), rows[0].fetchedAt);
+  return { candles, fetchedAt };
 }
 

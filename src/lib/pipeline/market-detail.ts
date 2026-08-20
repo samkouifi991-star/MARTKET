@@ -23,7 +23,7 @@ import { formatPrice } from "@/lib/format";
 import { DataFreshness, Instrument, MarketScore, PriceData, SeasonalityStat } from "@/lib/types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 import * as cftc from "@/services/market-data/cftc";
-import * as fmp from "@/services/market-data/fmp";
+import { getQuoteWithFallback, getDailyCandlesWithFallback } from "@/services/market-data/last-known-good";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
 import { resolveSmartMoney } from "./positioning";
@@ -124,12 +124,27 @@ async function smartMoneyCard(symbol: string): Promise<CardResult<SmartMoneyCard
   };
 }
 
+// Live, or last-known-good stored data — real either way, distinct from
+// "nothing usable at all" (unavailable/error), which is the only case that
+// should render as unavailable per the last-known-good rule: never blank
+// the page just because the newest refresh failed while real stored data
+// still exists.
+function isUsable<T>(status: DataFreshness, value: T | null): boolean {
+  return (status === "live" || status === "delayed" || status === "stale") && value !== null;
+}
+
 async function seasonalityCard(symbol: string, mode: DataMode): Promise<CardResult<SeasonalityStat>> {
-  const history = await fmp.getDailyCandles(symbol, 20 * 365);
-  if (history.status === "live" && history.value) {
-    const stat = computeCurrentMonthStat(history.value);
+  const history = await getDailyCandlesWithFallback(symbol, 20 * 365);
+  if (isUsable(history.status, history.value)) {
+    const stat = computeCurrentMonthStat(history.value!);
     if (stat && stat.years >= MIN_YEARS_FOR_LIVE_SEASONALITY) {
-      return { data: stat, freshness: "live", source: `Historical daily closes (FMP) — ${stat.years}-year sample`, lastUpdated: history.sourceUpdatedAt };
+      const fromStorage = history.source.includes("last known good");
+      return {
+        data: stat,
+        freshness: history.status,
+        source: fromStorage ? `Historical daily closes (FMP) — ${stat.years}-year sample — last known good` : `Historical daily closes (FMP) — ${stat.years}-year sample`,
+        lastUpdated: history.sourceUpdatedAt,
+      };
     }
     if (allowsDemoFallback(mode, symbol)) {
       const instrument = getInstrument(symbol)!;
@@ -144,29 +159,38 @@ async function seasonalityCard(symbol: string, mode: DataMode): Promise<CardResu
   return { data: null, freshness: history.status === "error" ? "error" : "unavailable", source: "Historical daily closes (FMP)", lastUpdated: null, reason: history.error };
 }
 
-async function priceCard(symbol: string, mode: DataMode): Promise<CardResult<PriceData>> {
-  const [quote, technical] = await Promise.all([fmp.getQuote(symbol), fetchTechnicalTrend(symbol)]);
+// Worse of two freshness levels, for combining the price card's two inputs
+// (quote + daily candles) into one badge — live < delayed < stale.
+const FRESHNESS_RANK: Partial<Record<DataFreshness, number>> = { live: 0, delayed: 1, stale: 2 };
+function worseOf(a: DataFreshness, b: DataFreshness): DataFreshness {
+  return (FRESHNESS_RANK[b] ?? 0) > (FRESHNESS_RANK[a] ?? 0) ? b : a;
+}
 
-  if (quote.status === "live" && quote.value && technical.daily.status === "live" && technical.daily.value && technical.result) {
+async function priceCard(symbol: string, mode: DataMode): Promise<CardResult<PriceData>> {
+  const [quote, technical] = await Promise.all([getQuoteWithFallback(symbol), fetchTechnicalTrend(symbol)]);
+
+  if (isUsable(quote.status, quote.value) && isUsable(technical.daily.status, technical.daily.value) && technical.result) {
     const t = technical.result;
-    const series = technical.daily.value.map((c) => ({ date: c.date, price: c.close }));
+    const series = technical.daily.value!.map((c) => ({ date: c.date, price: c.close }));
+    const freshness = worseOf(quote.status, technical.daily.status);
+    const fromStorage = quote.source.includes("last known good") || technical.daily.source.includes("last known good");
     return {
       data: {
         symbol,
-        current: quote.value.price,
-        changePct24h: quote.value.changePct24h,
+        current: quote.value!.price,
+        changePct24h: quote.value!.changePct24h,
         series,
-        ema20: t.sma20 ?? quote.value.price,
-        sma50: t.sma50 ?? quote.value.price,
-        sma100: t.sma100 ?? quote.value.price,
-        sma200: t.sma200 ?? quote.value.price,
+        ema20: t.sma20 ?? quote.value!.price,
+        sma50: t.sma50 ?? quote.value!.price,
+        sma100: t.sma100 ?? quote.value!.price,
+        sma200: t.sma200 ?? quote.value!.price,
         rsi14: t.rsi14 ?? 50,
         adx14: t.adx14 ?? 0,
         roc10: t.roc10 ?? 0,
         structure: t.structure,
       },
-      freshness: "live",
-      source: "Financial Modeling Prep",
+      freshness,
+      source: fromStorage ? "Financial Modeling Prep — last known good" : "Financial Modeling Prep",
       lastUpdated: quote.sourceUpdatedAt,
     };
   }
@@ -174,7 +198,7 @@ async function priceCard(symbol: string, mode: DataMode): Promise<CardResult<Pri
     const instrument = getInstrument(symbol)!;
     return { data: generatePriceData(instrument), freshness: "estimated", source: "Simulated price engine (demo)", lastUpdated: new Date().toISOString() };
   }
-  const failure = quote.status !== "live" ? quote : technical.daily;
+  const failure = !isUsable(quote.status, quote.value) ? quote : technical.daily;
   return { data: null, freshness: failure.status === "error" ? "error" : "unavailable", source: "Financial Modeling Prep", lastUpdated: null, reason: failure.error ?? "Insufficient candle history to compute indicators" };
 }
 
