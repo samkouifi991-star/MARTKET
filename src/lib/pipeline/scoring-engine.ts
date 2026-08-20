@@ -57,6 +57,7 @@ export async function computeLiveMarketScore(symbol: string, mode: DataMode): Pr
       weight,
       explanation: factor.explanation,
       source: factor.source,
+      provider: factor.provider,
       freshness: factor.freshness,
       lastUpdated: factor.lastUpdated,
       nextUpdate: factor.nextUpdate,

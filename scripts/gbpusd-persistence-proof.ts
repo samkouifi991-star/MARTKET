@@ -29,6 +29,15 @@ function log(msg: string): void {
   console.log(`PERSIST_PROOF: ${msg}`);
 }
 
+function describeError(err: unknown): string {
+  if (err instanceof Error) {
+    const cause = (err as { cause?: unknown }).cause;
+    const causeMsg = cause instanceof Error ? ` | cause: ${cause.message}` : cause ? ` | cause: ${String(cause)}` : "";
+    return `${err.name}: ${err.message}${causeMsg}`;
+  }
+  return String(err);
+}
+
 async function main() {
   if (DATA_MODE === "demo") {
     log("SKIPPED — DATA_MODE is demo in this environment");
@@ -111,4 +120,4 @@ async function main() {
   log(quote.status === "live" && daily.status === "live" && latestScore[0] ? "RESULT SUCCESS" : "RESULT PARTIAL — see individual steps above");
 }
 
-main().catch((err) => log(`RESULT FAIL — ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`));
+main().catch((err) => log(`RESULT FAIL — ${describeError(err)}`));

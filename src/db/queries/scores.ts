@@ -24,7 +24,11 @@ export async function recordScoreHistory(score: MarketScore): Promise<void> {
       weight: f.weight,
       weightedScore: f.contribution,
       explanation: f.explanation,
-      provider: f.source,
+      // provider is the short code (varchar(32)) — was previously set to
+      // f.source (a long human-readable label, up to 45+ chars for some
+      // factors), which threw a real Postgres "value too long" error the
+      // first time this ever ran against a real, migrated database.
+      provider: f.provider ?? "unknown",
       source: f.source,
       status: f.freshness,
       sourceUpdatedAt: f.lastUpdated ? new Date(f.lastUpdated) : null,
