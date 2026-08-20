@@ -61,6 +61,15 @@ function logDiagnostic(executionId: string, step: string, detail: Record<string,
  * and this deployment architecture. */
 class MyfxbookSessionIncompatibleError extends Error {}
 
+/** Thrown when Myfxbook's own API cleanly rejects the login call itself
+ * (e.g. "Wrong email/password") — a well-formed "no" from the provider,
+ * not a network/parsing failure. Myfxbook is an OPTIONAL retail-sentiment
+ * source (see gbpusd-validation.ts's REQUIRED/OPTIONAL classification), so
+ * this is surfaced as unavailable, never as an alarming ERROR — whether the
+ * stored credentials are stale is something only a human can confirm (this
+ * app cannot read back a Vercel "sensitive" env var's value, by design). */
+class MyfxbookLoginRejectedError extends Error {}
+
 // URLSearchParams.set() already percent-encodes the value it's given
 // (spaces, @, +, etc. in an email/password all come out correctly encoded
 // in the resulting query string) — this is not something to hand-roll.
@@ -72,7 +81,7 @@ async function login(): Promise<string> {
   const res = await fetch(url.toString(), { next: { revalidate: 0 } });
   if (!res.ok) throw new Error(`Myfxbook login failed: ${res.status} ${res.statusText}`);
   const data = (await res.json()) as { error: boolean; message?: string; session?: string };
-  if (data.error || !data.session) throw new Error(`Myfxbook login rejected: ${data.message ?? "no session returned"}`);
+  if (data.error || !data.session) throw new MyfxbookLoginRejectedError(data.message ?? "no session returned");
   return data.session;
 }
 
@@ -209,6 +218,20 @@ async function getRetailSentiment(internalSymbol: string): Promise<Provenance<No
         "myfxbook",
         SOURCE,
         `Myfxbook rejected a freshly-issued session within the same execution as its own login (${err.message}) — not a credentials problem, a structural incompatibility between Myfxbook's session model and this serverless architecture. Treating Myfxbook as unavailable rather than retrying further; IG is already wired as a secondary retail-sentiment provider.`
+      );
+    }
+    if (err instanceof MyfxbookLoginRejectedError) {
+      // A clean, well-formed rejection from Myfxbook's own API (e.g. "Wrong
+      // email/password"), not a network/parsing failure — Myfxbook is an
+      // OPTIONAL dependency (see gbpusd-validation.ts), so this must not
+      // block or alarm as an ERROR. Whether the stored MYFXBOOK_EMAIL/
+      // MYFXBOOK_PASSWORD actually match the intended account is something
+      // only a human can confirm — this app cannot read back a Vercel
+      // "sensitive" env var's value once set, by design.
+      return unavailable(
+        "myfxbook",
+        SOURCE,
+        `Myfxbook's API rejected the configured login (${err.message}). This is an OPTIONAL dependency — confirm MYFXBOOK_EMAIL/MYFXBOOK_PASSWORD independently (e.g. logging into myfxbook.com with the same credentials) rather than retrying automatically. IG is already wired as an alternative retail-sentiment provider via the same RetailSentimentProvider interface.`
       );
     }
     return errorResult("myfxbook", SOURCE, err instanceof Error ? err.message : String(err));
