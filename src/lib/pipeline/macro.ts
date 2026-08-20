@@ -6,7 +6,23 @@ import * as fred from "@/services/market-data/fred";
 import { FredSeriesPoint } from "@/services/types";
 import { demoFallbackFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
-import { Instrument, ScoreFactorKey } from "@/lib/types";
+import { DataFreshness, Instrument, ScoreFactorKey } from "@/lib/types";
+
+// API availability and data freshness are separate concepts (see fred.ts):
+// a series can resolve successfully while being materially out of date
+// (the concrete case: GB CPI resolves fine but FRED's own data lags ~17
+// months). Stale/delayed data still contributes to the average — excluding
+// it entirely would silently drop real signal — but the worst freshness
+// among the indicators that actually contributed is carried up into the
+// factor's own freshness, so confidence.ts's existing freshness weighting
+// degrades it automatically instead of the factor claiming "live" for data
+// that isn't current.
+const FRESHNESS_SEVERITY: Partial<Record<DataFreshness, number>> = { live: 0, delayed: 1, stale: 2 };
+
+function worseFreshness(a: DataFreshness | null, b: DataFreshness): DataFreshness {
+  if (a === null) return b;
+  return (FRESHNESS_SEVERITY[b] ?? 0) > (FRESHNESS_SEVERITY[a] ?? 0) ? b : a;
+}
 
 const GROWTH_INDICATORS: FredIndicatorKey[] = ["realGdp", "gdpGrowth", "industrialProduction", "retailSales"];
 const INFLATION_INDICATORS: FredIndicatorKey[] = ["cpi", "coreCpi", "pce", "corePce", "ppi"];
@@ -16,13 +32,23 @@ function clamp(v: number, min = -10, max = 10): number {
   return Math.max(min, Math.min(max, v));
 }
 
-async function fetchCountryScores(country: string, indicators: FredIndicatorKey[]): Promise<CountryMacroScores> {
+type CountryMacroScoresWithFreshness = CountryMacroScores & { freshness: DataFreshness | null };
+
+async function fetchCountryScores(country: string, indicators: FredIndicatorKey[]): Promise<CountryMacroScoresWithFreshness> {
   const results = await Promise.all(indicators.map((key) => fred.getSeries(country, key)));
   const seriesByIndicator: Partial<Record<FredIndicatorKey, FredSeriesPoint[]>> = {};
+  let freshness: DataFreshness | null = null;
   results.forEach((r, i) => {
-    if (r.status === "live" && r.value) seriesByIndicator[indicators[i]] = r.value;
+    // live/delayed/stale all carry real data and contribute to the
+    // average; only unavailable/error (no usable series at all) are
+    // excluded. classifyFredFreshness() already ruled out garbage-old data
+    // being silently read as "live" — it isn't excluded, it's downgraded.
+    if ((r.status === "live" || r.status === "delayed" || r.status === "stale") && r.value) {
+      seriesByIndicator[indicators[i]] = r.value;
+      freshness = worseFreshness(freshness, r.status);
+    }
   });
-  return computeCountryMacroScores(seriesByIndicator);
+  return { ...computeCountryMacroScores(seriesByIndicator), freshness };
 }
 
 type MacroCategory = "growth" | "inflation" | "labor";
@@ -68,13 +94,15 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
       return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor(meta.key, source, `Insufficient verified FRED coverage for ${base} and/or ${quote} ${category} indicators`);
     }
 
+    const freshness = worseFreshness(baseScores.freshness, quoteScores.freshness ?? "live");
+    const staleNote = freshness !== "live" ? ` One or both sides include a ${freshness} series (real data, just not current) — confidence reflects this.` : "";
     return {
       key: meta.key,
       rawScore: differential,
-      explanation: `${base} ${meta.label} score ${baseVal! > 0 ? "+" : ""}${baseVal!.toFixed(1)} vs. ${quote} at ${quoteVal! > 0 ? "+" : ""}${quoteVal!.toFixed(1)} — evaluated as a differential between both economies from real FRED data, not in isolation.`,
+      explanation: `${base} ${meta.label} score ${baseVal! > 0 ? "+" : ""}${baseVal!.toFixed(1)} vs. ${quote} at ${quoteVal! > 0 ? "+" : ""}${quoteVal!.toFixed(1)} — evaluated as a differential between both economies from real FRED data, not in isolation.${staleNote}`,
       source,
       provider: "fred",
-      freshness: "live",
+      freshness,
       lastUpdated: new Date().toISOString(),
       nextUpdate: new Date().toISOString(),
     };
@@ -85,13 +113,14 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
   const usVal = category === "growth" ? usScores.growthScore : category === "labor" ? usScores.laborScore : usScores.inflationScore;
   if (usVal === null) return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor(meta.key, source, "Insufficient verified FRED coverage for US indicators");
 
+  const usFreshness = usScores.freshness ?? "live";
   return {
     key: meta.key,
     rawScore: clamp(usVal * weight),
-    explanation: `US ${meta.label} score is ${usVal > 0 ? "+" : ""}${usVal.toFixed(1)} (real FRED data), applied as a global risk-appetite proxy scaled for ${instrument.assetClass.toLowerCase()}.`,
+    explanation: `US ${meta.label} score is ${usVal > 0 ? "+" : ""}${usVal.toFixed(1)} (real FRED data), applied as a global risk-appetite proxy scaled for ${instrument.assetClass.toLowerCase()}.${usFreshness !== "live" ? ` Includes a ${usFreshness} series — confidence reflects this.` : ""}`,
     source,
     provider: "fred",
-    freshness: "live",
+    freshness: usFreshness,
     lastUpdated: new Date().toISOString(),
     nextUpdate: new Date().toISOString(),
   };
@@ -119,13 +148,14 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode)
       return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor("interestRates", source, `Missing verified policy-rate series for ${base} and/or ${quote}`);
     }
     const diff = clamp((baseRates.policyRate - quoteRates.policyRate) * 4);
+    const freshness = worseFreshness(baseRates.freshness, quoteRates.freshness);
     return {
       key: "interestRates",
       rawScore: diff,
-      explanation: `${base} policy rate ${baseRates.policyRate}% vs. ${quote} at ${quoteRates.policyRate}% — a ${(baseRates.policyRate - quoteRates.policyRate).toFixed(2)}pt differential (FRED).`,
+      explanation: `${base} policy rate ${baseRates.policyRate}% vs. ${quote} at ${quoteRates.policyRate}% — a ${(baseRates.policyRate - quoteRates.policyRate).toFixed(2)}pt differential (FRED).${freshness !== "live" ? ` One or both policy-rate series are ${freshness} — confidence reflects this.` : ""}`,
       source,
       provider: "fred",
-      freshness: "live",
+      freshness,
       lastUpdated: new Date().toISOString(),
       nextUpdate: new Date().toISOString(),
     };
@@ -140,20 +170,22 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode)
   return {
     key: "interestRates",
     rawScore: clamp(-trendSign * scale * 5),
-    explanation: `US policy rate is ${usRates.policyRate}% and ${trendSign > 0 ? "trending higher" : trendSign < 0 ? "trending lower" : "holding steady"} (FRED), weighing on rate-sensitive assets accordingly.`,
+    explanation: `US policy rate is ${usRates.policyRate}% and ${trendSign > 0 ? "trending higher" : trendSign < 0 ? "trending lower" : "holding steady"} (FRED), weighing on rate-sensitive assets accordingly.${usRates.freshness !== "live" ? ` Series is ${usRates.freshness} — confidence reflects this.` : ""}`,
     source,
     provider: "fred",
-    freshness: "live",
+    freshness: usRates.freshness,
     lastUpdated: new Date().toISOString(),
     nextUpdate: new Date().toISOString(),
   };
 }
 
-async function fetchLatestRates(country: string): Promise<{ policyRate: number | null; trend: number }> {
+async function fetchLatestRates(country: string): Promise<{ policyRate: number | null; trend: number; freshness: DataFreshness }> {
   const result = await fred.getSeries(country, "policyRate", 6);
-  if (result.status !== "live" || !result.value || result.value.length === 0) return { policyRate: null, trend: 0 };
+  if ((result.status !== "live" && result.status !== "delayed" && result.status !== "stale") || !result.value || result.value.length === 0) {
+    return { policyRate: null, trend: 0, freshness: "unavailable" };
+  }
   const points = result.value;
   const current = points[points.length - 1].value;
   const previous = points[0].value;
-  return { policyRate: current, trend: Math.sign(current - previous) };
+  return { policyRate: current, trend: Math.sign(current - previous), freshness: result.status };
 }

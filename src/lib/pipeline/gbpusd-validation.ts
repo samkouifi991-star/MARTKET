@@ -101,7 +101,8 @@ const MAX_AGE_MS = {
   positioning: 10 * 86_400_000, // matches cftc.ts's own FRESH_WINDOW_DAYS
   retailSentiment: 30 * 3_600_000,
   news: 30 * 3_600_000,
-  macro: 120 * 86_400_000, // quarterly/monthly series with real-world reporting lag
+  // FRED/macro rows use fred.classifyFredFreshness's per-indicator cadence
+  // windows directly (see below) instead of a flat age here.
 };
 
 function classifyByAge(snapshot: DatasetSnapshot, maxAgeMs: number): DataFreshness {
@@ -195,24 +196,47 @@ export async function getGbpusdValidationSnapshot(): Promise<GbpusdValidationRes
     const indicatorSnapshot = s.economicIndicators[key] ?? { count: 0, lastFetchedAt: null, latestSourceDate: null };
     const label = FRED_FACTOR_LABEL[indicatorKey] ?? indicatorKey;
     const dataset = `${country} ${FRED_DATASET_LABEL[indicatorKey] ?? indicatorKey}`;
-    rows.push(
-      meta?.verified
-        ? storageRow("FRED", dataset, "required", label, indicatorSnapshot, MAX_AGE_MS.macro, fredHealthKey(country, indicatorKey), healthByKey)
-        : {
-            provider: "FRED",
-            dataset,
-            importance: "required",
-            status: "unavailable",
-            lastFetch: null,
-            sourceTimestamp: null,
-            records: 0,
-            factorUsing: label,
-            detail: meta
-              ? `Series ${meta.id} not yet verified against the real FRED API — see npm run test:fred-verify. Unverified series never contribute to the score.`
-              : `No FRED series mapped for ${country} ${indicatorKey}.`,
-            nextScheduledRefresh: null,
-          }
-    );
+    const health = healthByKey.get(fredHealthKey(country, indicatorKey));
+
+    if (!meta?.verified) {
+      rows.push({
+        provider: "FRED",
+        dataset,
+        importance: "required",
+        status: "unavailable",
+        lastFetch: null,
+        sourceTimestamp: null,
+        records: 0,
+        factorUsing: label,
+        detail: meta
+          ? `Series ${meta.id} not yet verified against the real FRED API — see npm run test:fred-verify. Unverified series never contribute to the score.`
+          : `No FRED series mapped for ${country} ${indicatorKey}.`,
+        nextScheduledRefresh: null,
+      });
+      continue;
+    }
+
+    // API availability and data freshness are separate concepts (see
+    // fred.ts's classifyFredFreshness, same rule used by the live path) —
+    // per-indicator cadence, not the flat MAX_AGE_MS.macro window, so a
+    // technically-resolvable-but-months-old series (e.g. GB CPI) reads as
+    // stale/delayed here too, consistently with the live score.
+    const status: DataFreshness =
+      indicatorSnapshot.count === 0 || !indicatorSnapshot.latestSourceDate
+        ? "unavailable"
+        : fred.classifyFredFreshness(indicatorKey, indicatorSnapshot.latestSourceDate).freshness;
+    rows.push({
+      provider: "FRED",
+      dataset,
+      importance: "required",
+      status,
+      lastFetch: indicatorSnapshot.lastFetchedAt,
+      sourceTimestamp: indicatorSnapshot.latestSourceDate,
+      records: indicatorSnapshot.count,
+      factorUsing: label,
+      detail: detailFor(indicatorSnapshot, health),
+      nextScheduledRefresh: nextScheduledRefresh(fredHealthKey(country, indicatorKey)),
+    });
   }
 
   // IG — optional secondary retail-sentiment provider, no dedicated storage

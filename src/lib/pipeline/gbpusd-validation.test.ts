@@ -29,6 +29,10 @@ beforeEach(() => {
   vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
   vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
   vi.mocked(fred.getSeries).mockResolvedValue(down);
+  vi.mocked(fred.classifyFredFreshness).mockImplementation((_indicator, dateIso) => {
+    const ageDays = Math.round((Date.now() - new Date(dateIso).getTime()) / 86_400_000);
+    return { freshness: ageDays <= 60 ? "live" : ageDays <= 120 ? "delayed" : "stale", ageDays, cadence: "monthly" };
+  });
   vi.mocked(myfxbookProvider.getRetailSentiment).mockResolvedValue(down);
   vi.mocked(igProvider.getRetailSentiment).mockResolvedValue(down);
   vi.mocked(diagnoseMyfxbookConnection).mockResolvedValue({ loginSuccessful: false, sessionReceived: false, communityOutlookSuccessful: false, symbolFound: false, error: "MYFXBOOK_EMAIL / MYFXBOOK_PASSWORD not configured" });
