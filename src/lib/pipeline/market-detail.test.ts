@@ -149,7 +149,14 @@ describe("getLiveMarketDetail", () => {
     vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
 
-    const detail = await getLiveMarketDetail("NZDUSD", "hybrid");
+    // EURGBP: NZDUSD was promoted to STRICT_LIVE_SYMBOLS in the OANDA FX
+    // batch (along with USDCHF/GBPJPY), so EURGBP is now the ordinary,
+    // not-yet-promoted example. Unlike the scoring-engine's "institutional"
+    // factor (positioning.ts), this card's institutionalCard() has no
+    // CFTC-coverage gate of its own — it just falls back to demo data like
+    // price/seasonality, so "estimated" is still correct here even though
+    // EURGBP has no real CFTC contract.
+    const detail = await getLiveMarketDetail("EURGBP", "hybrid");
 
     expect(detail.price.freshness).toBe("estimated");
     expect(detail.institutional.freshness).toBe("estimated");

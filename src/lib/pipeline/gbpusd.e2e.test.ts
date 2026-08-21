@@ -300,14 +300,20 @@ describe("GBPUSD end-to-end live pipeline", () => {
     vi.mocked(fred.getSeries).mockResolvedValue(down);
     mockIgUnavailable();
 
-    // NZDUSD, not GBPUSD/EURUSD/USDCAD/etc: all of those are strict-live
-    // symbols with stricter no-fallback rules (see the next tests), so
-    // this proves an ordinary, not-yet-promoted market keeps the normal
-    // hybrid leniency.
-    const score = await computeLiveMarketScore("NZDUSD", "hybrid");
+    // EURGBP, not GBPUSD/EURUSD/USDCAD/etc: all of those (plus USDCHF/
+    // NZDUSD/GBPJPY as of the OANDA FX batch) are strict-live symbols with
+    // stricter no-fallback rules (see the next tests), so this proves an
+    // ordinary, not-yet-promoted market keeps the normal hybrid leniency.
+    const score = await computeLiveMarketScore("EURGBP", "hybrid");
 
-    const nonRetailFactors = score.factors.filter((f) => f.key !== "retailSentiment");
+    // institutional is excluded here too: EURGBP is a cross with no
+    // CFTC-reportable futures contract, so it resolves NOT_APPLICABLE
+    // unconditionally (see hasCftcCoverage in positioning.ts) regardless of
+    // mode or provider state — asserted separately below.
+    const nonRetailFactors = score.factors.filter((f) => f.key !== "retailSentiment" && f.key !== "institutional");
     expect(nonRetailFactors.every((f) => f.freshness === "estimated")).toBe(true);
+    const institutional = score.factors.find((f) => f.key === "institutional")!;
+    expect(institutional.freshness).toBe("not_applicable");
     // Retail sentiment has no demo-fallback path here because IG explicitly
     // has no epic for this market — hybrid must not invent a percentage either.
     const retail = score.factors.find((f) => f.key === "retailSentiment")!;

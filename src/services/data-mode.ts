@@ -85,7 +85,34 @@ export function allowsLiveProviders(): boolean {
 //               covers ^NDX or an alternative ticker before it can join a
 //               live batch; the corrected "NASDAQ-100 Consolidated" CFTC
 //               mapping (see symbol-map.ts) is still fixed and ready.
-const STRICT_LIVE_SYMBOLS = new Set<string>(["GBPUSD", "EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500", "AUDUSD", "USDCAD", "XAGUSD", "DJ30"]);
+// Fourth-phase batch (3 markets) — OANDA wired as FX's primary price/candle
+// provider (see market-data-router.ts), verified via a real end-to-end
+// computeLiveMarketScore() dry run (scripts/fx-promotion-pipeline-verify.ts)
+// on top of the earlier per-provider OANDA verification
+// (scripts/oanda-fx-market-data-verify.ts):
+//   USDCHF    — FX cross, OANDA price/Daily/H4/H1 candles verified, OANDA
+//               retail sentiment verified, CFTC (CHF futures) verified, US
+//               vs CH macro differential (CH FRED growth/labor series newly
+//               metadata-confirmed for this batch).
+//   NZDUSD    — FX cross, OANDA price/Daily/H4/H1 candles verified, OANDA
+//               retail sentiment verified, CFTC (NZD futures) verified, NZ
+//               vs US macro differential (NZ FRED series newly
+//               metadata-confirmed for this batch).
+//   GBPJPY    — FX cross, OANDA price/Daily/H4/H1 candles verified, OANDA
+//               retail sentiment verified, GB vs JP macro differential.
+//               Institutional Positioning correctly resolves NOT_APPLICABLE
+//               (no legitimate single-leg CFTC construction for this cross)
+//               rather than a fabricated value — confirmed in the real
+//               pipeline dry run, and NOT_APPLICABLE does not depress
+//               confidence the way UNAVAILABLE does.
+//
+// EURGBP and EURJPY are deliberately NOT added this batch. Their OANDA
+// price/candle coverage is equally solid, and EU FRED growth coverage was
+// verified alongside this batch (CLVMNACSCAB1GQEA19 / NAEXKP01EZQ657S in
+// fred-series.ts), but promotion for these two crosses is being held
+// pending a separate explicit decision — see the pipeline dry-run output
+// for their current (non-demo, non-promoted) factor behavior.
+const STRICT_LIVE_SYMBOLS = new Set<string>(["GBPUSD", "EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500", "AUDUSD", "USDCAD", "XAGUSD", "DJ30", "USDCHF", "NZDUSD", "GBPJPY"]);
 
 export function isStrictLiveSymbol(symbol: string): boolean {
   return STRICT_LIVE_SYMBOLS.has(symbol);
