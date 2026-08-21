@@ -49,6 +49,7 @@ import { CftcPositioningResult, isCftcReportWithinFreshnessLimit } from "./cftc"
 import { classifyFredFreshness } from "./fred";
 import { FredIndicatorKey } from "./fred-series";
 import { NormalizedRetailSentiment, classifyRetailSentimentFreshness } from "./retail-sentiment";
+import { getSymbolMapping } from "./symbol-map";
 import {
   getLatestStoredPrice,
   getLatestStoredDailyCandles,
@@ -220,7 +221,32 @@ export async function getFredSeriesWithFallback(country: string, indicator: Fred
 export async function getRetailSentimentFromStorage(symbol: string): Promise<Provenance<NormalizedRetailSentiment>> {
   const stored = await getLatestStoredRetailSentiment(symbol);
   if (!stored) {
-    return unavailable("oanda", "OANDA PositionBook", `No retail-sentiment observation has ever been stored for ${symbol} — the scheduled ingestion job (cron/retail-sentiment) populates this from OANDA/IG/Myfxbook; nothing has landed in Neon yet.`);
+    // Symbol-aware, not a generic "OANDA/IG/Myfxbook" list that implies all
+    // three might apply to every market — most markets only have one or two
+    // actually configured (see symbol-map.ts). Naming the real configured
+    // provider(s), and explicitly noting when OANDA has been checked and
+    // confirmed not to cover this instrument (e.g. metals — OANDA's
+    // PositionBook was verified live against XAU_USD/XAG_USD and does not
+    // return usable data), keeps this reading as an honest structural gap
+    // rather than "just hasn't refreshed yet" when it's actually stuck on
+    // the one remaining provider (Myfxbook) never having produced a real
+    // observation for this symbol.
+    const mapping = getSymbolMapping(symbol);
+    const configured: { label: string; provider: ProviderName }[] = [];
+    if (mapping?.oandaInstrument) configured.push({ label: "OANDA", provider: "oanda" });
+    if (mapping?.igEpic) configured.push({ label: "IG", provider: "ig" });
+    if (mapping?.myfxbookSymbol) configured.push({ label: "Myfxbook", provider: "myfxbook" });
+    const primaryProvider = configured[0]?.provider ?? "oanda";
+    const providerLabel = configured.length > 0 ? configured.map((c) => c.label).join(" / ") : "no provider";
+    const oandaNote =
+      !mapping?.oandaInstrument && (mapping?.igEpic || mapping?.myfxbookSymbol)
+        ? " OANDA's PositionBook has been verified against this instrument and does not provide usable coverage for it, so this factor depends entirely on the remaining configured provider(s) above."
+        : "";
+    return unavailable(
+      primaryProvider,
+      configured.length > 0 ? `${providerLabel} retail sentiment` : "Retail Sentiment",
+      `No retail-sentiment observation has ever been stored for ${symbol}. Configured provider(s) for this market: ${providerLabel}.${oandaNote} The scheduled ingestion job (cron/retail-sentiment) will populate this once one of them succeeds.`
+    );
   }
 
   // sourceUpdatedAt is the provider's own timestamp for this observation
