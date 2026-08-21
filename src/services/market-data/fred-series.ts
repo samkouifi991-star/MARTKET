@@ -127,6 +127,13 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     //     Market, fresh.
     cpi: { id: "JPNCPIALLMINMEI", verified: true },
     unemploymentRate: { id: "LRHUTTTTJPM156S", verified: true },
+    // Candidates found via fred-verify.ts's live search for the NIKKEI225
+    // batch (JP had no growth/policy-rate series configured at all) —
+    // same GB/AU/CA patterns (NGDPRSAXDCxxQ, NAEXKP01xxQ657S,
+    // IRSTCI01xxM156N). Not yet metadata-confirmed.
+    realGdp: { id: "NGDPRSAXDCJPQ", verified: false },
+    gdpGrowth: { id: "NAEXKP01JPQ657S", verified: false },
+    policyRate: { id: "IRSTCI01JPM156N", verified: false },
     yield10y: { id: "IRLTLT01JPM156N", verified: false },
   },
   CA: {
@@ -173,10 +180,40 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
   },
   NZ: {
     cpi: { id: "NZLCPIALLQINMEI", verified: false },
+    // Candidates found via fred-verify.ts's live search for the NZDUSD
+    // batch. unemploymentRate/policyRate follow the LRHUTTTTxx/IRSTCI01xx
+    // patterns already verified for GB/AU/CA/JP, but NZ's unemployment
+    // series in FRED is genuinely quarterly (real-world: Stats NZ's
+    // Household Labour Force Survey is quarterly, not monthly, unlike
+    // GB/AU/JP) — hence the "Q" not "M" in the ID despite the title text
+    // still reading "Monthly Unemployment Rate" (an OECD-source label
+    // quirk, not a wrong series). realGdp has no NGDPRSAXDCNZQ-style level
+    // series available; NZLGDPRQPSMEI is the closest real candidate —
+    // needs metadata confirmation of its actual units before trusting it
+    // as a level rather than a growth rate. Not yet metadata-confirmed.
+    realGdp: { id: "NZLGDPRQPSMEI", verified: false },
+    gdpGrowth: { id: "NAEXKP01NZQ657S", verified: false },
+    unemploymentRate: { id: "LRHUTTTTNZQ156S", verified: false },
+    policyRate: { id: "IRSTCI01NZM156N", verified: false },
   },
   CH: {
     cpi: { id: "CHECPIALLMINMEI", verified: false },
     policyRate: { id: "IRSTCI01CHM156N", verified: false },
+    // Candidates found via fred-verify.ts's live search for the USDCHF
+    // batch. gdpGrowth follows the established NAEXKP01xxQ657S pattern.
+    // realGdp has no NGDPRSAXDCCHQ-style level series available; FRED's
+    // CH real-GDP coverage instead uses Eurostat-style Chain-Linked-Volume
+    // naming (CLVMNACSAB1GQCH — "S" = seasonally adjusted, picked over the
+    // "SC"/"NS" variants for consistency with every other verified series
+    // here being seasonally adjusted). unemploymentRate has no
+    // LRHUTTTTCHM156S-style series either; the closest real candidate
+    // (LRUN64TTCHQ156S) is Quarterly and covers ages 15-64 rather than
+    // 15+, a genuinely different definition from GB/AU/CA/JP's series —
+    // flagged here so it's judged on its own metadata, not assumed
+    // identical. Not yet metadata-confirmed.
+    realGdp: { id: "CLVMNACSAB1GQCH", verified: false },
+    gdpGrowth: { id: "NAEXKP01CHQ657S", verified: false },
+    unemploymentRate: { id: "LRUN64TTCHQ156S", verified: false },
   },
 };
 

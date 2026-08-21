@@ -41,6 +41,26 @@ const SERIES_TO_CHECK: { country: string; indicator: string; id: string }[] = [
   { country: "CA", indicator: "unemploymentRate", id: "LRHUTTTTCAM156S" },
   { country: "AU", indicator: "cpi", id: "AUSCPIALLQINMEI" },
   { country: "AU", indicator: "unemploymentRate", id: "LRHUTTTTAUM156S" },
+  // JP growth/policy-rate: needed for NIKKEI225's full primary local
+  // macro model (JP already has cpi/unemploymentRate verified).
+  { country: "JP", indicator: "realGdp", id: "NGDPRSAXDCJPQ" },
+  { country: "JP", indicator: "gdpGrowth", id: "NAEXKP01JPQ657S" },
+  { country: "JP", indicator: "policyRate", id: "IRSTCI01JPM156N" },
+  // CH: needed for USDCHF PARTIAL->READY. cpi/policyRate were already
+  // configured but never actually metadata-confirmed — confirming them
+  // here for the first time alongside the new growth/labor candidates.
+  { country: "CH", indicator: "cpi", id: "CHECPIALLMINMEI" },
+  { country: "CH", indicator: "policyRate", id: "IRSTCI01CHM156N" },
+  { country: "CH", indicator: "realGdp", id: "CLVMNACSAB1GQCH" },
+  { country: "CH", indicator: "gdpGrowth", id: "NAEXKP01CHQ657S" },
+  { country: "CH", indicator: "unemploymentRate", id: "LRUN64TTCHQ156S" },
+  // NZ: needed for NZDUSD PARTIAL->READY. cpi was already configured but
+  // never metadata-confirmed.
+  { country: "NZ", indicator: "cpi", id: "NZLCPIALLQINMEI" },
+  { country: "NZ", indicator: "realGdp", id: "NZLGDPRQPSMEI" },
+  { country: "NZ", indicator: "gdpGrowth", id: "NAEXKP01NZQ657S" },
+  { country: "NZ", indicator: "unemploymentRate", id: "LRHUTTTTNZQ156S" },
+  { country: "NZ", indicator: "policyRate", id: "IRSTCI01NZM156N" },
 ];
 
 async function main() {
