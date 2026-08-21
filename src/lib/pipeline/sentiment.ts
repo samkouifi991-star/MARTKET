@@ -1,8 +1,8 @@
 import { getInstrument } from "@/lib/instruments";
 import { DEFAULT_RETAIL_SENTIMENT_CONFIG } from "@/lib/config";
-import { getRetailSentimentWithFallback } from "@/services/market-data/last-known-good";
+import { getRetailSentimentFromStorage } from "@/services/market-data/last-known-good";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
-import { errorFactor, notApplicableFactor, ResolvedFactor, unavailableFactor } from "./types";
+import { notApplicableFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { DataMode } from "@/services/data-mode";
 
 function clamp(v: number, min = -10, max = 10): number {
@@ -21,25 +21,23 @@ export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMo
 
   // A permanent, structural gap (this asset class has no configured
   // retail-sentiment provider at all — e.g. crypto/indices aren't covered
-  // by Myfxbook or IG today) is not the same thing as "the provider is
-  // temporarily down." Checking the symbol map before calling the provider
+  // by OANDA, IG, or Myfxbook today) is not the same thing as "the provider
+  // is temporarily down." Checking the symbol map before reading storage
   // means this never gets counted as a data-quality problem in confidence.
   const mapping = getSymbolMapping(symbol);
-  if (!mapping?.myfxbookSymbol && !mapping?.igEpic) {
-    return notApplicableFactor("retailSentiment", "Retail Sentiment", `no retail-sentiment provider (Myfxbook/IG) covers ${symbol} in the current provider set`);
+  if (!mapping?.oandaInstrument && !mapping?.igEpic && !mapping?.myfxbookSymbol) {
+    return notApplicableFactor("retailSentiment", "Retail Sentiment", `no retail-sentiment provider (OANDA/IG/Myfxbook) covers ${symbol} in the current provider set`);
   }
 
-  // Storage-first: tries the live provider first, falls back to the last
-  // stored snapshot (DELAYED/STALE) on a genuine failure — see
-  // last-known-good.ts. Remains UNAVAILABLE if no valid observation has
-  // ever existed for this symbol.
-  const sentiment = await getRetailSentimentWithFallback(symbol);
+  // Storage-first — reads Neon only, never a live provider call (OANDA must
+  // never be called from a page render; see last-known-good.ts's file
+  // header). Remains UNAVAILABLE if no valid observation has ever existed
+  // for this symbol.
+  const sentiment = await getRetailSentimentFromStorage(symbol);
   const SOURCE = sentiment.source;
-  const usable = (sentiment.status === "live" || sentiment.status === "delayed" || sentiment.status === "stale") && sentiment.value;
+  const usable = (sentiment.status === "delayed" || sentiment.status === "stale") && sentiment.value;
   if (!usable) {
-    return sentiment.status === "error"
-      ? errorFactor("retailSentiment", SOURCE, sentiment.error ?? "request failed")
-      : unavailableFactor("retailSentiment", SOURCE, sentiment.error ?? "Retail sentiment unavailable — no configured provider covers this market");
+    return unavailableFactor("retailSentiment", SOURCE, sentiment.error ?? "Retail sentiment unavailable — no stored observation exists yet for this market");
   }
 
   const { extremeLongThreshold, extremeShortThreshold } = DEFAULT_RETAIL_SENTIMENT_CONFIG;
@@ -55,7 +53,7 @@ export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMo
     raw = severity * 10;
     explanation = `${pctShort.toFixed(0)}% of retail traders are short (above the ${extremeShortThreshold}% extreme threshold), generating a contrarian bullish contribution that strengthens with how extreme positioning is.`;
   }
-  if (sentiment.source.includes("last known good")) explanation += ` Live refresh failed (${sentiment.error ?? "unavailable"}); showing the last successfully stored snapshot instead, not a live re-fetch.`;
+  if (sentiment.status === "stale") explanation += ` This reflects the last stored snapshot (${sentiment.fetchedAt}), older than the usual refresh window — the scheduled ingestion job has not refreshed it recently.`;
 
   return {
     key: "retailSentiment",

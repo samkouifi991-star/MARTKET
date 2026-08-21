@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("@/services/market-data/last-known-good");
-import { getPositioningWithFallback, getRetailSentimentWithFallback, getQuoteWithFallback } from "@/services/market-data/last-known-good";
+import { getPositioningWithFallback, getRetailSentimentFromStorage, getQuoteWithFallback } from "@/services/market-data/last-known-good";
 import { resolveInstitutionalFactor, resolveSmartMoney } from "./positioning";
 
 beforeEach(() => vi.resetAllMocks());
@@ -22,7 +22,7 @@ describe("resolveInstitutionalFactor / resolveSmartMoney — structural not_appl
     expect(result.freshness).toBe("not_applicable");
     expect(result.signal).toBe("None");
     expect(getPositioningWithFallback).not.toHaveBeenCalled();
-    expect(getRetailSentimentWithFallback).not.toHaveBeenCalled();
+    expect(getRetailSentimentFromStorage).not.toHaveBeenCalled();
     expect(getQuoteWithFallback).not.toHaveBeenCalled();
   });
 

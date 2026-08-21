@@ -22,7 +22,7 @@ import { computeCurrentMonthStat, computeHistoricalSampleDepth } from "@/lib/eng
 import { formatPrice } from "@/lib/format";
 import { DataFreshness, Instrument, MarketScore, PriceData, SeasonalityStat } from "@/lib/types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
-import { getQuoteWithFallback, getDailyCandlesWithFallback, getPositioningWithFallback, getRetailSentimentWithFallback } from "@/services/market-data/last-known-good";
+import { getQuoteWithFallback, getDailyCandlesWithFallback, getPositioningWithFallback, getRetailSentimentFromStorage } from "@/services/market-data/last-known-good";
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import { seasonalityDepthFreshness, worseOf } from "./types";
@@ -109,12 +109,13 @@ async function retailCard(symbol: string): Promise<CardResult<NormalizedRetailSe
   // configured provider for this asset class is a permanent, structural
   // gap, not a temporary outage.
   const mapping = getSymbolMapping(symbol);
-  if (!mapping?.myfxbookSymbol && !mapping?.igEpic) {
-    return { data: null, freshness: "not_applicable", source: "Retail Sentiment", lastUpdated: null, reason: `No retail-sentiment provider (Myfxbook/IG) covers ${symbol} in the current provider set` };
+  if (!mapping?.oandaInstrument && !mapping?.igEpic && !mapping?.myfxbookSymbol) {
+    return { data: null, freshness: "not_applicable", source: "Retail Sentiment", lastUpdated: null, reason: `No retail-sentiment provider (OANDA/IG/Myfxbook) covers ${symbol} in the current provider set` };
   }
-  // Storage-first: live provider first, falls back to the last stored
-  // snapshot (DELAYED/STALE) on failure — see last-known-good.ts.
-  const result = await getRetailSentimentWithFallback(symbol);
+  // Storage-first — reads Neon only, never a live provider call (see
+  // last-known-good.ts's file header on why OANDA is never called from a
+  // page render).
+  const result = await getRetailSentimentFromStorage(symbol);
   if (isUsable(result.status, result.value)) {
     return { data: result.value, freshness: result.status, source: result.source, lastUpdated: result.sourceUpdatedAt };
   }

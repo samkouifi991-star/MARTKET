@@ -69,7 +69,7 @@ export type ScoreFactor = {
   weight: number; // 0..1
   explanation: string;
   source: string; // human-readable label, e.g. "CFTC Traders in Financial Futures" — can be long
-  // Short provider code, e.g. "fmp"/"cftc"/"fred"/"myfxbook"/"demo"/"none" —
+  // Short provider code, e.g. "fmp"/"cftc"/"fred"/"oanda"/"ig"/"myfxbook"/"demo"/"none" —
   // distinct from `source` because the DB's factor_scores.provider column
   // is varchar(32) and several `source` labels exceed that; optional since
   // the demo generator (lib/scoring.ts) never persists to that table.

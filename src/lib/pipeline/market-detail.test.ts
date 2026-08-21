@@ -4,13 +4,11 @@ import type { NormalizedCandle } from "@/services/types";
 
 vi.mock("@/services/market-data/fmp");
 vi.mock("@/services/market-data/cftc");
-vi.mock("@/services/market-data/retail-sentiment");
 vi.mock("@/db/queries/market-data");
 
 import * as fmp from "@/services/market-data/fmp";
 import * as cftc from "@/services/market-data/cftc";
-import * as retailSentiment from "@/services/market-data/retail-sentiment";
-import { getLatestStoredPrice, getLatestStoredDailyCandles } from "@/db/queries/market-data";
+import { getLatestStoredPrice, getLatestStoredDailyCandles, getLatestStoredRetailSentiment } from "@/db/queries/market-data";
 import { getLiveMarketDetail } from "./market-detail";
 
 const dailyCandles: NormalizedCandle[] = buildTrendingCandles({ bars: 260, startPrice: 1.24, trendPerBar: 0.0012, noise: 0.0008, seed: 55 });
@@ -82,14 +80,16 @@ function mockAllLive() {
     },
   });
 
-  vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue({
-    provider: "myfxbook",
-    source: "Myfxbook Community Outlook",
-    status: "live",
-    fetchedAt: new Date().toISOString(),
-    sourceUpdatedAt: new Date().toISOString(),
-    nextExpectedUpdate: null,
-    value: { symbol: "GBPUSD", pctLong: 62, pctShort: 38 },
+  // Retail sentiment is read from storage only (see last-known-good.ts) —
+  // "live" isn't a state this path can produce, so a stored row a few
+  // minutes old is the realistic "everything succeeded" fixture, and the
+  // resulting freshness is "delayed", not "live".
+  vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({
+    pctLong: 62,
+    pctShort: 38,
+    provider: "oanda",
+    source: "OANDA PositionBook",
+    fetchedAt: new Date(),
   });
 }
 
@@ -101,6 +101,7 @@ beforeEach(() => {
   // taking the "never had data -> unavailable" path.
   vi.mocked(getLatestStoredPrice).mockResolvedValue(null);
   vi.mocked(getLatestStoredDailyCandles).mockResolvedValue(null);
+  vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue(null);
 });
 
 describe("getLiveMarketDetail", () => {
@@ -113,7 +114,7 @@ describe("getLiveMarketDetail", () => {
     expect(detail.price.data?.current).toBeGreaterThan(0);
     expect(detail.institutional.freshness).toBe("live");
     expect(detail.institutional.data?.classification).toBe("Asset Manager");
-    expect(detail.retail.freshness).toBe("live");
+    expect(detail.retail.freshness).toBe("delayed");
     expect(detail.retail.data?.pctLong).toBe(62);
     expect(detail.smartMoney.freshness).toBe("live");
     expect(detail.seasonality.freshness).toBe("live");
@@ -125,7 +126,8 @@ describe("getLiveMarketDetail", () => {
     vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
     vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
-    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
+    // getLatestStoredRetailSentiment already defaults to null in beforeEach
+    // — retail sentiment has no live call to fail, just no stored row.
 
     const detail = await getLiveMarketDetail("GBPUSD", "live");
 
@@ -145,7 +147,6 @@ describe("getLiveMarketDetail", () => {
     vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
     vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
-    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
 
     const detail = await getLiveMarketDetail("NZDUSD", "hybrid");
 
@@ -162,7 +163,6 @@ describe("getLiveMarketDetail", () => {
     vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
     vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
-    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
 
     const detail = await getLiveMarketDetail("GBPUSD", "hybrid");
 

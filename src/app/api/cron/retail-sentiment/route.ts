@@ -1,8 +1,19 @@
-// Retail sentiment — every 15-60 minutes. Uses the RetailSentimentProvider
-// combinator (Myfxbook primary, IG secondary/optional), so this job never
-// hardcodes a specific provider. Only runs for instruments at least one
-// provider covers; everything else is correctly absent from coverage rather
-// than attempted and failing.
+// Retail sentiment — the ONLY place a retail-sentiment provider is ever
+// called live (page renders and the scoring engine read Neon only, via
+// getRetailSentimentFromStorage — see last-known-good.ts). Uses the
+// RetailSentimentProvider combinator (OANDA primary, IG secondary/optional,
+// Myfxbook fallback-only — see retail-sentiment/index.ts), so this job
+// never hardcodes a specific provider. Only runs for instruments at least
+// one provider covers; everything else is correctly absent from coverage
+// rather than attempted and failing.
+//
+// Cadence: intended to run roughly every 30-60 minutes (OANDA PositionBook
+// updates far more often than once a day), but this project's Vercel plan
+// is Hobby tier, which blocks sub-daily cron schedules entirely (see
+// gbpusd-validation.ts's CRON_SCHEDULE comment) — so vercel.json keeps this
+// on the same once-daily cadence as every other cron job until the plan
+// changes. Revisit the schedule there if/when a higher Vercel plan lifts
+// that restriction.
 import { NextRequest, NextResponse } from "next/server";
 import { INSTRUMENTS } from "@/lib/instruments";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
@@ -16,7 +27,7 @@ export async function GET(req: NextRequest) {
 
   const symbols = INSTRUMENTS.filter((i) => {
     const mapping = getSymbolMapping(i.symbol);
-    return Boolean(mapping?.myfxbookSymbol || mapping?.igEpic);
+    return Boolean(mapping?.oandaInstrument || mapping?.igEpic || mapping?.myfxbookSymbol);
   }).map((i) => i.symbol);
   if (symbols.length === 0) {
     return NextResponse.json({ job: "retail-sentiment", okCount: 0, failCount: 0, note: "No instruments have retail-sentiment coverage yet" });

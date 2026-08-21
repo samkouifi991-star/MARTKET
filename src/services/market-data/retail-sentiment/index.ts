@@ -1,18 +1,24 @@
 // Single entry point the scoring engine and UI use for retail sentiment.
-// Callers must never import myfxbook.ts or ig-provider.ts (or ig.ts)
-// directly — this is the only place that knows Myfxbook is primary and IG
-// is a secondary/optional provider, so a future third provider (or a
-// reordering) never requires touching the pipeline or UI.
+// Callers must never import oanda.ts, myfxbook.ts, or ig-provider.ts (or
+// ig.ts) directly — this is the only place that knows the provider
+// priority order, so a future reordering or new provider never requires
+// touching the pipeline or UI.
 import { Provenance } from "../../types";
+import { oandaProvider } from "./oanda";
 import { myfxbookProvider } from "./myfxbook";
 import { igProvider } from "./ig-provider";
 import { NormalizedRetailSentiment, RetailSentimentProvider } from "./types";
 
 export type { NormalizedRetailSentiment, RetailSentimentProvider } from "./types";
 
-// Priority order: Myfxbook (primary MVP source) first, IG (optional,
-// requires confirmed epic + credentials) second.
-export const RETAIL_SENTIMENT_PROVIDERS: RetailSentimentProvider[] = [myfxbookProvider, igProvider];
+// Priority order: OANDA PositionBook (primary — see oanda.ts) first, IG
+// (secondary/optional, requires a confirmed epic + credentials) second,
+// Myfxbook last as a fallback-only source — its session/auth flow proved
+// unreliable for this deployment (see myfxbook.ts), so it's no longer
+// primary, but stays wired in rather than deleted in case OANDA and IG are
+// both ever unavailable. None of these being configured/covering a symbol
+// ever blocks the pipeline — the combinator below just moves to the next.
+export const RETAIL_SENTIMENT_PROVIDERS: RetailSentimentProvider[] = [oandaProvider, igProvider, myfxbookProvider];
 
 export async function getRetailSentiment(symbol: string): Promise<Provenance<NormalizedRetailSentiment>> {
   let best: Provenance<NormalizedRetailSentiment> | null = null;

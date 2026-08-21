@@ -17,7 +17,16 @@
 // `myfxbookSymbol` follows Myfxbook's plain FX-broker-style tickers
 // (high-confidence for majors/crosses/gold/silver) but is likewise not yet
 // confirmed against a live get-community-outlook.json response — see
-// retail-sentiment/myfxbook.ts.
+// retail-sentiment/myfxbook.ts. Myfxbook is no longer the primary retail-
+// sentiment source (its session/auth flow proved unreliable for this
+// deployment) — see retail-sentiment/index.ts for the current priority
+// order (OANDA, then IG, then Myfxbook as a fallback-only last resort).
+// `oandaInstrument` follows OANDA's official v20 REST API instrument-naming
+// convention (BASE_QUOTE, e.g. "GBP_USD") for the FX majors/crosses OANDA's
+// PositionBook endpoint documents coverage for — high-confidence since the
+// convention is stable and publicly documented, but like every other
+// provider identifier here, not yet confirmed against a live response; see
+// retail-sentiment/oanda.ts.
 
 export type CftcReportType = "financial_futures" | "disaggregated" | "legacy";
 
@@ -40,28 +49,35 @@ export type SymbolMapping = {
   /** Myfxbook Community Outlook symbol — Myfxbook uses plain FX-broker-style
    * tickers (e.g. "GBPUSD") for majors/crosses and covers a handful of metals,
    * so this is high-confidence for those and null elsewhere. Still unverified
-   * against a live get-community-outlook.json response — see myfxbook.ts. */
+   * against a live get-community-outlook.json response — see myfxbook.ts.
+   * Myfxbook is fallback-only now (see retail-sentiment/index.ts); this
+   * field stays populated so it still works if OANDA/IG are ever both down. */
   myfxbookSymbol: string | null;
+  /** OANDA v20 instrument name for PositionBook retail-sentiment lookups
+   * (e.g. "GBP_USD"). Populated only for the FX majors/crosses OANDA's
+   * PositionBook documents coverage for; null elsewhere — never guessed for
+   * an instrument without confirmed coverage. See retail-sentiment/oanda.ts. */
+  oandaInstrument: string | null;
 };
 
 export const SYMBOL_MAP: Record<string, SymbolMapping> = {
   // ---- Forex — CFTC Traders in Financial Futures (currency futures) ----
-  EURUSD: { symbol: "EURUSD", fmp: { ticker: "EURUSD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "EURO FX - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "EURUSD" },
-  GBPUSD: { symbol: "GBPUSD", fmp: { ticker: "GBPUSD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "BRITISH POUND STERLING - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "GBPUSD" },
-  USDJPY: { symbol: "USDJPY", fmp: { ticker: "USDJPY", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "JAPANESE YEN - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "USDJPY" },
-  USDCHF: { symbol: "USDCHF", fmp: { ticker: "USDCHF", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "SWISS FRANC - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "USDCHF" },
-  AUDUSD: { symbol: "AUDUSD", fmp: { ticker: "AUDUSD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "AUSTRALIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "AUDUSD" },
-  NZDUSD: { symbol: "NZDUSD", fmp: { ticker: "NZDUSD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "NEW ZEALAND DOLLAR - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "NZDUSD" },
-  USDCAD: { symbol: "USDCAD", fmp: { ticker: "USDCAD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "CANADIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "USDCAD" },
+  EURUSD: { symbol: "EURUSD", fmp: { ticker: "EURUSD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "EURO FX - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "EURUSD", oandaInstrument: "EUR_USD" },
+  GBPUSD: { symbol: "GBPUSD", fmp: { ticker: "GBPUSD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "BRITISH POUND STERLING - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "GBPUSD", oandaInstrument: "GBP_USD" },
+  USDJPY: { symbol: "USDJPY", fmp: { ticker: "USDJPY", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "JAPANESE YEN - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "USDJPY", oandaInstrument: "USD_JPY" },
+  USDCHF: { symbol: "USDCHF", fmp: { ticker: "USDCHF", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "SWISS FRANC - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "USDCHF", oandaInstrument: "USD_CHF" },
+  AUDUSD: { symbol: "AUDUSD", fmp: { ticker: "AUDUSD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "AUSTRALIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "AUDUSD", oandaInstrument: "AUD_USD" },
+  NZDUSD: { symbol: "NZDUSD", fmp: { ticker: "NZDUSD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "NEW ZEALAND DOLLAR - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "NZDUSD", oandaInstrument: "NZD_USD" },
+  USDCAD: { symbol: "USDCAD", fmp: { ticker: "USDCAD", kind: "forex" }, cftc: { reportType: "financial_futures", reportName: "CANADIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: "USDCAD", oandaInstrument: "USD_CAD" },
   // Crosses (EURGBP, EURJPY, GBPJPY) have no direct CFTC futures contract —
   // COT coverage is intentionally null; the UI must show institutional
   // positioning as unavailable for these rather than approximate it.
-  EURGBP: { symbol: "EURGBP", fmp: { ticker: "EURGBP", kind: "forex" }, cftc: null, igEpic: null, myfxbookSymbol: "EURGBP" },
-  EURJPY: { symbol: "EURJPY", fmp: { ticker: "EURJPY", kind: "forex" }, cftc: null, igEpic: null, myfxbookSymbol: "EURJPY" },
-  GBPJPY: { symbol: "GBPJPY", fmp: { ticker: "GBPJPY", kind: "forex" }, cftc: null, igEpic: null, myfxbookSymbol: "GBPJPY" },
+  EURGBP: { symbol: "EURGBP", fmp: { ticker: "EURGBP", kind: "forex" }, cftc: null, igEpic: null, myfxbookSymbol: "EURGBP", oandaInstrument: "EUR_GBP" },
+  EURJPY: { symbol: "EURJPY", fmp: { ticker: "EURJPY", kind: "forex" }, cftc: null, igEpic: null, myfxbookSymbol: "EURJPY", oandaInstrument: "EUR_JPY" },
+  GBPJPY: { symbol: "GBPJPY", fmp: { ticker: "GBPJPY", kind: "forex" }, cftc: null, igEpic: null, myfxbookSymbol: "GBPJPY", oandaInstrument: "GBP_JPY" },
 
   // ---- Indices — CFTC Traders in Financial Futures (equity index futures) ----
-  SPX500: { symbol: "SPX500", fmp: { ticker: "^GSPC", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
+  SPX500: { symbol: "SPX500", fmp: { ticker: "^GSPC", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
   // NAS100/DJ30: cftc-verify.ts flagged the previous all-caps reportName
   // values ("NASDAQ-100 CONSOLIDATED", "DJIA CONSOLIDATED") as resolving
   // via discovery but returning 0 rows from an exact-match fetch — found
@@ -90,26 +106,26 @@ export const SYMBOL_MAP: Record<string, SymbolMapping> = {
   //   3. NAS100 is deliberately left unsupported
   // The CFTC mapping below is unaffected by any of this and stays fixed
   // and verified, ready for whichever price source is eventually chosen.
-  NAS100: { symbol: "NAS100", fmp: { ticker: "^NDX", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "NASDAQ-100 Consolidated - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
-  DJ30: { symbol: "DJ30", fmp: { ticker: "^DJI", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "DJIA Consolidated - CHICAGO BOARD OF TRADE" }, igEpic: null, myfxbookSymbol: null },
-  RUT2000: { symbol: "RUT2000", fmp: { ticker: "^RUT", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "RUSSELL E-MINI - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
+  NAS100: { symbol: "NAS100", fmp: { ticker: "^NDX", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "NASDAQ-100 Consolidated - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
+  DJ30: { symbol: "DJ30", fmp: { ticker: "^DJI", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "DJIA Consolidated - CHICAGO BOARD OF TRADE" }, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
+  RUT2000: { symbol: "RUT2000", fmp: { ticker: "^RUT", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "RUSSELL E-MINI - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
   // DAX/FTSE/Nikkei futures are not CFTC-reportable (traded on Eurex/ICE
   // Europe/OSE, outside CFTC jurisdiction) — no COT coverage exists for these.
-  DAX40: { symbol: "DAX40", fmp: { ticker: "^GDAXI", kind: "index" }, cftc: null, igEpic: null, myfxbookSymbol: null },
-  FTSE100: { symbol: "FTSE100", fmp: { ticker: "^FTSE", kind: "index" }, cftc: null, igEpic: null, myfxbookSymbol: null },
-  NIKKEI225: { symbol: "NIKKEI225", fmp: { ticker: "^N225", kind: "index" }, cftc: null, igEpic: null, myfxbookSymbol: null },
+  DAX40: { symbol: "DAX40", fmp: { ticker: "^GDAXI", kind: "index" }, cftc: null, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
+  FTSE100: { symbol: "FTSE100", fmp: { ticker: "^FTSE", kind: "index" }, cftc: null, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
+  NIKKEI225: { symbol: "NIKKEI225", fmp: { ticker: "^N225", kind: "index" }, cftc: null, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
 
   // ---- Commodities — CFTC Disaggregated (metals/energy) ----
-  XAUUSD: { symbol: "XAUUSD", fmp: { ticker: "GCUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "GOLD - COMMODITY EXCHANGE INC." }, igEpic: null, myfxbookSymbol: "XAUUSD" },
-  XAGUSD: { symbol: "XAGUSD", fmp: { ticker: "SIUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "SILVER - COMMODITY EXCHANGE INC." }, igEpic: null, myfxbookSymbol: "XAGUSD" },
-  COPPER: { symbol: "COPPER", fmp: { ticker: "HGUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "COPPER-GRADE #1 - COMMODITY EXCHANGE INC." }, igEpic: null, myfxbookSymbol: null },
-  XPTUSD: { symbol: "XPTUSD", fmp: { ticker: "PLUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "PLATINUM - NEW YORK MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
-  WTIUSD: { symbol: "WTIUSD", fmp: { ticker: "CLUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "WTI FINANCIAL CRUDE OIL - NEW YORK MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
-  NATGAS: { symbol: "NATGAS", fmp: { ticker: "NGUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "NATURAL GAS - NEW YORK MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
+  XAUUSD: { symbol: "XAUUSD", fmp: { ticker: "GCUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "GOLD - COMMODITY EXCHANGE INC." }, igEpic: null, myfxbookSymbol: "XAUUSD", oandaInstrument: null },
+  XAGUSD: { symbol: "XAGUSD", fmp: { ticker: "SIUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "SILVER - COMMODITY EXCHANGE INC." }, igEpic: null, myfxbookSymbol: "XAGUSD", oandaInstrument: null },
+  COPPER: { symbol: "COPPER", fmp: { ticker: "HGUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "COPPER-GRADE #1 - COMMODITY EXCHANGE INC." }, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
+  XPTUSD: { symbol: "XPTUSD", fmp: { ticker: "PLUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "PLATINUM - NEW YORK MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
+  WTIUSD: { symbol: "WTIUSD", fmp: { ticker: "CLUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "WTI FINANCIAL CRUDE OIL - NEW YORK MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
+  NATGAS: { symbol: "NATGAS", fmp: { ticker: "NGUSD", kind: "commodity" }, cftc: { reportType: "disaggregated", reportName: "NATURAL GAS - NEW YORK MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
 
   // ---- Crypto — CFTC Traders in Financial Futures (CME Bitcoin/Ether futures) ----
-  BTCUSD: { symbol: "BTCUSD", fmp: { ticker: "BTCUSD", kind: "crypto" }, cftc: { reportType: "financial_futures", reportName: "BITCOIN - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
-  ETHUSD: { symbol: "ETHUSD", fmp: { ticker: "ETHUSD", kind: "crypto" }, cftc: null, igEpic: null, myfxbookSymbol: null },
+  BTCUSD: { symbol: "BTCUSD", fmp: { ticker: "BTCUSD", kind: "crypto" }, cftc: { reportType: "financial_futures", reportName: "BITCOIN - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
+  ETHUSD: { symbol: "ETHUSD", fmp: { ticker: "ETHUSD", kind: "crypto" }, cftc: null, igEpic: null, myfxbookSymbol: null, oandaInstrument: null },
 };
 
 export function getSymbolMapping(symbol: string): SymbolMapping | undefined {

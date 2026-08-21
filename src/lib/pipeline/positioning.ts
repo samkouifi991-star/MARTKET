@@ -2,7 +2,7 @@ import { getInstrument } from "@/lib/instruments";
 import { institutionalFactor as demoInstitutionalFactor } from "@/lib/scoring";
 import { computeInstitutionalMomentum, detectDivergenceSignal, DivergenceInput, SmartMoneySignal } from "@/lib/engines/smart-money";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
-import { getPositioningWithFallback, getQuoteWithFallback, getRetailSentimentWithFallback } from "@/services/market-data/last-known-good";
+import { getPositioningWithFallback, getQuoteWithFallback, getRetailSentimentFromStorage } from "@/services/market-data/last-known-good";
 import { demoFallbackFactor, errorFactor, notApplicableFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 
@@ -87,7 +87,7 @@ export async function resolveSmartMoney(symbol: string): Promise<SmartMoneyResol
       freshness: "not_applicable",
     };
   }
-  const [positioning, sentiment, quote] = await Promise.all([getPositioningWithFallback(symbol), getRetailSentimentWithFallback(symbol), getQuoteWithFallback(symbol)]);
+  const [positioning, sentiment, quote] = await Promise.all([getPositioningWithFallback(symbol), getRetailSentimentFromStorage(symbol), getQuoteWithFallback(symbol)]);
 
   if (!positioning.value) {
     return { signal: "None", confidence: 0, explanation: "Institutional positioning data is unavailable for this market, so Smart Money cannot be evaluated.", provider: "cftc", freshness: "unavailable" };

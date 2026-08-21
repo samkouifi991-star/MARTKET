@@ -3,13 +3,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 vi.mock("./fmp");
 vi.mock("./cftc");
 vi.mock("./fred");
-vi.mock("./retail-sentiment");
 vi.mock("@/db/queries/market-data");
 
 import * as fmp from "./fmp";
 import * as cftc from "./cftc";
 import * as fred from "./fred";
-import * as retailSentiment from "./retail-sentiment";
 import {
   getLatestStoredPrice,
   getLatestStoredDailyCandles,
@@ -22,7 +20,7 @@ import {
   getDailyCandlesWithFallback,
   getPositioningWithFallback,
   getFredSeriesWithFallback,
-  getRetailSentimentWithFallback,
+  getRetailSentimentFromStorage,
 } from "./last-known-good";
 import { CftcPositioningResult } from "./cftc";
 
@@ -218,46 +216,32 @@ describe("getFredSeriesWithFallback", () => {
   });
 });
 
-describe("getRetailSentimentWithFallback", () => {
-  it("passes through the live result unchanged when the live call succeeds", async () => {
-    const live = { provider: "myfxbook" as const, source: "Myfxbook Community Outlook", status: "live" as const, fetchedAt: "now", sourceUpdatedAt: "now", nextExpectedUpdate: null, value: { symbol: "EURUSD", pctLong: 62, pctShort: 38 } };
-    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(live);
+describe("getRetailSentimentFromStorage — reads Neon only, never calls a retail-sentiment provider live", () => {
+  it("classifies a recently-stored OANDA snapshot as DELAYED", async () => {
+    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "oanda", source: "OANDA PositionBook", fetchedAt: hoursAgo(2) });
 
-    const result = await getRetailSentimentWithFallback("EURUSD");
-
-    expect(result).toBe(live);
-    expect(getLatestStoredRetailSentiment).not.toHaveBeenCalled();
-  });
-
-  it("falls back to a recently-stored snapshot as DELAYED when the live call fails", async () => {
-    const down = { provider: "myfxbook" as const, source: "Myfxbook Community Outlook", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "request failed" };
-    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
-    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "myfxbook", source: "Myfxbook Community Outlook", fetchedAt: hoursAgo(2) });
-
-    const result = await getRetailSentimentWithFallback("EURUSD");
+    const result = await getRetailSentimentFromStorage("EURUSD");
 
     expect(result.status).toBe("delayed");
+    expect(result.provider).toBe("oanda");
+    expect(result.source).toBe("OANDA PositionBook");
     expect(result.value?.pctLong).toBe(58);
   });
 
   it("classifies an older stored snapshot as STALE, not DELAYED", async () => {
-    const down = { provider: "myfxbook" as const, source: "Myfxbook Community Outlook", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "request failed" };
-    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
-    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "myfxbook", source: "Myfxbook Community Outlook", fetchedAt: hoursAgo(200) });
+    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "oanda", source: "OANDA PositionBook", fetchedAt: hoursAgo(200) });
 
-    const result = await getRetailSentimentWithFallback("EURUSD");
+    const result = await getRetailSentimentFromStorage("EURUSD");
 
     expect(result.status).toBe("stale");
   });
 
   it("remains UNAVAILABLE when no valid observation has ever existed — never fabricates a snapshot", async () => {
-    const down = { provider: "myfxbook" as const, source: "Myfxbook Community Outlook", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "no coverage" };
-    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
     vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue(null);
 
-    const result = await getRetailSentimentWithFallback("BTCUSD");
+    const result = await getRetailSentimentFromStorage("BTCUSD");
 
-    expect(result).toBe(down);
     expect(result.status).toBe("unavailable");
+    expect(result.value).toBeNull();
   });
 });

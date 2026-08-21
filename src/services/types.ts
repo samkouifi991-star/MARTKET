@@ -1,6 +1,6 @@
 import { DataFreshness } from "@/lib/types";
 
-export type ProviderName = "fmp" | "cftc" | "fred" | "ig" | "myfxbook" | "demo";
+export type ProviderName = "fmp" | "cftc" | "fred" | "ig" | "myfxbook" | "oanda" | "demo";
 
 /** Every value pulled through the live pipeline carries this alongside its
  * normalized value, so the UI can show exactly where a number came from and

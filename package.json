@@ -27,6 +27,7 @@
     "test:fred-verify": "tsx scripts/fred-verify.ts",
     "test:fred-metadata": "tsx scripts/fred-metadata-check.ts",
     "test:fmp-rate-limit-diagnose": "tsx scripts/fmp-rate-limit-diagnose.ts",
+    "test:oanda-verify": "tsx scripts/oanda-verify.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

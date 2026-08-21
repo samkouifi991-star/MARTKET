@@ -26,13 +26,20 @@
 // observation-date) — a live call that comes back "stale" is still the
 // freshest data obtainable, strictly at least as fresh as anything in
 // storage, so only a genuine fetch failure (unavailable/error) triggers a
-// storage read for those two (see liveFetchFailed below). Retail sentiment
-// has no such concept at the provider level (Myfxbook/IG only ever return
-// "live" or a failure), so it follows the FMP pattern instead.
+// storage read for those two (see liveFetchFailed below).
+//
+// Retail sentiment is a deliberate architectural exception to the whole
+// "live first, storage as fallback" pattern above: the render/scoring path
+// must NEVER call a retail-sentiment provider (OANDA/IG/Myfxbook) directly —
+// only the scheduled cron (cron/retail-sentiment) does that, writing
+// whatever it gets to Neon. getRetailSentimentFromStorage below only ever
+// reads Neon, classifying freshness purely by how long ago the stored
+// snapshot was written (DELAYED/STALE), same tiering as everything else in
+// this file. This keeps provider request volume to the cron's own cadence,
+// never one call per page view.
 import * as fmp from "./fmp";
 import * as cftc from "./cftc";
 import * as fred from "./fred";
-import * as retailSentiment from "./retail-sentiment";
 import { CftcPositioningResult, isCftcReportWithinFreshnessLimit } from "./cftc";
 import { classifyFredFreshness } from "./fred";
 import { FredIndicatorKey } from "./fred-series";
@@ -44,7 +51,7 @@ import {
   getLatestStoredRetailSentiment,
   getLatestStoredEconomicSeries,
 } from "@/db/queries/market-data";
-import { FredSeriesPoint, NormalizedCandle, NormalizedQuote, Provenance } from "../types";
+import { FredSeriesPoint, NormalizedCandle, NormalizedQuote, Provenance, unavailable } from "../types";
 
 // Matches the real cron cadence (daily, once/day — see vercel.json and
 // gbpusd-validation.ts's own CRON_SCHEDULE comment on why this project's
@@ -161,33 +168,29 @@ export async function getFredSeriesWithFallback(country: string, indicator: Fred
   };
 }
 
-export async function getRetailSentimentWithFallback(symbol: string): Promise<Provenance<NormalizedRetailSentiment>> {
-  const live = await retailSentiment.getRetailSentiment(symbol);
-  // Retail sentiment has no intrinsic staleness concept at the provider
-  // level (Myfxbook/IG only ever return "live" or a failure) — so unlike
-  // the CFTC/FRED "already-real-data" carve-out above, anything short of
-  // "live" here means the fetch genuinely didn't produce this instant's
-  // reading, and storage is the only source of an honest prior value.
-  if (live.status === "live") return live;
-
+/** Reads Neon ONLY — never calls a retail-sentiment provider live. See the
+ * file-header note above: OANDA (or IG/Myfxbook) is only ever called from
+ * the scheduled cron, not from a page render or the scoring engine. Freshness
+ * is classified purely from how long ago the stored snapshot was written,
+ * exactly like the CFTC/FRED storage tiers below (DELAYED/STALE), and a
+ * symbol that has never had a successful provider write stays UNAVAILABLE —
+ * never a fabricated stand-in. */
+export async function getRetailSentimentFromStorage(symbol: string): Promise<Provenance<NormalizedRetailSentiment>> {
   const stored = await getLatestStoredRetailSentiment(symbol);
-  // "If no valid observation has ever existed, remain UNAVAILABLE" — a
-  // stored row only exists here at all when a provider genuinely succeeded
-  // at write time (getLatestStoredRetailSentiment only reads status="live"
-  // rows), so this is never a fabricated stand-in.
-  if (!stored) return live;
+  if (!stored) {
+    return unavailable("oanda", "OANDA PositionBook", `No retail-sentiment observation has ever been stored for ${symbol} — the scheduled ingestion job (cron/retail-sentiment) populates this from OANDA/IG/Myfxbook; nothing has landed in Neon yet.`);
+  }
 
   const freshness = classifyStoredAge(stored.fetchedAt);
   return {
     // The DB column is a free varchar, but it's only ever written from a
     // real ProviderName at insert time (see cron/retail-sentiment/route.ts).
     provider: stored.provider as Provenance<NormalizedRetailSentiment>["provider"],
-    source: `${stored.source} (last known good — stored)`,
+    source: stored.source,
     status: freshness,
     fetchedAt: stored.fetchedAt.toISOString(),
     sourceUpdatedAt: stored.fetchedAt.toISOString(),
     nextExpectedUpdate: null,
     value: { symbol, pctLong: stored.pctLong, pctShort: stored.pctShort },
-    error: `Live refresh unavailable (${live.error ?? live.status}) — showing last stored snapshot from ${stored.fetchedAt.toISOString()}`,
   };
 }
