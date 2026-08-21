@@ -69,6 +69,27 @@ export const SYMBOL_MAP: Record<string, SymbolMapping> = {
   // pure case mismatch: CFTC's actual market_and_exchange_names strings
   // use mixed case ("Consolidated", not "CONSOLIDATED"), confirmed fresh
   // (latest report 2026-08-11) under the correct casing below.
+  // NAS100 PRICE SOURCE: currently NOT USABLE on this account's FMP plan.
+  // scripts/nas100-index-discovery.ts (run against FMP's real /index-list
+  // and quote/historical endpoints) found and tested every genuine
+  // Nasdaq-100 candidate: ^NDX (the index itself), ^XNDX (Total Return
+  // variant), and — as an explicit ETF-proxy fallback, never to be
+  // silently presented as the index — QQQ. All three returned 402 Payment
+  // Required on both /quote and /historical-price-eod/full. This isn't a
+  // symbol-mapping error or an index-specific gap: QQQ hitting the same
+  // 402 shows this plan simply doesn't include individual equity/ETF
+  // quote+historical access, only the specific asset classes already
+  // working (forex, commodities, crypto, and a couple of pre-whitelisted
+  // major indices — ^GSPC/SPX500 and ^DJI/DJ30 are both confirmed live).
+  // NAS100 stays NOT_PROMOTED (no substitute index, ETF, or synthetic
+  // price — see data-mode.ts) until one of:
+  //   1. an FMP plan upgrade becomes worthwhile for multiple markets at
+  //      once, not just this one — decide from the full remaining-market
+  //      coverage picture (scripts/fmp-coverage-test.ts), not NAS100 alone
+  //   2. a dedicated index data provider is integrated (e.g. Massive)
+  //   3. NAS100 is deliberately left unsupported
+  // The CFTC mapping below is unaffected by any of this and stays fixed
+  // and verified, ready for whichever price source is eventually chosen.
   NAS100: { symbol: "NAS100", fmp: { ticker: "^NDX", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "NASDAQ-100 Consolidated - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
   DJ30: { symbol: "DJ30", fmp: { ticker: "^DJI", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "DJIA Consolidated - CHICAGO BOARD OF TRADE" }, igEpic: null, myfxbookSymbol: null },
   RUT2000: { symbol: "RUT2000", fmp: { ticker: "^RUT", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "RUSSELL E-MINI - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
