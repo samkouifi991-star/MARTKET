@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && next build",
+    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/oanda-metals-retail-sentiment-verify.ts; next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -37,6 +37,7 @@
     "test:six-market-verify": "tsx scripts/six-market-verify.ts",
     "test:commodity-coverage-reconcile": "tsx scripts/commodity-coverage-reconcile.ts",
     "test:retail-sentiment-status-check": "tsx scripts/retail-sentiment-status-check.ts",
+    "test:oanda-metals-retail-sentiment-verify": "tsx scripts/oanda-metals-retail-sentiment-verify.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
