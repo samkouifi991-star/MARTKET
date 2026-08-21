@@ -80,16 +80,17 @@ function mockAllLive() {
     },
   });
 
-  // Retail sentiment is read from storage only (see last-known-good.ts) —
-  // "live" isn't a state this path can produce, so a stored row a few
-  // minutes old is the realistic "everything succeeded" fixture, and the
-  // resulting freshness is "delayed", not "live".
+  // Retail sentiment is read from storage only (see last-known-good.ts),
+  // but freshness follows the OANDA source timestamp's own age, not how
+  // recently the row was written — a fresh sourceUpdatedAt genuinely reads
+  // "live" here, matching the "everything succeeded" fixture.
   vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({
     pctLong: 62,
     pctShort: 38,
     provider: "oanda",
     source: "OANDA PositionBook",
     fetchedAt: new Date(),
+    sourceUpdatedAt: new Date(),
   });
 }
 
@@ -114,7 +115,7 @@ describe("getLiveMarketDetail", () => {
     expect(detail.price.data?.current).toBeGreaterThan(0);
     expect(detail.institutional.freshness).toBe("live");
     expect(detail.institutional.data?.classification).toBe("Asset Manager");
-    expect(detail.retail.freshness).toBe("delayed");
+    expect(detail.retail.freshness).toBe("live");
     expect(detail.retail.data?.pctLong).toBe(62);
     expect(detail.smartMoney.freshness).toBe("live");
     expect(detail.seasonality.freshness).toBe("live");

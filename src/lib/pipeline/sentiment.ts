@@ -31,11 +31,13 @@ export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMo
 
   // Storage-first — reads Neon only, never a live provider call (OANDA must
   // never be called from a page render; see last-known-good.ts's file
-  // header). Remains UNAVAILABLE if no valid observation has ever existed
-  // for this symbol.
+  // header). Freshness (live/delayed/stale) reflects the age of OANDA's own
+  // source timestamp, not how recently the row was read from storage — a
+  // snapshot the cron just wrote genuinely reads "live" here. Remains
+  // UNAVAILABLE if no valid observation has ever existed for this symbol.
   const sentiment = await getRetailSentimentFromStorage(symbol);
   const SOURCE = sentiment.source;
-  const usable = (sentiment.status === "delayed" || sentiment.status === "stale") && sentiment.value;
+  const usable = (sentiment.status === "live" || sentiment.status === "delayed" || sentiment.status === "stale") && sentiment.value;
   if (!usable) {
     return unavailableFactor("retailSentiment", SOURCE, sentiment.error ?? "Retail sentiment unavailable — no stored observation exists yet for this market");
   }

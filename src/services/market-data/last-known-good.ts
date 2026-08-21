@@ -33,17 +33,22 @@
 // must NEVER call a retail-sentiment provider (OANDA/IG/Myfxbook) directly —
 // only the scheduled cron (cron/retail-sentiment) does that, writing
 // whatever it gets to Neon. getRetailSentimentFromStorage below only ever
-// reads Neon, classifying freshness purely by how long ago the stored
-// snapshot was written (DELAYED/STALE), same tiering as everything else in
-// this file. This keeps provider request volume to the cron's own cadence,
-// never one call per page view.
+// reads Neon — but its freshness is classified the same way CFTC/FRED's is
+// above: by the age of the observation's OWN source timestamp
+// (sourceUpdatedAt, e.g. OANDA PositionBook's `time`), not by how long ago
+// the row happened to be written. A snapshot read from Neon a second after
+// the cron wrote it is exactly as fresh as the OANDA data it carries, never
+// automatically "delayed" just because the read came from storage; storage
+// provenance (fetchedAt) is tracked on the row but never drives freshness.
+// This keeps provider request volume to the cron's own cadence, never one
+// call per page view.
 import * as fmp from "./fmp";
 import * as cftc from "./cftc";
 import * as fred from "./fred";
 import { CftcPositioningResult, isCftcReportWithinFreshnessLimit } from "./cftc";
 import { classifyFredFreshness } from "./fred";
 import { FredIndicatorKey } from "./fred-series";
-import { NormalizedRetailSentiment } from "./retail-sentiment";
+import { NormalizedRetailSentiment, classifyRetailSentimentFreshness } from "./retail-sentiment";
 import {
   getLatestStoredPrice,
   getLatestStoredDailyCandles,
@@ -170,9 +175,9 @@ export async function getFredSeriesWithFallback(country: string, indicator: Fred
 
 /** Reads Neon ONLY — never calls a retail-sentiment provider live. See the
  * file-header note above: OANDA (or IG/Myfxbook) is only ever called from
- * the scheduled cron, not from a page render or the scoring engine. Freshness
- * is classified purely from how long ago the stored snapshot was written,
- * exactly like the CFTC/FRED storage tiers below (DELAYED/STALE), and a
+ * the scheduled cron, not from a page render or the scoring engine.
+ * Freshness is classified from the observation's own source timestamp, not
+ * from when the row was written — see classifyRetailSentimentFreshness. A
  * symbol that has never had a successful provider write stays UNAVAILABLE —
  * never a fabricated stand-in. */
 export async function getRetailSentimentFromStorage(symbol: string): Promise<Provenance<NormalizedRetailSentiment>> {
@@ -181,7 +186,13 @@ export async function getRetailSentimentFromStorage(symbol: string): Promise<Pro
     return unavailable("oanda", "OANDA PositionBook", `No retail-sentiment observation has ever been stored for ${symbol} — the scheduled ingestion job (cron/retail-sentiment) populates this from OANDA/IG/Myfxbook; nothing has landed in Neon yet.`);
   }
 
-  const freshness = classifyStoredAge(stored.fetchedAt);
+  // sourceUpdatedAt is the provider's own timestamp for this observation
+  // (OANDA PositionBook's `time`); fall back to fetchedAt only for rows
+  // written before that column existed, or from a provider that never had
+  // a real per-symbol timestamp to offer — storage provenance (fetchedAt)
+  // otherwise plays no part in the freshness classification.
+  const sourceTimestamp = (stored.sourceUpdatedAt ?? stored.fetchedAt).toISOString();
+  const { freshness } = classifyRetailSentimentFreshness(sourceTimestamp);
   return {
     // The DB column is a free varchar, but it's only ever written from a
     // real ProviderName at insert time (see cron/retail-sentiment/route.ts).
@@ -189,7 +200,7 @@ export async function getRetailSentimentFromStorage(symbol: string): Promise<Pro
     source: stored.source,
     status: freshness,
     fetchedAt: stored.fetchedAt.toISOString(),
-    sourceUpdatedAt: stored.fetchedAt.toISOString(),
+    sourceUpdatedAt: sourceTimestamp,
     nextExpectedUpdate: null,
     value: { symbol, pctLong: stored.pctLong, pctShort: stored.pctShort },
   };

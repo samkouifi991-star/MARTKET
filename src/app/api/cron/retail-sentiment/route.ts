@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     // for Myfxbook/IG — neither has an intrinsic staleness concept — but
     // this stays correct if a future provider adds one), not a hardcoded
     // "live" regardless of what actually came back.
-    await insertRetailSentiment(symbol, sentiment.value.pctLong, sentiment.value.pctShort, sentiment.status, sentiment.provider, sentiment.source);
+    await insertRetailSentiment(symbol, sentiment.value.pctLong, sentiment.value.pctShort, sentiment.status, sentiment.provider, sentiment.source, sentiment.sourceUpdatedAt);
   });
 
   return NextResponse.json({ job: "retail-sentiment", okCount, failCount });

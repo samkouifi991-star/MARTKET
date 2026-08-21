@@ -42,6 +42,22 @@ describe("resolveRetailSentimentFactor — structural not_applicable vs. tempora
     expect(factor.explanation).not.toMatch(/not applicable/i);
   });
 
+  it("reports LIVE when the stored snapshot's own OANDA source timestamp is fresh — storage provenance never forces a downgrade", async () => {
+    vi.mocked(getRetailSentimentFromStorage).mockResolvedValue({
+      provider: "oanda",
+      source: "OANDA PositionBook",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: new Date().toISOString(),
+      nextExpectedUpdate: null,
+      value: { symbol: "EURUSD", pctLong: 62, pctShort: 38 },
+    });
+
+    const factor = await resolveRetailSentimentFactor("EURUSD", "live");
+
+    expect(factor.freshness).toBe("live");
+  });
+
   it("reports DELAYED for a recently-stored OANDA snapshot", async () => {
     vi.mocked(getRetailSentimentFromStorage).mockResolvedValue({
       provider: "oanda",

@@ -1,0 +1,1 @@
+ALTER TABLE "retail_sentiment" ADD COLUMN "source_updated_at" timestamp with time zone;

@@ -9,7 +9,7 @@ vi.mock("./ig-provider", () => ({ igProvider: { name: "ig", sourceLabel: "IG Cli
 import { oandaProvider } from "./oanda";
 import { myfxbookProvider } from "./myfxbook";
 import { igProvider } from "./ig-provider";
-import { getRetailSentiment } from "./index";
+import { getRetailSentiment, classifyRetailSentimentFreshness } from "./index";
 
 type ProviderId = "oanda" | "myfxbook" | "ig";
 
@@ -112,5 +112,23 @@ describe("retail-sentiment combinator — OANDA primary, IG secondary, Myfxbook 
     expect(result.provider).toBe("oanda");
     expect(result.status).toBe("live");
     expect(myfxbookProvider.getRetailSentiment).not.toHaveBeenCalled();
+  });
+});
+
+function hoursAgoIso(h: number): string {
+  return new Date(Date.now() - h * 3_600_000).toISOString();
+}
+
+describe("classifyRetailSentimentFreshness — driven by source-timestamp age, not fetch/storage time", () => {
+  it("classifies a timestamp from moments ago as live", () => {
+    expect(classifyRetailSentimentFreshness(hoursAgoIso(0)).freshness).toBe("live");
+  });
+
+  it("classifies a timestamp a few hours old as delayed", () => {
+    expect(classifyRetailSentimentFreshness(hoursAgoIso(10)).freshness).toBe("delayed");
+  });
+
+  it("classifies a timestamp beyond the once-daily refresh window as stale", () => {
+    expect(classifyRetailSentimentFreshness(hoursAgoIso(48)).freshness).toBe("stale");
   });
 });

@@ -73,6 +73,17 @@ export const retailSentiment = pgTable(
     source: text("source").notNull().default("IG Client Sentiment"),
     status: varchar("status", { length: 16 }).notNull(),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    // The provider's own timestamp for this observation (e.g. OANDA
+    // PositionBook's `time`) — distinct from fetchedAt (when WE wrote this
+    // row). Freshness must be computed from this, not fetchedAt: a row read
+    // back from storage isn't "less fresh" just because it came from Neon,
+    // and a row written a second ago isn't fresh if the underlying
+    // observation it carries is actually old. Nullable because IG/Myfxbook
+    // don't return a genuine per-symbol timestamp (their providers set this
+    // to the fetch time itself, an honest "this is a live snapshot, we have
+    // no better timestamp" approximation) and because rows written before
+    // this column existed have none.
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }),
   },
   (t) => [index("retail_sentiment_symbol_fetched").on(t.symbol, t.fetchedAt)]
 );

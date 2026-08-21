@@ -216,24 +216,43 @@ describe("getFredSeriesWithFallback", () => {
   });
 });
 
-describe("getRetailSentimentFromStorage — reads Neon only, never calls a retail-sentiment provider live", () => {
-  it("classifies a recently-stored OANDA snapshot as DELAYED", async () => {
-    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "oanda", source: "OANDA PositionBook", fetchedAt: hoursAgo(2) });
+describe("getRetailSentimentFromStorage — reads Neon only, freshness driven by the source timestamp's age, not how recently the row was read", () => {
+  it("classifies a fresh OANDA source timestamp as LIVE even though it was read from Neon — storage provenance never forces a downgrade", async () => {
+    // fetchedAt is old (the row itself was written a while ago) but
+    // sourceUpdatedAt (OANDA's own timestamp) is fresh — freshness must
+    // follow sourceUpdatedAt, not fetchedAt.
+    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "oanda", source: "OANDA PositionBook", fetchedAt: hoursAgo(10), sourceUpdatedAt: hoursAgo(1) });
 
     const result = await getRetailSentimentFromStorage("EURUSD");
 
-    expect(result.status).toBe("delayed");
+    expect(result.status).toBe("live");
     expect(result.provider).toBe("oanda");
     expect(result.source).toBe("OANDA PositionBook");
     expect(result.value?.pctLong).toBe(58);
   });
 
-  it("classifies an older stored snapshot as STALE, not DELAYED", async () => {
-    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "oanda", source: "OANDA PositionBook", fetchedAt: hoursAgo(200) });
+  it("classifies an aging source timestamp as DELAYED even when the row was just written — fetchedAt recency alone doesn't make it live", async () => {
+    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "oanda", source: "OANDA PositionBook", fetchedAt: hoursAgo(0), sourceUpdatedAt: hoursAgo(10) });
+
+    const result = await getRetailSentimentFromStorage("EURUSD");
+
+    expect(result.status).toBe("delayed");
+  });
+
+  it("classifies an old source timestamp as STALE, not DELAYED", async () => {
+    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "oanda", source: "OANDA PositionBook", fetchedAt: hoursAgo(0), sourceUpdatedAt: hoursAgo(200) });
 
     const result = await getRetailSentimentFromStorage("EURUSD");
 
     expect(result.status).toBe("stale");
+  });
+
+  it("falls back to fetchedAt for freshness only when sourceUpdatedAt is null (legacy rows, or a provider with no real per-symbol timestamp)", async () => {
+    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "myfxbook", source: "Myfxbook Community Outlook", fetchedAt: hoursAgo(1), sourceUpdatedAt: null });
+
+    const result = await getRetailSentimentFromStorage("EURUSD");
+
+    expect(result.status).toBe("live");
   });
 
   it("remains UNAVAILABLE when no valid observation has ever existed — never fabricates a snapshot", async () => {

@@ -68,9 +68,17 @@ export async function upsertPositioning(symbol: string, pos: CftcPositioningResu
     .onConflictDoNothing({ target: [institutionalPositioning.symbol, institutionalPositioning.classification, institutionalPositioning.reportDate] });
 }
 
-export async function insertRetailSentiment(symbol: string, pctLong: number, pctShort: number, status: string, provider?: string, source?: string): Promise<void> {
+export async function insertRetailSentiment(symbol: string, pctLong: number, pctShort: number, status: string, provider?: string, source?: string, sourceUpdatedAt?: string | null): Promise<void> {
   const db = getDb();
-  await db.insert(retailSentiment).values({ symbol, pctLong, pctShort, status, ...(provider ? { provider } : {}), ...(source ? { source } : {}) });
+  await db.insert(retailSentiment).values({
+    symbol,
+    pctLong,
+    pctShort,
+    status,
+    ...(provider ? { provider } : {}),
+    ...(source ? { source } : {}),
+    ...(sourceUpdatedAt ? { sourceUpdatedAt: new Date(sourceUpdatedAt) } : {}),
+  });
 }
 
 export async function upsertEconomicIndicator(country: string, indicator: FredIndicatorKey, seriesId: string, date: string, value: number): Promise<void> {
@@ -186,7 +194,19 @@ export async function getLatestStoredPositioning(symbol: string): Promise<Stored
   };
 }
 
-export type StoredRetailSentiment = { pctLong: number; pctShort: number; provider: string; source: string; fetchedAt: Date };
+export type StoredRetailSentiment = {
+  pctLong: number;
+  pctShort: number;
+  provider: string;
+  source: string;
+  fetchedAt: Date;
+  /** The provider's own timestamp for this observation (e.g. OANDA
+   * PositionBook's `time`) — freshness must be computed from this, not
+   * fetchedAt. Null for rows written before this column existed, or from a
+   * provider (IG/Myfxbook) that never had a real per-symbol timestamp to
+   * begin with — callers fall back to fetchedAt only in that case. */
+  sourceUpdatedAt: Date | null;
+};
 
 /** The latest stored retail-sentiment snapshot for this symbol — only ever
  * written from a genuinely live provider read (see insertRetailSentiment's
@@ -202,7 +222,7 @@ export async function getLatestStoredRetailSentiment(symbol: string): Promise<St
     .limit(1);
   const r = rows[0];
   if (!r) return null;
-  return { pctLong: r.pctLong, pctShort: r.pctShort, provider: r.provider, source: r.source, fetchedAt: r.fetchedAt };
+  return { pctLong: r.pctLong, pctShort: r.pctShort, provider: r.provider, source: r.source, fetchedAt: r.fetchedAt, sourceUpdatedAt: r.sourceUpdatedAt };
 }
 
 export type StoredEconomicSeries = { points: FredSeriesPoint[]; fetchedAt: Date };

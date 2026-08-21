@@ -1,10 +1,8 @@
-// Controlled OANDA PositionBook verification — tests exactly the 5 symbols
-// the user asked to verify before any broader rollout: GBPUSD, EURUSD,
-// USDJPY, AUDUSD, USDCAD. Deliberately does NOT touch any other
-// OANDA-mapped symbol — USDCHF/NZDUSD/EURGBP/EURJPY/GBPJPY are already
-// configured in symbol-map.ts but are intentionally excluded from this run,
-// pending review of these results (see the user's explicit "stop and
-// report before expanding to all supported markets" instruction).
+// Controlled OANDA PositionBook verification. First batch (GBPUSD, EURUSD,
+// USDJPY, AUDUSD, USDCAD) already verified and approved as primary. This
+// script's default batch is now the second, user-approved expansion —
+// USDCHF, NZDUSD, EURGBP, EURJPY, GBPJPY — and deliberately touches nothing
+// beyond it; pass symbols explicitly (argv) to verify a different set.
 //
 // Exercises the real architecture end to end for each symbol: OANDA
 // PositionBook (live) -> Neon write -> Neon read-back -> the Retail
@@ -13,9 +11,16 @@
 // mapping, whether the live PositionBook call succeeded, long %/short %,
 // the provider's own source timestamp, whether the Neon write succeeded,
 // whether the Neon read-back matches what was written, the resolved
-// Retail Sentiment factor (score/freshness/explanation).
+// Retail Sentiment factor (raw score, Bullish/Bearish/Neutral
+// classification derived from that score's sign, and freshness — which
+// now reflects the age of OANDA's own source timestamp, not how recently
+// the row was written; see classifyRetailSentimentFreshness).
 //
-// Usage: OANDA_API_TOKEN=xxx npm run test:oanda-verify
+// Calls oandaProvider directly, never the multi-provider combinator, so a
+// symbol OANDA doesn't cover is reported honestly as such — this script
+// never falls back to IG or Myfxbook mid-verification.
+//
+// Usage: OANDA_API_TOKEN=xxx npm run test:oanda-verify [SYMBOL...]
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
 loadEnv();
@@ -26,10 +31,16 @@ import { insertRetailSentiment, getLatestStoredRetailSentiment } from "../src/db
 import { resolveRetailSentimentFactor } from "../src/lib/pipeline/sentiment";
 import { DATA_MODE } from "../src/services/data-mode";
 
-const VERIFY_SYMBOLS = ["GBPUSD", "EURUSD", "USDJPY", "AUDUSD", "USDCAD"];
+const DEFAULT_BATCH = ["USDCHF", "NZDUSD", "EURGBP", "EURJPY", "GBPJPY"];
 
 function log(msg: string): void {
   console.log(`OANDA_VERIFY: ${msg}`);
+}
+
+function classify(rawScore: number): "Bullish" | "Bearish" | "Neutral" {
+  if (rawScore > 0) return "Bullish";
+  if (rawScore < 0) return "Bearish";
+  return "Neutral";
 }
 
 async function verifyOne(symbol: string): Promise<void> {
@@ -45,15 +56,15 @@ async function verifyOne(symbol: string): Promise<void> {
 
   log(`LONG_PCT=${result.value.pctLong.toFixed(2)} SHORT_PCT=${result.value.pctShort.toFixed(2)} SOURCE_TIMESTAMP=${result.sourceUpdatedAt}`);
 
-  await insertRetailSentiment(symbol, result.value.pctLong, result.value.pctShort, result.status, result.provider, result.source);
+  await insertRetailSentiment(symbol, result.value.pctLong, result.value.pctShort, result.status, result.provider, result.source, result.sourceUpdatedAt);
   log(`NEON_WRITE ok`);
 
   const stored = await getLatestStoredRetailSentiment(symbol);
   const readbackMatches = stored !== null && Math.abs(stored.pctLong - result.value.pctLong) < 1e-6 && Math.abs(stored.pctShort - result.value.pctShort) < 1e-6;
-  log(`NEON_READBACK ${stored ? `pctLong=${stored.pctLong} pctShort=${stored.pctShort} matches=${readbackMatches}` : "null — write did not land"}`);
+  log(`NEON_READBACK ${stored ? `pctLong=${stored.pctLong} pctShort=${stored.pctShort} sourceUpdatedAt=${stored.sourceUpdatedAt?.toISOString() ?? "null"} matches=${readbackMatches}` : "null — write did not land"}`);
 
   const factor = await resolveRetailSentimentFactor(symbol, "live");
-  log(`RETAIL_SENTIMENT_FACTOR rawScore=${factor.rawScore} freshness=${factor.freshness} explanation="${factor.explanation}"`);
+  log(`RETAIL_SENTIMENT_FACTOR rawScore=${factor.rawScore} classification=${classify(factor.rawScore)} freshness=${factor.freshness} explanation="${factor.explanation}"`);
 }
 
 async function main() {
@@ -66,7 +77,10 @@ async function main() {
     return;
   }
 
-  for (const symbol of VERIFY_SYMBOLS) {
+  const requested = process.argv.slice(2);
+  const symbols = requested.length > 0 ? requested : DEFAULT_BATCH;
+
+  for (const symbol of symbols) {
     try {
       await verifyOne(symbol);
     } catch (err) {
@@ -74,7 +88,7 @@ async function main() {
     }
   }
 
-  log("DONE — do not expand beyond these 5 symbols without reviewing these results");
+  log(`DONE (${symbols.join(", ")}) — do not expand further without reviewing these results`);
 }
 
 main().catch((err) => log(`FATAL — ${err instanceof Error ? err.message : String(err)}`));
