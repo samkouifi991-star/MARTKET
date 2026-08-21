@@ -20,8 +20,8 @@ import * as fmp from "../src/services/market-data/fmp";
 import { upsertMarketPrice, upsertCandles } from "../src/db/queries/market-data";
 import { DATA_MODE } from "../src/services/data-mode";
 
-// Third-phase batch: AUDUSD, USDCAD, XAGUSD, NAS100, DJ30.
-const SYMBOLS = ["AUDUSD", "USDCAD", "XAGUSD", "NAS100", "DJ30"];
+// Fourth-phase batch: RUT2000, FTSE100, NIKKEI225, ETHUSD, USDCHF, NZDUSD.
+const SYMBOLS = ["RUT2000", "FTSE100", "NIKKEI225", "ETHUSD", "USDCHF", "NZDUSD"];
 
 function log(msg: string): void {
   console.log(`FIVE_MARKET_SEED: ${msg}`);

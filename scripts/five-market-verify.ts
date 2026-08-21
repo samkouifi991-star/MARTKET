@@ -20,8 +20,8 @@ import { seasonalityDepthFreshness } from "../src/lib/pipeline/types";
 import { NormalizedCandle } from "../src/services/types";
 import { DATA_MODE } from "../src/services/data-mode";
 
-// Third-phase batch: AUDUSD, USDCAD, XAGUSD, NAS100, DJ30.
-const SYMBOLS = ["AUDUSD", "USDCAD", "XAGUSD", "NAS100", "DJ30"];
+// Fourth-phase batch: RUT2000, FTSE100, NIKKEI225, ETHUSD, USDCHF, NZDUSD.
+const SYMBOLS = ["RUT2000", "FTSE100", "NIKKEI225", "ETHUSD", "USDCHF", "NZDUSD"];
 const MACRO_INDICATORS = ["realGdp", "gdpGrowth", "industrialProduction", "retailSales", "cpi", "coreCpi", "pce", "corePce", "ppi", "unemploymentRate", "payrolls", "initialClaims", "wageGrowth", "laborParticipation", "policyRate"];
 
 function log(msg: string): void {
@@ -101,7 +101,10 @@ async function main() {
     }
 
     // ---- FRED / macro coverage ----
-    const countries = instrument?.currencies ? instrument.currencies.map((c) => CCY_TO_COUNTRY[c]) : ["US"];
+    // Non-FX instruments (indices/commodities/crypto) use macroCountry as
+    // their primary local macro country when set (see macro.ts); default
+    // to US only when unset, matching resolveMacroCategory's fallback.
+    const countries = instrument?.currencies ? instrument.currencies.map((c) => CCY_TO_COUNTRY[c]) : [instrument?.macroCountry ?? "US"];
     for (const country of countries) {
       const rows = await db.select().from(economicIndicators).where(eq(economicIndicators.country, country));
       const indicatorsCovered = new Set(rows.map((r) => r.indicator));
