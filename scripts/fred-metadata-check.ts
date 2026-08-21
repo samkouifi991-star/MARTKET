@@ -61,6 +61,12 @@ const SERIES_TO_CHECK: { country: string; indicator: string; id: string }[] = [
   { country: "NZ", indicator: "gdpGrowth", id: "NAEXKP01NZQ657S" },
   { country: "NZ", indicator: "unemploymentRate", id: "LRHUTTTTNZQ156S" },
   { country: "NZ", indicator: "policyRate", id: "IRSTCI01NZM156N" },
+  // EU: needed for EURGBP/EURJPY macro. realGdp candidate follows the
+  // Eurostat area-aggregate "SCA" (seasonally + calendar adjusted)
+  // convention rather than the simpler 2-letter "SA" used for single
+  // countries like CH — confirming here rather than assuming.
+  { country: "EU", indicator: "realGdp", id: "CLVMNACSCAB1GQEA19" },
+  { country: "EU", indicator: "gdpGrowth", id: "NAEXKP01EZQ657S" },
 ];
 
 async function main() {
