@@ -20,7 +20,8 @@ import { seasonalityDepthFreshness } from "../src/lib/pipeline/types";
 import { NormalizedCandle } from "../src/services/types";
 import { DATA_MODE } from "../src/services/data-mode";
 
-const SYMBOLS = ["EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500"];
+// Third-phase batch: AUDUSD, USDCAD, XAGUSD, NAS100, DJ30.
+const SYMBOLS = ["AUDUSD", "USDCAD", "XAGUSD", "NAS100", "DJ30"];
 const MACRO_INDICATORS = ["realGdp", "gdpGrowth", "industrialProduction", "retailSales", "cpi", "coreCpi", "pce", "corePce", "ppi", "unemploymentRate", "payrolls", "initialClaims", "wageGrowth", "laborParticipation", "policyRate"];
 
 function log(msg: string): void {

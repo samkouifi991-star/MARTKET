@@ -130,27 +130,46 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     yield10y: { id: "IRLTLT01JPM156N", verified: false },
   },
   CA: {
-    cpi: { id: "CANCPIALLMINMEI", verified: false },
-    unemploymentRate: { id: "LRHUTTTTCAM156S", verified: false },
-    policyRate: { id: "IRSTCI01CAM156N", verified: false },
+    // Verified against the real FRED API (npm run test:fred-verify +
+    // test:fred-metadata) for the USDCAD batch:
+    //   cpi (CANCPIALLMINMEI): correct series, Index 2015=100, Monthly,
+    //     but FRED's own last observation is 2025-03-01 (~17 months stale
+    //     as of this verification) — same "correct mapping, stale FRED
+    //     data" handling as GB/EU/AU CPI; kept verified.
+    //   unemploymentRate (LRHUTTTTCAM156S): Percent, Monthly, fresh
+    //     (through 2026-07-01).
+    //   policyRate (IRSTCI01CAM156N): "Interest Rates: Immediate Rates
+    //     (<24h): Call Money/Interbank Rate: Total for Canada", Percent,
+    //     Monthly, fresh (through 2026-06-01). Matches Interest Rates.
+    //   realGdp (NGDPRSAXDCCAQ) / gdpGrowth (NAEXKP01CAQ657S): same
+    //     IMF IFS / OECD MEI patterns already verified for GB/AU, both
+    //     fresh (through 2026-01-01 / 2026-04-01).
+    cpi: { id: "CANCPIALLMINMEI", verified: true },
+    unemploymentRate: { id: "LRHUTTTTCAM156S", verified: true },
+    policyRate: { id: "IRSTCI01CAM156N", verified: true },
     yield10y: { id: "IRLTLT01CAM156N", verified: false },
-    // Found via fred-verify.ts's live search for the USDCAD batch — same
-    // NGDPRSAXDCxxQ / NAEXKP01xxQ657S pattern already verified for GB/AU.
-    // Not yet metadata-confirmed — see fred-metadata-check.ts's next run.
-    realGdp: { id: "NGDPRSAXDCCAQ", verified: false },
-    gdpGrowth: { id: "NAEXKP01CAQ657S", verified: false },
+    realGdp: { id: "NGDPRSAXDCCAQ", verified: true },
+    gdpGrowth: { id: "NAEXKP01CAQ657S", verified: true },
   },
   AU: {
-    cpi: { id: "AUSCPIALLQINMEI", verified: false },
-    unemploymentRate: { id: "LRHUTTTTAUM156S", verified: false },
-    // Found via fred-verify.ts's live search for the AUDUSD batch — same
-    // pattern as GB/CA above. Not yet metadata-confirmed.
-    realGdp: { id: "NGDPRSAXDCAUQ", verified: false },
-    gdpGrowth: { id: "NAEXKP01AUQ657S", verified: false },
-    // Candidate only, unconfirmed — same OECD MEI IRSTCI01 pattern already
-    // used for CA/CH's policyRate. Confirm via metadata check before
-    // trusting; do not flip to verified without a real title/units match.
-    policyRate: { id: "IRSTCI01AUM156N", verified: false },
+    // Verified against the real FRED API for the AUDUSD batch — same
+    // confirmation process as CA above:
+    //   cpi (AUSCPIALLQINMEI): correct series, Index 2015=100, Quarterly,
+    //     ~19 months stale as of this verification (through 2025-01-01) —
+    //     same "correct mapping, stale FRED data" handling as GB/EU/CA.
+    //   unemploymentRate (LRHUTTTTAUM156S): Percent, Monthly, fresh
+    //     (through 2026-06-01).
+    //   realGdp (NGDPRSAXDCAUQ) / gdpGrowth (NAEXKP01AUQ657S): fresh
+    //     (through 2026-01-01), same pattern as GB/CA.
+    //   policyRate (IRSTCI01AUM156N): "Interest Rates: Immediate Rates
+    //     (<24h): Call Money/Interbank Rate: Total for Australia", Percent,
+    //     Monthly, fresh (through 2026-06-01) — the real RBA-equivalent
+    //     series, confirmed by title, not guessed.
+    cpi: { id: "AUSCPIALLQINMEI", verified: true },
+    unemploymentRate: { id: "LRHUTTTTAUM156S", verified: true },
+    realGdp: { id: "NGDPRSAXDCAUQ", verified: true },
+    gdpGrowth: { id: "NAEXKP01AUQ657S", verified: true },
+    policyRate: { id: "IRSTCI01AUM156N", verified: true },
   },
   NZ: {
     cpi: { id: "NZLCPIALLQINMEI", verified: false },

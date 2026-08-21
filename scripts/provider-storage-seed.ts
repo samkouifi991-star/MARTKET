@@ -23,7 +23,9 @@ import { getSymbolMapping } from "../src/services/market-data/symbol-map";
 import { FRED_SERIES, FredIndicatorKey } from "../src/services/market-data/fred-series";
 import { DATA_MODE } from "../src/services/data-mode";
 
-const SYMBOLS = ["GBPUSD", "EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500"];
+// Third-phase batch: AUDUSD, USDCAD, XAGUSD, NAS100, DJ30 (GBPUSD + the
+// second-phase 5 already seeded in earlier runs).
+const SYMBOLS = ["AUDUSD", "USDCAD", "XAGUSD", "NAS100", "DJ30"];
 
 function log(msg: string): void {
   console.log(`PROVIDER_STORAGE_SEED: ${msg}`);

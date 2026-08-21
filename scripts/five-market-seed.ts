@@ -1,4 +1,4 @@
-// One-time seed for the second-phase 5-market batch (EURUSD, USDJPY,
+// One-time seed for the current 5-market batch (originally EURUSD, USDJPY,
 // XAUUSD, BTCUSD, SPX500). five-market-verify.ts found zero stored rows
 // for any of them — price, candles, CFTC, retail sentiment, FRED — for the
 // same reason GBPUSD needed manual one-off backfills earlier this session:
@@ -20,7 +20,8 @@ import * as fmp from "../src/services/market-data/fmp";
 import { upsertMarketPrice, upsertCandles } from "../src/db/queries/market-data";
 import { DATA_MODE } from "../src/services/data-mode";
 
-const SYMBOLS = ["EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500"];
+// Third-phase batch: AUDUSD, USDCAD, XAGUSD, NAS100, DJ30.
+const SYMBOLS = ["AUDUSD", "USDCAD", "XAGUSD", "NAS100", "DJ30"];
 
 function log(msg: string): void {
   console.log(`FIVE_MARKET_SEED: ${msg}`);
