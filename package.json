@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/five-market-seed.ts; tsx scripts/five-market-verify.ts; next build",
+    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/fred-verify.ts; tsx scripts/fred-metadata-check.ts; tsx scripts/cftc-verify.ts; next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

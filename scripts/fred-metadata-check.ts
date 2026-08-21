@@ -17,6 +17,15 @@ const SERIES_TO_CHECK: { country: string; indicator: string; id: string }[] = [
   { country: "GB", indicator: "cpi", id: "GBRCPIALLMINMEI" },
   { country: "GB", indicator: "unemploymentRate", id: "LRHUTTTTGBM156S" },
   { country: "GB", indicator: "policyRate", id: "IUDSOIA" },
+  // EU/JP: needed for EURUSD/USDJPY's macro differential — currently all
+  // verified:false in fred-series.ts (never used at runtime, getSeries()
+  // refuses unverified series), so this is the same confirmation pass GB
+  // went through before it was flipped to verified:true.
+  { country: "EU", indicator: "cpi", id: "CP0000EZ19M086NEST" },
+  { country: "EU", indicator: "unemploymentRate", id: "LRHUTTTTEZM156S" },
+  { country: "EU", indicator: "policyRate", id: "ECBDFR" },
+  { country: "JP", indicator: "cpi", id: "JPNCPIALLMINMEI" },
+  { country: "JP", indicator: "unemploymentRate", id: "LRHUTTTTJPM156S" },
 ];
 
 async function main() {
