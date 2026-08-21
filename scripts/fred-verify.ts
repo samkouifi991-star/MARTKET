@@ -65,7 +65,7 @@ const SEARCH_QUERIES: { country: string; indicator: FredIndicatorKey; query: str
   // AUDUSD batch: AU has no growth or policy-rate series configured at all.
   { country: "AU", indicator: "realGdp", query: "Australia Real GDP" },
   { country: "AU", indicator: "gdpGrowth", query: "Australia GDP Growth Rate" },
-  { country: "AU", indicator: "policyRate", query: "Australia Immediate Rates Central Bank Rate" },
+  { country: "AU", indicator: "policyRate", query: "Australia Interbank Rate" },
   // USDCAD batch: CA has no growth series configured (policyRate exists,
   // unverified — the main verification loop above already checks it live).
   { country: "CA", indicator: "realGdp", query: "Canada Real GDP" },

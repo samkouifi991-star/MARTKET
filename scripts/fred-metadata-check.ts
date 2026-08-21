@@ -26,6 +26,21 @@ const SERIES_TO_CHECK: { country: string; indicator: string; id: string }[] = [
   { country: "EU", indicator: "policyRate", id: "ECBDFR" },
   { country: "JP", indicator: "cpi", id: "JPNCPIALLMINMEI" },
   { country: "JP", indicator: "unemploymentRate", id: "LRHUTTTTJPM156S" },
+  // AU/CA: needed for AUDUSD/USDCAD's macro differential — candidates
+  // found via fred-verify.ts's live search, same GB pattern. policyRate
+  // entries are unconfirmed guesses following CA/CH's existing OECD MEI
+  // IRSTCI01 convention — this metadata check IS the confirmation step,
+  // not an assumption; if the title doesn't match, it stays unverified.
+  { country: "AU", indicator: "realGdp", id: "NGDPRSAXDCAUQ" },
+  { country: "AU", indicator: "gdpGrowth", id: "NAEXKP01AUQ657S" },
+  { country: "AU", indicator: "policyRate", id: "IRSTCI01AUM156N" },
+  { country: "CA", indicator: "realGdp", id: "NGDPRSAXDCCAQ" },
+  { country: "CA", indicator: "gdpGrowth", id: "NAEXKP01CAQ657S" },
+  { country: "CA", indicator: "policyRate", id: "IRSTCI01CAM156N" },
+  { country: "CA", indicator: "cpi", id: "CANCPIALLMINMEI" },
+  { country: "CA", indicator: "unemploymentRate", id: "LRHUTTTTCAM156S" },
+  { country: "AU", indicator: "cpi", id: "AUSCPIALLQINMEI" },
+  { country: "AU", indicator: "unemploymentRate", id: "LRHUTTTTAUM156S" },
 ];
 
 async function main() {

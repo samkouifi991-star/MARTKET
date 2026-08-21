@@ -134,10 +134,23 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     unemploymentRate: { id: "LRHUTTTTCAM156S", verified: false },
     policyRate: { id: "IRSTCI01CAM156N", verified: false },
     yield10y: { id: "IRLTLT01CAM156N", verified: false },
+    // Found via fred-verify.ts's live search for the USDCAD batch — same
+    // NGDPRSAXDCxxQ / NAEXKP01xxQ657S pattern already verified for GB/AU.
+    // Not yet metadata-confirmed — see fred-metadata-check.ts's next run.
+    realGdp: { id: "NGDPRSAXDCCAQ", verified: false },
+    gdpGrowth: { id: "NAEXKP01CAQ657S", verified: false },
   },
   AU: {
     cpi: { id: "AUSCPIALLQINMEI", verified: false },
     unemploymentRate: { id: "LRHUTTTTAUM156S", verified: false },
+    // Found via fred-verify.ts's live search for the AUDUSD batch — same
+    // pattern as GB/CA above. Not yet metadata-confirmed.
+    realGdp: { id: "NGDPRSAXDCAUQ", verified: false },
+    gdpGrowth: { id: "NAEXKP01AUQ657S", verified: false },
+    // Candidate only, unconfirmed — same OECD MEI IRSTCI01 pattern already
+    // used for CA/CH's policyRate. Confirm via metadata check before
+    // trusting; do not flip to verified without a real title/units match.
+    policyRate: { id: "IRSTCI01AUM156N", verified: false },
   },
   NZ: {
     cpi: { id: "NZLCPIALLQINMEI", verified: false },
