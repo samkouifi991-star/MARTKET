@@ -57,12 +57,19 @@ async function checkSeries(country: string, indicator: FredIndicatorKey, id: str
   }
 }
 
-// GBPUSD's dependency chain needs both sides fully covered — GB is
-// currently missing realGdp/gdpGrowth entirely (see fred-series.ts), so
-// this searches for candidates explicitly rather than silently skipping it.
-const GBPUSD_SEARCH_QUERIES: { country: string; indicator: FredIndicatorKey; query: string }[] = [
+// Search for candidates for any country/indicator gap a live batch needs,
+// rather than silently skipping it or guessing an ID.
+const SEARCH_QUERIES: { country: string; indicator: FredIndicatorKey; query: string }[] = [
   { country: "GB", indicator: "realGdp", query: "United Kingdom Real GDP" },
   { country: "GB", indicator: "gdpGrowth", query: "United Kingdom GDP Growth Rate" },
+  // AUDUSD batch: AU has no growth or policy-rate series configured at all.
+  { country: "AU", indicator: "realGdp", query: "Australia Real GDP" },
+  { country: "AU", indicator: "gdpGrowth", query: "Australia GDP Growth Rate" },
+  { country: "AU", indicator: "policyRate", query: "Australia Immediate Rates Central Bank Rate" },
+  // USDCAD batch: CA has no growth series configured (policyRate exists,
+  // unverified — the main verification loop above already checks it live).
+  { country: "CA", indicator: "realGdp", query: "Canada Real GDP" },
+  { country: "CA", indicator: "gdpGrowth", query: "Canada GDP Growth Rate" },
 ];
 
 async function main() {
@@ -106,8 +113,8 @@ async function main() {
   }
 
   console.log("\n" + "=".repeat(100));
-  console.log("Searching for GBPUSD-chain series that aren't configured yet (GB growth)...\n");
-  for (const { country, indicator, query } of GBPUSD_SEARCH_QUERIES) {
+  console.log("Searching for series that aren't configured yet...\n");
+  for (const { country, indicator, query } of SEARCH_QUERIES) {
     const existing = FRED_SERIES[country]?.[indicator];
     if (existing) {
       console.log(`  ${country}/${indicator}: already configured as ${existing.id} (verified: ${existing.verified}) — skipping search.`);
