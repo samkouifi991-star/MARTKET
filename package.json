@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && next build",
+    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/eurgbp-eurjpy-promotion-verify.ts; next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -32,6 +32,7 @@
     "test:oanda-fx-market-data-verify": "tsx scripts/oanda-fx-market-data-verify.ts",
     "test:fx-seasonality-backfill": "tsx scripts/fx-seasonality-backfill.ts",
     "test:fx-promotion-pipeline-verify": "tsx scripts/fx-promotion-pipeline-verify.ts",
+    "test:eurgbp-eurjpy-promotion-verify": "tsx scripts/eurgbp-eurjpy-promotion-verify.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
