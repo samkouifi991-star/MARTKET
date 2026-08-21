@@ -208,14 +208,27 @@ async function discoverCftcContract(reportType: CftcReportType, searchAnchor: st
 // query matched the wrong data entirely (wrong market-name string, wrong
 // sort, wrong dataset) rather than a merely-delayed real report.
 const FRESH_WINDOW_DAYS = 10;
-const STALE_WINDOW_DAYS = 45;
+// Exported so the storage-first fallback (last-known-good.ts) can apply the
+// exact same ceiling to a *stored* report — "never use a report beyond the
+// existing freshness limits" applies identically whether the report came
+// from a live call or from Neon.
+export const CFTC_STALE_WINDOW_DAYS = 45;
 
 function classifyCftcFreshness(reportDateIso: string): "live" | "stale" | "invalid" {
   const ageDays = (Date.now() - new Date(reportDateIso).getTime()) / 86_400_000;
   if (ageDays < 0) return "invalid"; // a "future" report date is itself a sign something's wrong
   if (ageDays <= FRESH_WINDOW_DAYS) return "live";
-  if (ageDays <= STALE_WINDOW_DAYS) return "stale";
+  if (ageDays <= CFTC_STALE_WINDOW_DAYS) return "stale";
   return "invalid";
+}
+
+/** Whether a CFTC report of this age is still within the same ceiling the
+ * live path itself enforces (`classifyCftcFreshness`'s "invalid" cutoff) —
+ * used by the storage-first fallback to refuse a stored report that's aged
+ * past usefulness, exactly as the live path would refuse to return one. */
+export function isCftcReportWithinFreshnessLimit(reportDateIso: string): boolean {
+  const ageDays = (Date.now() - new Date(reportDateIso).getTime()) / 86_400_000;
+  return ageDays >= 0 && ageDays <= CFTC_STALE_WINDOW_DAYS;
 }
 
 function percentileOf(currentNet: number, history: number[]): number | null {

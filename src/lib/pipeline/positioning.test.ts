@@ -1,23 +1,19 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("@/services/market-data/cftc");
-vi.mock("@/services/market-data/retail-sentiment");
 vi.mock("@/services/market-data/last-known-good");
-import * as cftc from "@/services/market-data/cftc";
-import * as retailSentiment from "@/services/market-data/retail-sentiment";
-import { getQuoteWithFallback } from "@/services/market-data/last-known-good";
+import { getPositioningWithFallback, getRetailSentimentWithFallback, getQuoteWithFallback } from "@/services/market-data/last-known-good";
 import { resolveInstitutionalFactor, resolveSmartMoney } from "./positioning";
 
 beforeEach(() => vi.resetAllMocks());
 
 describe("resolveInstitutionalFactor / resolveSmartMoney — structural not_applicable when no CFTC contract exists", () => {
-  it("marks EURGBP not_applicable without ever calling the CFTC client — crosses have no CFTC-reportable futures contract", async () => {
+  it("marks EURGBP not_applicable without ever calling the storage-first CFTC wrapper — crosses have no CFTC-reportable futures contract", async () => {
     const factor = await resolveInstitutionalFactor("EURGBP", "live");
 
     expect(factor.freshness).toBe("not_applicable");
     expect(factor.rawScore).toBe(0);
     expect(factor.explanation).toMatch(/not applicable/i);
-    expect(cftc.getInstitutionalPositioning).not.toHaveBeenCalled();
+    expect(getPositioningWithFallback).not.toHaveBeenCalled();
   });
 
   it("marks Smart Money not_applicable for EURGBP the same way, without calling any provider", async () => {
@@ -25,13 +21,13 @@ describe("resolveInstitutionalFactor / resolveSmartMoney — structural not_appl
 
     expect(result.freshness).toBe("not_applicable");
     expect(result.signal).toBe("None");
-    expect(cftc.getInstitutionalPositioning).not.toHaveBeenCalled();
-    expect(retailSentiment.getRetailSentiment).not.toHaveBeenCalled();
+    expect(getPositioningWithFallback).not.toHaveBeenCalled();
+    expect(getRetailSentimentWithFallback).not.toHaveBeenCalled();
     expect(getQuoteWithFallback).not.toHaveBeenCalled();
   });
 
-  it("still calls the CFTC client for EURUSD (a real CFTC-reportable contract) — a real provider failure stays 'unavailable', not 'not_applicable'", async () => {
-    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue({
+  it("still calls the storage-first CFTC wrapper for EURUSD (a real CFTC-reportable contract) — a real failure stays 'unavailable', not 'not_applicable'", async () => {
+    vi.mocked(getPositioningWithFallback).mockResolvedValue({
       provider: "cftc",
       source: "CFTC Traders in Financial Futures",
       status: "unavailable",
@@ -44,8 +40,44 @@ describe("resolveInstitutionalFactor / resolveSmartMoney — structural not_appl
 
     const factor = await resolveInstitutionalFactor("EURUSD", "live");
 
-    expect(cftc.getInstitutionalPositioning).toHaveBeenCalledWith("EURUSD");
+    expect(getPositioningWithFallback).toHaveBeenCalledWith("EURUSD");
     expect(factor.freshness).toBe("unavailable");
     expect(factor.explanation).not.toMatch(/not applicable/i);
+  });
+
+  it("reports DELAYED (not UNAVAILABLE) when the wrapper falls back to a recently-stored report", async () => {
+    vi.mocked(getPositioningWithFallback).mockResolvedValue({
+      provider: "cftc",
+      source: "CFTC Traders in Financial Futures (last known good — stored)",
+      status: "delayed",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: new Date().toISOString(),
+      nextExpectedUpdate: null,
+      value: {
+        classification: "Asset Manager",
+        reportDate: new Date().toISOString(),
+        longContracts: 60000,
+        shortContracts: 14000,
+        netPositioning: 46000,
+        pctLong: 81,
+        pctShort: 19,
+        openInterest: 210000,
+        netWeeklyChange: 2000,
+        percentile1y: 78,
+        percentile3y: 74,
+        direction: "Bullish",
+        strength: "Strong",
+        netHistory: [{ reportDate: new Date().toISOString(), netPositioning: 46000 }],
+        marketAndExchangeName: "EURO FX - CHICAGO MERCANTILE EXCHANGE",
+        cftcContractMarketCode: null,
+      },
+      error: "Live refresh unavailable — showing last stored CFTC report",
+    });
+
+    const factor = await resolveInstitutionalFactor("EURUSD", "live");
+
+    expect(factor.freshness).toBe("delayed");
+    expect(factor.rawScore).not.toBe(0);
+    expect(factor.explanation).toMatch(/last successfully stored/i);
   });
 });

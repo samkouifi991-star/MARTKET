@@ -1,6 +1,6 @@
 import { getInstrument } from "@/lib/instruments";
 import { DEFAULT_RETAIL_SENTIMENT_CONFIG } from "@/lib/config";
-import * as retailSentiment from "@/services/market-data/retail-sentiment";
+import { getRetailSentimentWithFallback } from "@/services/market-data/last-known-good";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import { errorFactor, notApplicableFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { DataMode } from "@/services/data-mode";
@@ -29,16 +29,21 @@ export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMo
     return notApplicableFactor("retailSentiment", "Retail Sentiment", `no retail-sentiment provider (Myfxbook/IG) covers ${symbol} in the current provider set`);
   }
 
-  const sentiment = await retailSentiment.getRetailSentiment(symbol);
+  // Storage-first: tries the live provider first, falls back to the last
+  // stored snapshot (DELAYED/STALE) on a genuine failure — see
+  // last-known-good.ts. Remains UNAVAILABLE if no valid observation has
+  // ever existed for this symbol.
+  const sentiment = await getRetailSentimentWithFallback(symbol);
   const SOURCE = sentiment.source;
-  if (sentiment.status !== "live" || !sentiment.value) {
+  const usable = (sentiment.status === "live" || sentiment.status === "delayed" || sentiment.status === "stale") && sentiment.value;
+  if (!usable) {
     return sentiment.status === "error"
       ? errorFactor("retailSentiment", SOURCE, sentiment.error ?? "request failed")
       : unavailableFactor("retailSentiment", SOURCE, sentiment.error ?? "Retail sentiment unavailable — no configured provider covers this market");
   }
 
   const { extremeLongThreshold, extremeShortThreshold } = DEFAULT_RETAIL_SENTIMENT_CONFIG;
-  const { pctLong, pctShort } = sentiment.value;
+  const { pctLong, pctShort } = sentiment.value!;
   let raw = 0;
   let explanation = `${pctLong.toFixed(0)}% of retail traders are long / ${pctShort.toFixed(0)}% short, within normal range — no contrarian signal generated.`;
   if (pctLong > extremeLongThreshold) {
@@ -50,6 +55,7 @@ export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMo
     raw = severity * 10;
     explanation = `${pctShort.toFixed(0)}% of retail traders are short (above the ${extremeShortThreshold}% extreme threshold), generating a contrarian bullish contribution that strengthens with how extreme positioning is.`;
   }
+  if (sentiment.source.includes("last known good")) explanation += ` Live refresh failed (${sentiment.error ?? "unavailable"}); showing the last successfully stored snapshot instead, not a live re-fetch.`;
 
   return {
     key: "retailSentiment",
@@ -57,7 +63,7 @@ export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMo
     explanation,
     source: SOURCE,
     provider: sentiment.provider,
-    freshness: "live",
+    freshness: sentiment.status,
     lastUpdated: sentiment.sourceUpdatedAt ?? new Date().toISOString(),
     nextUpdate: new Date().toISOString(),
   };

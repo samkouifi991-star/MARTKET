@@ -1,8 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("@/services/market-data/fred");
+vi.mock("@/db/queries/market-data");
 
 import * as fred from "@/services/market-data/fred";
+import { getLatestStoredEconomicSeries } from "@/db/queries/market-data";
 import { resolveInflationFactor } from "./macro";
 
 function liveSeries(value: number): Awaited<ReturnType<typeof fred.getSeries>> {
@@ -27,7 +29,14 @@ function staleSeries(value: number): Awaited<ReturnType<typeof fred.getSeries>> 
 }
 
 describe("resolveInflationFactor freshness propagation", () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    // No stored fallback in these tests — every scenario here exercises the
+    // live path (live or a real "stale" live result, never a genuine fetch
+    // failure), so getFredSeriesWithFallback should never even reach a DB
+    // read; this just keeps it from throwing if it somehow did.
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue(null);
+  });
 
   it("marks the factor live when every contributing FRED series is live", async () => {
     vi.mocked(fred.getSeries).mockImplementation(async (country: string, indicator: string) => {

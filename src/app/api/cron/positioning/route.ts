@@ -16,7 +16,11 @@ export async function GET(req: NextRequest) {
 
   const { okCount, failCount } = await runJobForEachSymbol("cftc:positioning", symbols, async (symbol) => {
     const positioning = await cftc.getInstitutionalPositioning(symbol);
-    if (positioning.status !== "live" || !positioning.value) throw new Error(positioning.error ?? "CFTC data unavailable");
+    // Store any real report (status "live" or "stale" — both carry an
+    // actual, not-fabricated value; only "unavailable"/"error" don't).
+    // Rejecting "stale" here would silently drop real historical reports
+    // that are still within CFTC's own freshness limit, just not brand new.
+    if (!positioning.value) throw new Error(positioning.error ?? "CFTC data unavailable");
     await upsertPositioning(symbol, positioning.value, positioning.source);
   });
 

@@ -22,9 +22,7 @@ import { computeCurrentMonthStat, computeHistoricalSampleDepth } from "@/lib/eng
 import { formatPrice } from "@/lib/format";
 import { DataFreshness, Instrument, MarketScore, PriceData, SeasonalityStat } from "@/lib/types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
-import * as cftc from "@/services/market-data/cftc";
-import { getQuoteWithFallback, getDailyCandlesWithFallback } from "@/services/market-data/last-known-good";
-import * as retailSentiment from "@/services/market-data/retail-sentiment";
+import { getQuoteWithFallback, getDailyCandlesWithFallback, getPositioningWithFallback, getRetailSentimentWithFallback } from "@/services/market-data/last-known-good";
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import { seasonalityDepthFreshness, worseOf } from "./types";
@@ -57,7 +55,9 @@ export type SmartMoneyCardData = { signal: string; confidence: number; explanati
 const MIN_YEARS_FOR_LIVE_SEASONALITY = 3;
 
 async function institutionalCard(symbol: string, mode: DataMode): Promise<CardResult<InstitutionalCardData>> {
-  const result = await cftc.getInstitutionalPositioning(symbol);
+  // Storage-first: live CFTC call first, falls back to the last stored
+  // report (DELAYED/STALE) on failure — see last-known-good.ts.
+  const result = await getPositioningWithFallback(symbol);
   if (result.value) {
     const v = result.value;
     return {
@@ -73,7 +73,7 @@ async function institutionalCard(symbol: string, mode: DataMode): Promise<CardRe
         strength: v.strength,
         reportDate: v.reportDate,
       },
-      freshness: result.status, // "live" or "stale" — a too-old report never reaches here with a value
+      freshness: result.status, // "live", "delayed", or "stale" — a report beyond CFTC's freshness limit never reaches here with a value
       source: result.source,
       lastUpdated: result.sourceUpdatedAt,
     };
@@ -112,21 +112,23 @@ async function retailCard(symbol: string): Promise<CardResult<NormalizedRetailSe
   if (!mapping?.myfxbookSymbol && !mapping?.igEpic) {
     return { data: null, freshness: "not_applicable", source: "Retail Sentiment", lastUpdated: null, reason: `No retail-sentiment provider (Myfxbook/IG) covers ${symbol} in the current provider set` };
   }
-  const result = await retailSentiment.getRetailSentiment(symbol);
-  if (result.status === "live" && result.value) {
-    return { data: result.value, freshness: "live", source: result.source, lastUpdated: result.sourceUpdatedAt };
+  // Storage-first: live provider first, falls back to the last stored
+  // snapshot (DELAYED/STALE) on failure — see last-known-good.ts.
+  const result = await getRetailSentimentWithFallback(symbol);
+  if (isUsable(result.status, result.value)) {
+    return { data: result.value, freshness: result.status, source: result.source, lastUpdated: result.sourceUpdatedAt };
   }
   return { data: null, freshness: result.status === "error" ? "error" : "unavailable", source: result.source, lastUpdated: null, reason: result.error };
 }
 
 async function smartMoneyCard(symbol: string): Promise<CardResult<SmartMoneyCardData>> {
   const result = await resolveSmartMoney(symbol);
-  if (result.freshness !== "live") {
+  if (result.freshness === "unavailable" || result.freshness === "error" || result.freshness === "not_applicable") {
     return { data: null, freshness: result.freshness, source: result.provider, lastUpdated: null, reason: result.explanation };
   }
   return {
     data: { signal: result.signal, confidence: result.confidence, explanation: result.explanation },
-    freshness: "live",
+    freshness: result.freshness,
     source: result.provider,
     lastUpdated: new Date().toISOString(),
   };

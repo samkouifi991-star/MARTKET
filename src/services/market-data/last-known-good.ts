@@ -1,20 +1,50 @@
-// Last-known-good fallback for quote/daily-candle reads on the *display and
-// scoring* path (not cron ingestion, which must stay pure-live — it's the
-// thing that populates the storage this file reads back). Architecture:
-//   FMP ingestion -> Neon -> factor calculations -> stored scores -> UI
+// Last-known-good fallback for the *display and scoring* path (not cron
+// ingestion, which must stay pure-live — it's the thing that populates the
+// storage this file reads back), covering every provider type: FMP quotes/
+// candles, CFTC institutional positioning, FRED macro series, and retail
+// sentiment. Architecture:
+//   Provider -> scheduled ingestion -> Neon -> factor engine -> score -> UI
 // The page should primarily reflect real stored data; a failed live refresh
-// must degrade the freshness badge, not blank the page. Built specifically
-// to fix an outage where FMP 429s made a page with real 228-row Neon
-// history for GBPUSD render as fully unavailable.
+// must degrade the freshness badge, not blank the page. Originally built to
+// fix an outage where FMP 429s made a page with real 228-row Neon history
+// for GBPUSD render as fully unavailable; extended to CFTC/FRED/retail
+// sentiment so the whole provider layer follows the same architecture, not
+// just price/candles.
 //
-// Rule (verbatim from the spec that motivated this): if the latest live
-// call didn't return "live", fall back to whatever was last actually
-// stored — recent stored data reads DELAYED, older reads STALE, and only
-// "there has never been a stored value at all" reads UNAVAILABLE. A stored
-// value is never erased or hidden just because the newest refresh failed.
+// General rule (verbatim from the spec that motivated the FMP version): if
+// the latest live call didn't return usable data, fall back to whatever was
+// last actually stored — recent stored data reads DELAYED, older reads
+// STALE, and only "there has never been a stored value at all" reads
+// UNAVAILABLE. A stored value is never erased or hidden just because the
+// newest refresh failed.
+//
+// One deliberate split by provider type, though: FMP quotes/candles treat
+// any live status other than exactly "live" as a reason to check storage
+// (there's no meaningful "live but old" reading for a price tick). CFTC and
+// FRED both have their own real staleness concept baked into the live
+// path itself (a CFTC report ages by report-date, a FRED series by
+// observation-date) — a live call that comes back "stale" is still the
+// freshest data obtainable, strictly at least as fresh as anything in
+// storage, so only a genuine fetch failure (unavailable/error) triggers a
+// storage read for those two (see liveFetchFailed below). Retail sentiment
+// has no such concept at the provider level (Myfxbook/IG only ever return
+// "live" or a failure), so it follows the FMP pattern instead.
 import * as fmp from "./fmp";
-import { getLatestStoredPrice, getLatestStoredDailyCandles } from "@/db/queries/market-data";
-import { NormalizedCandle, NormalizedQuote, Provenance } from "../types";
+import * as cftc from "./cftc";
+import * as fred from "./fred";
+import * as retailSentiment from "./retail-sentiment";
+import { CftcPositioningResult, isCftcReportWithinFreshnessLimit } from "./cftc";
+import { classifyFredFreshness } from "./fred";
+import { FredIndicatorKey } from "./fred-series";
+import { NormalizedRetailSentiment } from "./retail-sentiment";
+import {
+  getLatestStoredPrice,
+  getLatestStoredDailyCandles,
+  getLatestStoredPositioning,
+  getLatestStoredRetailSentiment,
+  getLatestStoredEconomicSeries,
+} from "@/db/queries/market-data";
+import { FredSeriesPoint, NormalizedCandle, NormalizedQuote, Provenance } from "../types";
 
 // Matches the real cron cadence (daily, once/day — see vercel.json and
 // gbpusd-validation.ts's own CRON_SCHEDULE comment on why this project's
@@ -65,5 +95,99 @@ export async function getDailyCandlesWithFallback(symbol: string, days = 260): P
     nextExpectedUpdate: null,
     value: stored.candles,
     error: `Live refresh unavailable (${live.error ?? live.status}) — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}`,
+  };
+}
+
+// CFTC/FRED/retail-sentiment update far less often than a price tick (a
+// COT report weekly, most macro indicators monthly-or-slower, sentiment
+// snapshots on the cron's own cadence) — a live call that already came back
+// "live" or even a real but merely-old "stale"/"delayed" result IS the
+// freshest obtainable data, so unlike price/candles above, only a genuine
+// fetch failure (unavailable/error — no value at all) should trigger a
+// storage read. Falling back to storage on a real "stale" live result would
+// be strictly worse: storage can only be at least as old.
+function liveFetchFailed<T>(live: Provenance<T>): boolean {
+  return live.status === "unavailable" || live.status === "error";
+}
+
+export async function getPositioningWithFallback(symbol: string): Promise<Provenance<CftcPositioningResult>> {
+  const live = await cftc.getInstitutionalPositioning(symbol);
+  if (!liveFetchFailed(live)) return live;
+
+  const stored = await getLatestStoredPositioning(symbol);
+  if (!stored) return live; // never had a stored report -> surface the live unavailable/error unchanged
+
+  // "Never use a report beyond the existing freshness limits" — the same
+  // ceiling the live path itself enforces (CFTC_STALE_WINDOW_DAYS), applied
+  // to the stored report's own reportDate, independent of how recently it
+  // was fetched. A report the live path would itself reject as too old
+  // must not be resurrected just because it's the newest thing in storage.
+  if (!isCftcReportWithinFreshnessLimit(stored.positioning.reportDate)) return live;
+
+  const freshness = classifyStoredAge(stored.fetchedAt);
+  return {
+    provider: "cftc",
+    source: `${live.source} (last known good — stored)`,
+    status: freshness,
+    fetchedAt: stored.fetchedAt.toISOString(),
+    sourceUpdatedAt: stored.positioning.reportDate,
+    nextExpectedUpdate: null,
+    value: stored.positioning,
+    error: `Live refresh unavailable (${live.error ?? live.status}) — showing last stored CFTC report (${stored.positioning.reportDate}), stored ${stored.fetchedAt.toISOString()}`,
+  };
+}
+
+export async function getFredSeriesWithFallback(country: string, indicator: FredIndicatorKey, limit = 24): Promise<Provenance<FredSeriesPoint[]>> {
+  const live = await fred.getSeries(country, indicator, limit);
+  if (!liveFetchFailed(live)) return live;
+
+  const stored = await getLatestStoredEconomicSeries(country, indicator, limit);
+  if (!stored || stored.points.length === 0) return live; // never had a stored observation -> unchanged
+
+  // Freshness is classified from the observation's own age, exactly like
+  // the live path (classifyFredFreshness) — a stored point isn't "less
+  // fresh" just because it came from Neon; it's the same real data.
+  const latestObservationDate = stored.points[stored.points.length - 1].date;
+  const { freshness, ageDays, cadence } = classifyFredFreshness(indicator, latestObservationDate);
+  return {
+    provider: "fred",
+    source: `${live.source} (last known good — stored)`,
+    status: freshness,
+    fetchedAt: stored.fetchedAt.toISOString(),
+    sourceUpdatedAt: latestObservationDate,
+    nextExpectedUpdate: null,
+    value: stored.points,
+    error: `Live refresh unavailable (${live.error ?? live.status}) — showing stored observations, latest dated ${latestObservationDate} (~${ageDays}d old, ${cadence} cadence)`,
+  };
+}
+
+export async function getRetailSentimentWithFallback(symbol: string): Promise<Provenance<NormalizedRetailSentiment>> {
+  const live = await retailSentiment.getRetailSentiment(symbol);
+  // Retail sentiment has no intrinsic staleness concept at the provider
+  // level (Myfxbook/IG only ever return "live" or a failure) — so unlike
+  // the CFTC/FRED "already-real-data" carve-out above, anything short of
+  // "live" here means the fetch genuinely didn't produce this instant's
+  // reading, and storage is the only source of an honest prior value.
+  if (live.status === "live") return live;
+
+  const stored = await getLatestStoredRetailSentiment(symbol);
+  // "If no valid observation has ever existed, remain UNAVAILABLE" — a
+  // stored row only exists here at all when a provider genuinely succeeded
+  // at write time (getLatestStoredRetailSentiment only reads status="live"
+  // rows), so this is never a fabricated stand-in.
+  if (!stored) return live;
+
+  const freshness = classifyStoredAge(stored.fetchedAt);
+  return {
+    // The DB column is a free varchar, but it's only ever written from a
+    // real ProviderName at insert time (see cron/retail-sentiment/route.ts).
+    provider: stored.provider as Provenance<NormalizedRetailSentiment>["provider"],
+    source: `${stored.source} (last known good — stored)`,
+    status: freshness,
+    fetchedAt: stored.fetchedAt.toISOString(),
+    sourceUpdatedAt: stored.fetchedAt.toISOString(),
+    nextExpectedUpdate: null,
+    value: { symbol, pctLong: stored.pctLong, pctShort: stored.pctShort },
+    error: `Live refresh unavailable (${live.error ?? live.status}) — showing last stored snapshot from ${stored.fetchedAt.toISOString()}`,
   };
 }

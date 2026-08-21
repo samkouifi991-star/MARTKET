@@ -1,11 +1,30 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("./fmp");
+vi.mock("./cftc");
+vi.mock("./fred");
+vi.mock("./retail-sentiment");
 vi.mock("@/db/queries/market-data");
 
 import * as fmp from "./fmp";
-import { getLatestStoredPrice, getLatestStoredDailyCandles } from "@/db/queries/market-data";
-import { getQuoteWithFallback, getDailyCandlesWithFallback } from "./last-known-good";
+import * as cftc from "./cftc";
+import * as fred from "./fred";
+import * as retailSentiment from "./retail-sentiment";
+import {
+  getLatestStoredPrice,
+  getLatestStoredDailyCandles,
+  getLatestStoredPositioning,
+  getLatestStoredRetailSentiment,
+  getLatestStoredEconomicSeries,
+} from "@/db/queries/market-data";
+import {
+  getQuoteWithFallback,
+  getDailyCandlesWithFallback,
+  getPositioningWithFallback,
+  getFredSeriesWithFallback,
+  getRetailSentimentWithFallback,
+} from "./last-known-good";
+import { CftcPositioningResult } from "./cftc";
 
 const down = { provider: "fmp" as const, source: "n/a", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "RATE_LIMITED" };
 
@@ -83,5 +102,162 @@ describe("getDailyCandlesWithFallback", () => {
 
     expect(result.status).toBe("stale");
     expect(result.fetchedAt).toBe(storedAt.toISOString());
+  });
+});
+
+function fixturePositioning(overrides: Partial<CftcPositioningResult> = {}): CftcPositioningResult {
+  return {
+    classification: "Asset Manager",
+    reportDate: hoursAgo(240).toISOString(), // 10 days — within the live path's own "live" window
+    longContracts: 60000,
+    shortContracts: 14000,
+    netPositioning: 46000,
+    pctLong: 81,
+    pctShort: 19,
+    openInterest: 210000,
+    netWeeklyChange: 2000,
+    percentile1y: 78,
+    percentile3y: 74,
+    direction: "Bullish",
+    strength: "Strong",
+    netHistory: [{ reportDate: hoursAgo(240).toISOString(), netPositioning: 46000 }],
+    marketAndExchangeName: "GBP - CME",
+    cftcContractMarketCode: "099741",
+    ...overrides,
+  };
+}
+
+describe("getPositioningWithFallback", () => {
+  it("passes through a live 'stale' result unchanged — already the freshest obtainable data, not a reason to check storage", async () => {
+    const live = { provider: "cftc" as const, source: "CFTC Traders in Financial Futures", status: "stale" as const, fetchedAt: "now", sourceUpdatedAt: "now", nextExpectedUpdate: "next-friday", value: fixturePositioning() };
+    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(live);
+
+    const result = await getPositioningWithFallback("GBPUSD");
+
+    expect(result).toBe(live);
+    expect(getLatestStoredPositioning).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a recently-stored report as DELAYED when the live call genuinely fails", async () => {
+    const down = { provider: "cftc" as const, source: "CFTC Traders in Financial Futures", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "request failed" };
+    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
+    vi.mocked(cftc.isCftcReportWithinFreshnessLimit).mockReturnValue(true);
+    vi.mocked(getLatestStoredPositioning).mockResolvedValue({ positioning: fixturePositioning(), fetchedAt: hoursAgo(2) });
+
+    const result = await getPositioningWithFallback("GBPUSD");
+
+    expect(result.status).toBe("delayed");
+    expect(result.value?.netPositioning).toBe(46000);
+  });
+
+  it("classifies an older stored report as STALE, not DELAYED, while still using the real data", async () => {
+    const down = { provider: "cftc" as const, source: "CFTC Traders in Financial Futures", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "request failed" };
+    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
+    vi.mocked(cftc.isCftcReportWithinFreshnessLimit).mockReturnValue(true);
+    vi.mocked(getLatestStoredPositioning).mockResolvedValue({ positioning: fixturePositioning(), fetchedAt: hoursAgo(200) });
+
+    const result = await getPositioningWithFallback("GBPUSD");
+
+    expect(result.status).toBe("stale");
+  });
+
+  it("never uses a stored report beyond the existing CFTC freshness limit, even if it's the newest thing stored", async () => {
+    const down = { provider: "cftc" as const, source: "CFTC Traders in Financial Futures", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "request failed" };
+    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
+    vi.mocked(cftc.isCftcReportWithinFreshnessLimit).mockReturnValue(false); // report itself too old, per CFTC's own ceiling
+    vi.mocked(getLatestStoredPositioning).mockResolvedValue({ positioning: fixturePositioning(), fetchedAt: hoursAgo(1) });
+
+    const result = await getPositioningWithFallback("GBPUSD");
+
+    expect(result).toBe(down); // the live unavailable result, unchanged — not the too-old stored report
+  });
+
+  it("reports the live result unchanged when there has never been a stored report", async () => {
+    const down = { provider: "cftc" as const, source: "CFTC Traders in Financial Futures", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "no CFTC coverage" };
+    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
+    vi.mocked(getLatestStoredPositioning).mockResolvedValue(null);
+
+    const result = await getPositioningWithFallback("EURGBP");
+
+    expect(result).toBe(down);
+  });
+});
+
+describe("getFredSeriesWithFallback", () => {
+  it("passes through a live 'stale' result unchanged — a real observation is already the freshest obtainable", async () => {
+    const live = { provider: "fred" as const, source: "FRED (Federal Reserve Economic Data)", status: "stale" as const, fetchedAt: "now", sourceUpdatedAt: "2024-01-01", nextExpectedUpdate: null, value: [{ date: "2024-01-01", value: 3.1 }] };
+    vi.mocked(fred.getSeries).mockResolvedValue(live);
+
+    const result = await getFredSeriesWithFallback("GB", "cpi");
+
+    expect(result).toBe(live);
+    expect(getLatestStoredEconomicSeries).not.toHaveBeenCalled();
+  });
+
+  it("falls back to stored observations and classifies freshness from the observation's own age, like the live path does", async () => {
+    const down = { provider: "fred" as const, source: "FRED (Federal Reserve Economic Data)", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "FRED_API_KEY is not configured" };
+    vi.mocked(fred.getSeries).mockResolvedValue(down);
+    vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 40, cadence: "monthly" });
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue({ points: [{ date: "2026-06-01", value: 2.7 }], fetchedAt: hoursAgo(2) });
+
+    const result = await getFredSeriesWithFallback("US", "cpi");
+
+    expect(result.status).toBe("delayed");
+    expect(result.value?.[0].value).toBe(2.7);
+    expect(result.sourceUpdatedAt).toBe("2026-06-01"); // the real observation date, not "now"
+  });
+
+  it("reports the live result unchanged when there has never been a stored observation", async () => {
+    const down = { provider: "fred" as const, source: "FRED (Federal Reserve Economic Data)", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "No FRED series mapped for JP/realGdp" };
+    vi.mocked(fred.getSeries).mockResolvedValue(down);
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue(null);
+
+    const result = await getFredSeriesWithFallback("JP", "realGdp");
+
+    expect(result).toBe(down);
+  });
+});
+
+describe("getRetailSentimentWithFallback", () => {
+  it("passes through the live result unchanged when the live call succeeds", async () => {
+    const live = { provider: "myfxbook" as const, source: "Myfxbook Community Outlook", status: "live" as const, fetchedAt: "now", sourceUpdatedAt: "now", nextExpectedUpdate: null, value: { symbol: "EURUSD", pctLong: 62, pctShort: 38 } };
+    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(live);
+
+    const result = await getRetailSentimentWithFallback("EURUSD");
+
+    expect(result).toBe(live);
+    expect(getLatestStoredRetailSentiment).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a recently-stored snapshot as DELAYED when the live call fails", async () => {
+    const down = { provider: "myfxbook" as const, source: "Myfxbook Community Outlook", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "request failed" };
+    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
+    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "myfxbook", source: "Myfxbook Community Outlook", fetchedAt: hoursAgo(2) });
+
+    const result = await getRetailSentimentWithFallback("EURUSD");
+
+    expect(result.status).toBe("delayed");
+    expect(result.value?.pctLong).toBe(58);
+  });
+
+  it("classifies an older stored snapshot as STALE, not DELAYED", async () => {
+    const down = { provider: "myfxbook" as const, source: "Myfxbook Community Outlook", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "request failed" };
+    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
+    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue({ pctLong: 58, pctShort: 42, provider: "myfxbook", source: "Myfxbook Community Outlook", fetchedAt: hoursAgo(200) });
+
+    const result = await getRetailSentimentWithFallback("EURUSD");
+
+    expect(result.status).toBe("stale");
+  });
+
+  it("remains UNAVAILABLE when no valid observation has ever existed — never fabricates a snapshot", async () => {
+    const down = { provider: "myfxbook" as const, source: "Myfxbook Community Outlook", status: "unavailable" as const, fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "no coverage" };
+    vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
+    vi.mocked(getLatestStoredRetailSentiment).mockResolvedValue(null);
+
+    const result = await getRetailSentimentWithFallback("BTCUSD");
+
+    expect(result).toBe(down);
+    expect(result.status).toBe("unavailable");
   });
 });

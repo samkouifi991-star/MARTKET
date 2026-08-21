@@ -2,7 +2,7 @@ import { getInstrument } from "@/lib/instruments";
 import { macroFactor as demoMacroFactor, inflationFactorFor as demoInflationFactor, interestRateFactor as demoInterestRateFactor, CCY_TO_COUNTRY } from "@/lib/scoring";
 import { computeCountryMacroScores, computeFxDifferential, CountryMacroScores } from "@/lib/engines/macro-differential";
 import { FredIndicatorKey } from "@/services/market-data/fred-series";
-import * as fred from "@/services/market-data/fred";
+import { getFredSeriesWithFallback } from "@/services/market-data/last-known-good";
 import { FredSeriesPoint } from "@/services/types";
 import { demoFallbackFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
@@ -35,7 +35,7 @@ function clamp(v: number, min = -10, max = 10): number {
 type CountryMacroScoresWithFreshness = CountryMacroScores & { freshness: DataFreshness | null };
 
 async function fetchCountryScores(country: string, indicators: FredIndicatorKey[]): Promise<CountryMacroScoresWithFreshness> {
-  const results = await Promise.all(indicators.map((key) => fred.getSeries(country, key)));
+  const results = await Promise.all(indicators.map((key) => getFredSeriesWithFallback(country, key)));
   const seriesByIndicator: Partial<Record<FredIndicatorKey, FredSeriesPoint[]>> = {};
   let freshness: DataFreshness | null = null;
   results.forEach((r, i) => {
@@ -180,7 +180,7 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode)
 }
 
 async function fetchLatestRates(country: string): Promise<{ policyRate: number | null; trend: number; freshness: DataFreshness }> {
-  const result = await fred.getSeries(country, "policyRate", 6);
+  const result = await getFredSeriesWithFallback(country, "policyRate", 6);
   if ((result.status !== "live" && result.status !== "delayed" && result.status !== "stale") || !result.value || result.value.length === 0) {
     return { policyRate: null, trend: 0, freshness: "unavailable" };
   }

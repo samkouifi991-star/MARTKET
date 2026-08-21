@@ -8,11 +8,12 @@
 // last-known-good.ts): when a live provider call fails, the display/scoring
 // pipeline needs to read back exactly what was last actually stored, not
 // just append to it.
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import { marketPrices, marketCandles, institutionalPositioning, retailSentiment, economicIndicators, economicEvents, newsArticles } from "../schema";
-import { NormalizedCandle, NormalizedEconomicEvent, NormalizedNewsArticle, NormalizedQuote } from "@/services/types";
+import { FredSeriesPoint, NormalizedCandle, NormalizedEconomicEvent, NormalizedNewsArticle, NormalizedQuote } from "@/services/types";
 import { CftcPositioningResult } from "@/services/market-data/cftc";
+import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import { FredIndicatorKey } from "@/services/market-data/fred-series";
 
 export async function upsertMarketPrice(symbol: string, quote: NormalizedQuote, provider: string): Promise<void> {
@@ -136,6 +137,94 @@ export async function getLatestStoredPrice(symbol: string): Promise<StoredPrice 
   const r = rows[0];
   if (!r) return null;
   return { price: r.price, changePct24h: r.changePct24h, provider: r.provider, sourceUpdatedAt: r.sourceUpdatedAt, fetchedAt: r.fetchedAt };
+}
+
+export type StoredPositioning = { positioning: CftcPositioningResult; fetchedAt: Date };
+
+/** The latest stored CFTC report for this symbol (any classification),
+ * reconstructed into the exact same CftcPositioningResult shape the live
+ * client returns — including netHistory, rebuilt from every stored row for
+ * that symbol/classification pair rather than stored redundantly per row.
+ * marketAndExchangeName/cftcContractMarketCode aren't stored per row (pure
+ * provenance metadata, not consumed by scoring) — recovered from
+ * symbol-map.ts's own mapping instead of a guess. */
+export async function getLatestStoredPositioning(symbol: string): Promise<StoredPositioning | null> {
+  const db = getDb();
+  const latestRows = await db.select().from(institutionalPositioning).where(eq(institutionalPositioning.symbol, symbol)).orderBy(desc(institutionalPositioning.reportDate)).limit(1);
+  const latest = latestRows[0];
+  if (!latest) return null;
+
+  const historyRows = await db
+    .select({ reportDate: institutionalPositioning.reportDate, netPositioning: institutionalPositioning.netPositioning })
+    .from(institutionalPositioning)
+    .where(and(eq(institutionalPositioning.symbol, symbol), eq(institutionalPositioning.classification, latest.classification)))
+    .orderBy(desc(institutionalPositioning.reportDate))
+    .limit(160); // ~3 years of weekly reports, matching the live client's own window
+
+  const netHistory = historyRows.map((r) => ({ reportDate: r.reportDate.toISOString(), netPositioning: r.netPositioning }));
+
+  return {
+    positioning: {
+      classification: latest.classification,
+      reportDate: latest.reportDate.toISOString(),
+      longContracts: latest.longContracts,
+      shortContracts: latest.shortContracts,
+      netPositioning: latest.netPositioning,
+      pctLong: latest.pctLong,
+      pctShort: latest.pctShort,
+      openInterest: latest.openInterest,
+      netWeeklyChange: latest.netWeeklyChange,
+      percentile1y: latest.percentile1y,
+      percentile3y: latest.percentile3y,
+      direction: latest.direction as CftcPositioningResult["direction"],
+      strength: latest.strength as CftcPositioningResult["strength"],
+      netHistory,
+      marketAndExchangeName: getSymbolMapping(symbol)?.cftc?.reportName ?? "",
+      cftcContractMarketCode: null,
+    },
+    fetchedAt: latest.fetchedAt,
+  };
+}
+
+export type StoredRetailSentiment = { pctLong: number; pctShort: number; provider: string; source: string; fetchedAt: Date };
+
+/** The latest stored retail-sentiment snapshot for this symbol — only ever
+ * written from a genuinely live provider read (see insertRetailSentiment's
+ * callers), so every stored row here is itself a real prior observation,
+ * never a fabricated one. */
+export async function getLatestStoredRetailSentiment(symbol: string): Promise<StoredRetailSentiment | null> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(retailSentiment)
+    .where(and(eq(retailSentiment.symbol, symbol), eq(retailSentiment.status, "live")))
+    .orderBy(desc(retailSentiment.fetchedAt))
+    .limit(1);
+  const r = rows[0];
+  if (!r) return null;
+  return { pctLong: r.pctLong, pctShort: r.pctShort, provider: r.provider, source: r.source, fetchedAt: r.fetchedAt };
+}
+
+export type StoredEconomicSeries = { points: FredSeriesPoint[]; fetchedAt: Date };
+
+/** The most recent `limit` stored observations for a country/indicator,
+ * oldest-first (matching fred.ts's own convention) — the storage-first
+ * counterpart to fred.getSeries(), read from economic_indicators rather
+ * than called live. */
+export async function getLatestStoredEconomicSeries(country: string, indicator: FredIndicatorKey, limit = 24): Promise<StoredEconomicSeries | null> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(economicIndicators)
+    .where(and(eq(economicIndicators.country, country), eq(economicIndicators.indicator, indicator)))
+    .orderBy(desc(economicIndicators.date))
+    .limit(limit);
+  if (rows.length === 0) return null;
+
+  const ascending = [...rows].reverse();
+  const points: FredSeriesPoint[] = ascending.map((r) => ({ date: r.date.toISOString().slice(0, 10), value: r.value }));
+  const fetchedAt = rows.reduce((max, r) => (r.fetchedAt > max ? r.fetchedAt : max), rows[0].fetchedAt);
+  return { points, fetchedAt };
 }
 
 export type StoredDailyCandles = { candles: NormalizedCandle[]; fetchedAt: Date };

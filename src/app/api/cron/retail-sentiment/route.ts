@@ -24,8 +24,12 @@ export async function GET(req: NextRequest) {
 
   const { okCount, failCount } = await runJobForEachSymbol("retail-sentiment", symbols, async (symbol) => {
     const sentiment = await retailSentiment.getRetailSentiment(symbol);
-    if (sentiment.status !== "live" || !sentiment.value) throw new Error(sentiment.error ?? "Retail sentiment unavailable");
-    await insertRetailSentiment(symbol, sentiment.value.pctLong, sentiment.value.pctShort, "live", sentiment.provider, sentiment.source);
+    if (!sentiment.value) throw new Error(sentiment.error ?? "Retail sentiment unavailable");
+    // Store the real status the provider reported (currently always "live"
+    // for Myfxbook/IG — neither has an intrinsic staleness concept — but
+    // this stays correct if a future provider adds one), not a hardcoded
+    // "live" regardless of what actually came back.
+    await insertRetailSentiment(symbol, sentiment.value.pctLong, sentiment.value.pctShort, sentiment.status, sentiment.provider, sentiment.source);
   });
 
   return NextResponse.json({ job: "retail-sentiment", okCount, failCount });

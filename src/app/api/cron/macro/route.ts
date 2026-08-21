@@ -22,7 +22,13 @@ export async function GET(req: NextRequest) {
       const t0 = Date.now();
       try {
         const result = await fred.getSeries(country, indicatorKey, 36);
-        if (result.status !== "live" || !result.value) throw new Error(result.error ?? "series unavailable");
+        // Store any real observation set (status "live", "delayed", or
+        // "stale" — all carry genuine FRED data, just classified by
+        // publication age; only "unavailable"/"error" have no value).
+        // Rejecting delayed/stale here would silently drop real macro data
+        // for slower-cadence indicators (quarterly GDP, lagging non-US
+        // series) that are never going to read "live" under a tight window.
+        if (!result.value) throw new Error(result.error ?? "series unavailable");
         for (const point of result.value) {
           await upsertEconomicIndicator(country, indicatorKey, meta.id, point.date, point.value);
         }
