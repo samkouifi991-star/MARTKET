@@ -18,7 +18,7 @@ vi.mock("../client", () => ({
   }),
 }));
 
-import { recordScoreHistory } from "./scores";
+import { recordScoreHistory, flooredSince, VALID_SCORE_HISTORY_FROM } from "./scores";
 import { MarketScore } from "@/lib/types";
 
 describe("recordScoreHistory", () => {
@@ -86,5 +86,36 @@ describe("recordScoreHistory", () => {
 
     const factorScoresValues = insertedValues[1] as { provider: string }[];
     expect(factorScoresValues[0].provider).toBe("unknown");
+  });
+});
+
+describe("flooredSince — pre-persistence-gating history cutoff", () => {
+  // The real problem this locks in: before the deployment that shipped
+  // persist:true gating, computeLiveMarketScore wrote a market_scores row
+  // on every static build-time prerender of /markets/[symbol]. Neither
+  // market_scores nor factor_scores has a column identifying a row's
+  // origin, so a stray build-time row can't be told apart from a genuine
+  // cron observation by anything stored on it — deleting by inference would
+  // risk discarding real data. The safe fix is a floor: never treat
+  // anything before the gating deployment's timestamp as real history.
+  it("floors a request window that would reach before the cutoff", () => {
+    const since = flooredSince(24 * 365); // "1 year back" reaches well before the cutoff
+    expect(since.getTime()).toBe(VALID_SCORE_HISTORY_FROM.getTime());
+  });
+
+  it("leaves a request window that stays after the cutoff untouched", () => {
+    // Pin "now" comfortably after the (fixed, real) cutoff so this test
+    // doesn't depend on how much real wall-clock time has passed since the
+    // cutoff deployment — which could itself be very recent.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(VALID_SCORE_HISTORY_FROM.getTime() + 60 * 24 * 3_600_000)); // 60 days later
+    try {
+      const sinceHours = 1;
+      const since = flooredSince(sinceHours);
+      expect(since.getTime()).toBe(Date.now() - sinceHours * 3_600_000);
+      expect(since.getTime()).toBeGreaterThan(VALID_SCORE_HISTORY_FROM.getTime());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

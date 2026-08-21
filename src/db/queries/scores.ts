@@ -37,11 +37,28 @@ export async function recordScoreHistory(score: MarketScore): Promise<void> {
   );
 }
 
+// Before this deployment went READY, computeLiveMarketScore called
+// recordScoreHistory unconditionally — including from /markets/[symbol]'s
+// static build-time prerenders (it had no dynamic export yet), so every
+// test deployment that session wrote its own market_scores/factor_scores
+// rows. Neither table has an origin/source column, so a build-time row is
+// indistinguishable from a genuine scheduled observation by anything
+// stored on the row itself — deleting by inference would risk discarding
+// real data. Instead every history read floors its window here: rows
+// older than this are never shown as if they were periodic observations.
+// Going forward, only /api/cron/scores (persist:true) writes these tables.
+export const VALID_SCORE_HISTORY_FROM = new Date("2026-08-20T23:33:51.344Z");
+
+export function flooredSince(sinceHours: number): Date {
+  const requested = new Date(Date.now() - sinceHours * 3600_000);
+  return requested < VALID_SCORE_HISTORY_FROM ? VALID_SCORE_HISTORY_FROM : requested;
+}
+
 export type ScoreHistoryPoint = { computedAt: string; totalScore: number; bias: string; confidence: number };
 
 export async function getScoreHistory(symbol: string, sinceHours = 24 * 30): Promise<ScoreHistoryPoint[]> {
   const db = getDb();
-  const since = new Date(Date.now() - sinceHours * 3600_000);
+  const since = flooredSince(sinceHours);
   const rows = await db
     .select()
     .from(marketScores)
@@ -57,7 +74,7 @@ export type FactorChange = { factorKey: string; then: number; now: number; delta
  * (e.g. "+0.8 CPI surprise, +0.5 retail sentiment shift ..."). */
 export async function getFactorChangesSince(symbol: string, sinceHours: number): Promise<FactorChange[]> {
   const db = getDb();
-  const since = new Date(Date.now() - sinceHours * 3600_000);
+  const since = flooredSince(sinceHours);
 
   const latestRows = await db.select().from(factorScores).where(eq(factorScores.symbol, symbol)).orderBy(desc(factorScores.computedAt)).limit(9);
 
