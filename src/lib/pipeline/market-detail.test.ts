@@ -147,7 +147,7 @@ describe("getLiveMarketDetail", () => {
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     vi.mocked(retailSentiment.getRetailSentiment).mockResolvedValue(down);
 
-    const detail = await getLiveMarketDetail("USDCAD", "hybrid");
+    const detail = await getLiveMarketDetail("NZDUSD", "hybrid");
 
     expect(detail.price.freshness).toBe("estimated");
     expect(detail.institutional.freshness).toBe("estimated");

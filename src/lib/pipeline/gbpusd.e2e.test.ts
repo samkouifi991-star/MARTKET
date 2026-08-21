@@ -298,10 +298,11 @@ describe("GBPUSD end-to-end live pipeline", () => {
     vi.mocked(fred.getSeries).mockResolvedValue(down);
     mockIgUnavailable();
 
-    // USDCAD, not GBPUSD/EURUSD: both of those are strict-live symbols with
-    // stricter no-fallback rules (see the next tests), so this proves an
-    // ordinary, not-yet-promoted market keeps the normal hybrid leniency.
-    const score = await computeLiveMarketScore("USDCAD", "hybrid");
+    // NZDUSD, not GBPUSD/EURUSD/USDCAD/etc: all of those are strict-live
+    // symbols with stricter no-fallback rules (see the next tests), so
+    // this proves an ordinary, not-yet-promoted market keeps the normal
+    // hybrid leniency.
+    const score = await computeLiveMarketScore("NZDUSD", "hybrid");
 
     const nonRetailFactors = score.factors.filter((f) => f.key !== "retailSentiment");
     expect(nonRetailFactors.every((f) => f.freshness === "estimated")).toBe(true);
@@ -341,6 +342,24 @@ describe("GBPUSD end-to-end live pipeline", () => {
     mockIgUnavailable();
 
     for (const symbol of ["EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500"]) {
+      const score = await computeLiveMarketScore(symbol, "hybrid");
+      const applicable = score.factors.filter((f) => f.freshness !== "not_applicable");
+      expect(applicable.every((f) => f.freshness === "unavailable" || f.freshness === "error")).toBe(true);
+      expect(score.factors.every((f) => f.contribution === 0)).toBe(true);
+    }
+  });
+
+  it("in hybrid mode, the third-phase batch (AUDUSD, USDCAD, XAGUSD, DJ30) also never falls back to demo data — same strict-live bar as GBPUSD", async () => {
+    const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
+    vi.mocked(fmp.getQuote).mockResolvedValue(down);
+    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
+    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
+    vi.mocked(fred.getSeries).mockResolvedValue(down);
+    mockIgUnavailable();
+
+    for (const symbol of ["AUDUSD", "USDCAD", "XAGUSD", "DJ30"]) {
       const score = await computeLiveMarketScore(symbol, "hybrid");
       const applicable = score.factors.filter((f) => f.freshness !== "not_applicable");
       expect(applicable.every((f) => f.freshness === "unavailable" || f.freshness === "error")).toBe(true);

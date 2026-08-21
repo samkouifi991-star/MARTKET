@@ -55,7 +55,37 @@ export function allowsLiveProviders(): boolean {
 //   SPX500    — equity index, CFTC financial_futures (E-mini) coverage, US
 //               macro proxy, retail sentiment correctly NOT_APPLICABLE (no
 //               Myfxbook/IG coverage for indices)
-const STRICT_LIVE_SYMBOLS = new Set<string>(["GBPUSD", "EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500"]);
+//
+// Third-phase batch (4 of the intended 5 — see NAS100 note below):
+//   AUDUSD    — FX major, AUD/USD differential (AU FRED growth/policy-rate
+//               series newly verified for this batch)
+//   USDCAD    — FX major, USD/CAD differential (CA FRED growth/policy-rate
+//               series newly verified for this batch) — base/quote order
+//               (USD base, CAD quote) uses the exact same generic
+//               computeFxDifferential already proven correct by USDJPY
+//               (also USD-base) in the prior batch; no new logic needed.
+//   XAGUSD    — commodity, CFTC disaggregated SILVER contract (distinct
+//               mapping from XAUUSD's GOLD contract, confirmed against
+//               real CFTC data — the metal-scoring path is not hardcoded
+//               to gold), US macro proxy, myfxbook retail sentiment
+//               coverage exists (myfxbookSymbol: "XAGUSD").
+//   DJ30      — equity index, CFTC financial_futures coverage under the
+//               corrected "DJIA Consolidated" mapping (see symbol-map.ts),
+//               US macro proxy, retail sentiment correctly NOT_APPLICABLE.
+//   NAS100    — NOT added. FMP returned 402 Payment Required on both
+//               /quote and /historical-price-eod/full for ^NDX (confirmed
+//               via a real seed attempt, scripts/five-market-seed.ts) —
+//               this FMP plan doesn't cover the Nasdaq-100 index ticker
+//               (DJ30's ^DJI succeeded on the same run, so this is
+//               specific to ^NDX, not a general outage). No stored price/
+//               candle data exists to fall back to, so promoting it now
+//               would render Price/Technical/Seasonality UNAVAILABLE with
+//               no degradation path — the CFTC mapping fix alone doesn't
+//               make this market viable. Needs either an FMP plan that
+//               covers ^NDX or an alternative ticker before it can join a
+//               live batch; the corrected "NASDAQ-100 Consolidated" CFTC
+//               mapping (see symbol-map.ts) is still fixed and ready.
+const STRICT_LIVE_SYMBOLS = new Set<string>(["GBPUSD", "EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500", "AUDUSD", "USDCAD", "XAGUSD", "DJ30"]);
 
 export function isStrictLiveSymbol(symbol: string): boolean {
   return STRICT_LIVE_SYMBOLS.has(symbol);
