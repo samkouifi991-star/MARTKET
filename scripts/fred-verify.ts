@@ -87,6 +87,12 @@ const SEARCH_QUERIES: { country: string; indicator: FredIndicatorKey; query: str
   { country: "NZ", indicator: "gdpGrowth", query: "New Zealand GDP Growth Rate" },
   { country: "NZ", indicator: "unemploymentRate", query: "New Zealand Unemployment Rate" },
   { country: "NZ", indicator: "policyRate", query: "New Zealand Interbank Rate" },
+  // EURGBP/EURJPY batch: EU has cpi/unemploymentRate/policyRate verified,
+  // but no growth series at all — needed so EURGBP (EU vs GB) and EURJPY
+  // (EU vs JP) get a genuine economicGrowth factor instead of one side
+  // always reading unavailable.
+  { country: "EU", indicator: "realGdp", query: "Euro Area Real GDP" },
+  { country: "EU", indicator: "gdpGrowth", query: "Euro Area GDP Growth Rate" },
 ];
 
 async function main() {
