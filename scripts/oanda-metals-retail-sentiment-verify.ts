@@ -27,6 +27,31 @@ function baseUrl(): string {
   return process.env.OANDA_ENVIRONMENT === "live" ? "https://api-fxtrade.oanda.com" : "https://api-fxpractice.oanda.com";
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 520 is a Cloudflare edge error (transient infra hiccup between this build
+// environment and OANDA), not a real answer from OANDA about instrument
+// coverage — retry a couple of times before treating it as inconclusive,
+// rather than mistaking network flakiness for "not covered".
+async function fetchWithRetry(url: string, token: string, attempts = 3): Promise<{ res: Response; bodyText: string }> {
+  let lastRes: Response | null = null;
+  let lastBody = "";
+  for (let i = 0; i < attempts; i++) {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const bodyText = await res.text();
+    if (res.ok || (res.status !== 520 && res.status < 500)) return { res, bodyText };
+    lastRes = res;
+    lastBody = bodyText;
+    if (i < attempts - 1) {
+      log(`  transient ${res.status} on attempt ${i + 1}/${attempts}, retrying in 3s...`);
+      await sleep(3000);
+    }
+  }
+  return { res: lastRes!, bodyText: lastBody };
+}
+
 async function verifyOne(symbol: string, oandaInstrument: string): Promise<void> {
   log(`==== ${symbol} (OANDA instrument: ${oandaInstrument}) ====`);
   const token = process.env.OANDA_API_TOKEN;
@@ -37,8 +62,7 @@ async function verifyOne(symbol: string, oandaInstrument: string): Promise<void>
 
   const url = `${baseUrl()}/v3/instruments/${encodeURIComponent(oandaInstrument)}/positionBook`;
   try {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    const bodyText = await res.text();
+    const { res, bodyText } = await fetchWithRetry(url, token);
     log(`HTTP status=${res.status} ${res.statusText}`);
     if (!res.ok) {
       log(`RAW_ERROR_BODY: ${bodyText.slice(0, 500)}`);
