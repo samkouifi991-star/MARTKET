@@ -93,6 +93,17 @@ const SEARCH_QUERIES: { country: string; indicator: FredIndicatorKey; query: str
   // always reading unavailable.
   { country: "EU", indicator: "realGdp", query: "Euro Area Real GDP" },
   { country: "EU", indicator: "gdpGrowth", query: "Euro Area GDP Growth Rate" },
+  // DAX40 batch: DE has zero FRED coverage configured at all — needed for
+  // DAX40's full 4-category primary local macro model (growth/inflation/
+  // labor/rates), following the same real-search-then-metadata-confirm
+  // process every other country's series went through. This does NOT by
+  // itself unblock DAX40 for promotion — its price/candle source (FMP 402
+  // on ^GDAXI, unconfirmed either way) is a separate, still-open gap.
+  { country: "DE", indicator: "realGdp", query: "Germany Real GDP" },
+  { country: "DE", indicator: "gdpGrowth", query: "Germany GDP Growth Rate" },
+  { country: "DE", indicator: "cpi", query: "Germany Consumer Price Index" },
+  { country: "DE", indicator: "unemploymentRate", query: "Germany Unemployment Rate" },
+  { country: "DE", indicator: "policyRate", query: "Germany Interbank Rate" },
 ];
 
 async function main() {

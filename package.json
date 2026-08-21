@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && next build",
+    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/commodity-coverage-reconcile.ts; tsx scripts/fred-verify.ts; next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -35,6 +35,7 @@
     "test:eurgbp-eurjpy-promotion-verify": "tsx scripts/eurgbp-eurjpy-promotion-verify.ts",
     "test:four-market-seed-verify": "tsx scripts/four-market-seed-verify.ts",
     "test:six-market-verify": "tsx scripts/six-market-verify.ts",
+    "test:commodity-coverage-reconcile": "tsx scripts/commodity-coverage-reconcile.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
