@@ -29,6 +29,7 @@
     "test:fmp-rate-limit-diagnose": "tsx scripts/fmp-rate-limit-diagnose.ts",
     "test:oanda-verify": "tsx scripts/oanda-verify.ts",
     "test:retail-sentiment-cron-verify": "tsx scripts/retail-sentiment-cron-verify.ts",
+    "test:oanda-fx-market-data-verify": "tsx scripts/oanda-fx-market-data-verify.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
