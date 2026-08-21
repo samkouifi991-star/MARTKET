@@ -247,23 +247,35 @@ export async function getLatestStoredEconomicSeries(country: string, indicator: 
   return { points, fetchedAt };
 }
 
-export type StoredDailyCandles = { candles: NormalizedCandle[]; fetchedAt: Date };
+export type StoredDailyCandles = { candles: NormalizedCandle[]; fetchedAt: Date; provider: string };
 
-/** All stored daily candles for this symbol, oldest first, plus the most
+/** All stored candles for this symbol/timeframe, oldest first, plus the most
  * recent `fetched_at` across those rows (when we last successfully wrote
  * any of them) — the timestamp a last-known-good fallback should report as
- * "as of", not the moment this function happens to be called. */
-export async function getLatestStoredDailyCandles(symbol: string): Promise<StoredDailyCandles | null> {
+ * "as of", not the moment this function happens to be called — and the
+ * provider that wrote the most recent (latest-dated) candle, so a
+ * last-known-good fallback can report the series' TRUE current source
+ * (e.g. "oanda") rather than assuming a fixed provider. Generalized over
+ * timeframe so daily and intraday (4h/1h) share one implementation. */
+export async function getLatestStoredCandles(symbol: string, timeframe: "1d" | "4h" | "1h"): Promise<StoredDailyCandles | null> {
   const db = getDb();
   const rows = await db
     .select()
     .from(marketCandles)
-    .where(and(eq(marketCandles.symbol, symbol), eq(marketCandles.timeframe, "1d")))
+    .where(and(eq(marketCandles.symbol, symbol), eq(marketCandles.timeframe, timeframe)))
     .orderBy(marketCandles.date);
   if (rows.length === 0) return null;
 
   const candles: NormalizedCandle[] = rows.map((r) => ({ date: r.date.toISOString(), open: r.open, high: r.high, low: r.low, close: r.close, volume: r.volume }));
   const fetchedAt = rows.reduce((max, r) => (r.fetchedAt > max ? r.fetchedAt : max), rows[0].fetchedAt);
-  return { candles, fetchedAt };
+  const provider = rows[rows.length - 1].provider; // rows are ordered by date ascending — last row is the latest candle
+  return { candles, fetchedAt, provider };
+}
+
+/** Daily-only convenience wrapper — kept as its own name since it's the
+ * overwhelming majority of existing callers (Technical/Seasonality/price
+ * chart all default to daily). */
+export async function getLatestStoredDailyCandles(symbol: string): Promise<StoredDailyCandles | null> {
+  return getLatestStoredCandles(symbol, "1d");
 }
 

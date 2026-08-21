@@ -2,9 +2,9 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { buildMultiYearDailyCandles } from "@/lib/engines/__fixtures__/candles";
 import type { NormalizedCandle } from "@/services/types";
 
-vi.mock("@/services/market-data/fmp");
+vi.mock("@/services/market-data/market-data-router");
 vi.mock("@/db/queries/market-data");
-import * as fmp from "@/services/market-data/fmp";
+import * as marketData from "@/services/market-data/market-data-router";
 import { getLatestStoredDailyCandles } from "@/db/queries/market-data";
 import { resolveSeasonalityFactor } from "./seasonality";
 
@@ -19,8 +19,8 @@ beforeEach(() => vi.resetAllMocks());
 
 describe("resolveSeasonalityFactor — last-known-good fallback during an FMP outage", () => {
   it("computes a real result from stored history (DELAYED, not UNAVAILABLE) when the live fetch fails but multi-year candles are stored", async () => {
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(getLatestStoredDailyCandles).mockResolvedValue({ candles: multiYearCandles, fetchedAt: new Date(Date.now() - 3 * 3_600_000) });
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(getLatestStoredDailyCandles).mockResolvedValue({ candles: multiYearCandles, fetchedAt: new Date(Date.now() - 3 * 3_600_000), provider: "fmp" });
 
     const factor = await resolveSeasonalityFactor("GBPUSD", "live");
 
@@ -30,8 +30,8 @@ describe("resolveSeasonalityFactor — last-known-good fallback during an FMP ou
   });
 
   it("classifies older stored history as STALE, not DELAYED, while still using the real data", async () => {
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(getLatestStoredDailyCandles).mockResolvedValue({ candles: multiYearCandles, fetchedAt: new Date(Date.now() - 200 * 3_600_000) });
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(getLatestStoredDailyCandles).mockResolvedValue({ candles: multiYearCandles, fetchedAt: new Date(Date.now() - 200 * 3_600_000), provider: "fmp" });
 
     const factor = await resolveSeasonalityFactor("GBPUSD", "live");
 
@@ -39,7 +39,7 @@ describe("resolveSeasonalityFactor — last-known-good fallback during an FMP ou
   });
 
   it("still returns unavailable — not a fabricated result — when there is no stored fallback either", async () => {
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
     vi.mocked(getLatestStoredDailyCandles).mockResolvedValue(null);
 
     const factor = await resolveSeasonalityFactor("GBPUSD", "live");
@@ -49,7 +49,7 @@ describe("resolveSeasonalityFactor — last-known-good fallback during an FMP ou
   });
 
   it("reports live freshness when the live fetch succeeds directly (fallback never consulted)", async () => {
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue({
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue({
       provider: "fmp",
       source: "Financial Modeling Prep",
       status: "live",
@@ -76,7 +76,7 @@ describe("resolveSeasonalityFactor — historical sample depth (real span, not j
     // month "appear twice" (once near each edge) and look falsely
     // multi-year if gated on period-occurrence count instead of real span.
     const oneYearCandles = buildMultiYearDailyCandles({ years: 1, startYear: 2025, startPrice: 1.27, monthBiasPctPerDay: () => 0.01, seed: 3 });
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue({
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue({
       provider: "fmp",
       source: "Financial Modeling Prep",
       status: "live",
@@ -97,7 +97,7 @@ describe("resolveSeasonalityFactor — historical sample depth (real span, not j
 
   it("classifies a 4-year sample as STALE/low-confidence, not full-confidence live", async () => {
     const fourYearCandles = buildMultiYearDailyCandles({ years: 4, startYear: 2021, startPrice: 1.24, monthBiasPctPerDay: () => 0.015, seed: 11 });
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue({
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue({
       provider: "fmp",
       source: "Financial Modeling Prep",
       status: "live",
@@ -116,7 +116,7 @@ describe("resolveSeasonalityFactor — historical sample depth (real span, not j
 
   it("classifies a 7-year sample as DELAYED/reduced-confidence, not full-confidence live", async () => {
     const sevenYearCandles = buildMultiYearDailyCandles({ years: 7, startYear: 2018, startPrice: 1.3, monthBiasPctPerDay: () => 0.015, seed: 21 });
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue({
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue({
       provider: "fmp",
       source: "Financial Modeling Prep",
       status: "live",
@@ -134,7 +134,7 @@ describe("resolveSeasonalityFactor — historical sample depth (real span, not j
 
   it("reports full live confidence only at 10+ years of real span", async () => {
     const tenYearCandles = buildMultiYearDailyCandles({ years: 10, startYear: 2015, startPrice: 1.3, monthBiasPctPerDay: () => 0.015, seed: 31 });
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue({
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue({
       provider: "fmp",
       source: "Financial Modeling Prep",
       status: "live",

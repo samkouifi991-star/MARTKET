@@ -42,7 +42,7 @@
 // provenance (fetchedAt) is tracked on the row but never drives freshness.
 // This keeps provider request volume to the cron's own cadence, never one
 // call per page view.
-import * as fmp from "./fmp";
+import * as marketData from "./market-data-router";
 import * as cftc from "./cftc";
 import * as fred from "./fred";
 import { CftcPositioningResult, isCftcReportWithinFreshnessLimit } from "./cftc";
@@ -52,11 +52,22 @@ import { NormalizedRetailSentiment, classifyRetailSentimentFreshness } from "./r
 import {
   getLatestStoredPrice,
   getLatestStoredDailyCandles,
+  getLatestStoredCandles,
   getLatestStoredPositioning,
   getLatestStoredRetailSentiment,
   getLatestStoredEconomicSeries,
 } from "@/db/queries/market-data";
-import { FredSeriesPoint, NormalizedCandle, NormalizedQuote, Provenance, unavailable } from "../types";
+import { FredSeriesPoint, NormalizedCandle, NormalizedQuote, Provenance, ProviderName, unavailable } from "../types";
+
+// Human-readable label per provider, for the storage-fallback branches
+// below — never a hardcoded "Financial Modeling Prep" regardless of which
+// provider actually wrote the stored row (see item 7: provenance must
+// reflect the TRUE source, e.g. "oanda").
+const PROVIDER_LABEL: Record<string, string> = { fmp: "Financial Modeling Prep", oanda: "OANDA v20" };
+
+function providerLabel(provider: string): string {
+  return PROVIDER_LABEL[provider] ?? provider;
+}
 
 // Matches the real cron cadence (daily, once/day — see vercel.json and
 // gbpusd-validation.ts's own CRON_SCHEDULE comment on why this project's
@@ -70,7 +81,7 @@ function classifyStoredAge(fetchedAt: Date): "delayed" | "stale" {
 }
 
 export async function getQuoteWithFallback(symbol: string): Promise<Provenance<NormalizedQuote>> {
-  const live = await fmp.getQuote(symbol);
+  const live = await marketData.getQuote(symbol);
   if (live.status === "live") return live;
 
   const stored = await getLatestStoredPrice(symbol);
@@ -79,8 +90,8 @@ export async function getQuoteWithFallback(symbol: string): Promise<Provenance<N
   const freshness = classifyStoredAge(stored.fetchedAt);
   const sourceTimestamp = (stored.sourceUpdatedAt ?? stored.fetchedAt).toISOString();
   return {
-    provider: "fmp",
-    source: "Financial Modeling Prep (last known good — stored)",
+    provider: stored.provider as ProviderName,
+    source: `${providerLabel(stored.provider)} (last known good — stored)`,
     status: freshness,
     fetchedAt: stored.fetchedAt.toISOString(), // the real time we stored this, not now()
     sourceUpdatedAt: sourceTimestamp,
@@ -91,7 +102,7 @@ export async function getQuoteWithFallback(symbol: string): Promise<Provenance<N
 }
 
 export async function getDailyCandlesWithFallback(symbol: string, days = 260): Promise<Provenance<NormalizedCandle[]>> {
-  const live = await fmp.getDailyCandles(symbol, days);
+  const live = await marketData.getDailyCandles(symbol, days);
   if (live.status === "live") return live;
 
   const stored = await getLatestStoredDailyCandles(symbol);
@@ -99,8 +110,34 @@ export async function getDailyCandlesWithFallback(symbol: string, days = 260): P
 
   const freshness = classifyStoredAge(stored.fetchedAt);
   return {
-    provider: "fmp",
-    source: "Financial Modeling Prep (last known good — stored)",
+    provider: stored.provider as ProviderName,
+    source: `${providerLabel(stored.provider)} (last known good — stored)`,
+    status: freshness,
+    fetchedAt: stored.fetchedAt.toISOString(),
+    sourceUpdatedAt: stored.candles[stored.candles.length - 1].date,
+    nextExpectedUpdate: null,
+    value: stored.candles,
+    error: `Live refresh unavailable (${live.error ?? live.status}) — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}`,
+  };
+}
+
+/** Same live-then-storage pattern as getDailyCandlesWithFallback, for 4H/1H
+ * candles — the candles cron now writes these to Neon too (see
+ * cron/candles/route.ts), so intraday confirmation gets the same
+ * last-known-good protection daily candles already had, instead of going
+ * unavailable outright whenever a live 4H/1H request fails. */
+export async function getIntradayCandlesWithFallback(symbol: string, interval: "1hour" | "4hour"): Promise<Provenance<NormalizedCandle[]>> {
+  const live = await marketData.getIntradayCandles(symbol, interval);
+  if (live.status === "live") return live;
+
+  const timeframe = interval === "1hour" ? "1h" : "4h";
+  const stored = await getLatestStoredCandles(symbol, timeframe);
+  if (!stored || stored.candles.length === 0) return live;
+
+  const freshness = classifyStoredAge(stored.fetchedAt);
+  return {
+    provider: stored.provider as ProviderName,
+    source: `${providerLabel(stored.provider)} (last known good — stored)`,
     status: freshness,
     fetchedAt: stored.fetchedAt.toISOString(),
     sourceUpdatedAt: stored.candles[stored.candles.length - 1].date,

@@ -2,11 +2,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { buildMultiYearDailyCandles, buildTrendingCandles } from "@/lib/engines/__fixtures__/candles";
 import type { NormalizedCandle } from "@/services/types";
 
-vi.mock("@/services/market-data/fmp");
+vi.mock("@/services/market-data/market-data-router");
 vi.mock("@/services/market-data/cftc");
 vi.mock("@/db/queries/market-data");
 
-import * as fmp from "@/services/market-data/fmp";
+import * as marketData from "@/services/market-data/market-data-router";
 import * as cftc from "@/services/market-data/cftc";
 import { getLatestStoredPrice, getLatestStoredDailyCandles, getLatestStoredRetailSentiment } from "@/db/queries/market-data";
 import { getLiveMarketDetail } from "./market-detail";
@@ -21,7 +21,7 @@ const dailyCandles: NormalizedCandle[] = buildTrendingCandles({ bars: 260, start
 const multiYearCandles: NormalizedCandle[] = buildMultiYearDailyCandles({ years: 12, startYear: 2013, startPrice: 1.24, monthBiasPctPerDay: () => 0.02, seed: 55 });
 
 function mockAllLive() {
-  vi.mocked(fmp.getQuote).mockResolvedValue({
+  vi.mocked(marketData.getQuote).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
     status: "live",
@@ -30,7 +30,7 @@ function mockAllLive() {
     nextExpectedUpdate: null,
     value: { symbol: "GBPUSD", price: dailyCandles[dailyCandles.length - 1].close, changePct24h: 0.3, timestamp: new Date().toISOString() },
   });
-  vi.mocked(fmp.getDailyCandles).mockImplementation(async (_symbol, days = 260) => ({
+  vi.mocked(marketData.getDailyCandles).mockImplementation(async (_symbol, days = 260) => ({
     provider: "fmp",
     source: "Financial Modeling Prep",
     status: "live",
@@ -39,7 +39,7 @@ function mockAllLive() {
     nextExpectedUpdate: null,
     value: days > 1000 ? multiYearCandles : dailyCandles,
   }));
-  vi.mocked(fmp.getIntradayCandles).mockResolvedValue({
+  vi.mocked(marketData.getIntradayCandles).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
     status: "live",
@@ -123,9 +123,9 @@ describe("getLiveMarketDetail", () => {
 
   it("never fabricates a value in live mode — every card goes unavailable/error with null data when providers fail", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     // getLatestStoredRetailSentiment already defaults to null in beforeEach
     // — retail sentiment has no live call to fail, just no stored row.
@@ -144,9 +144,9 @@ describe("getLiveMarketDetail", () => {
 
   it("in hybrid mode for an ordinary (non-strict-live) symbol, falls back to clearly-labeled demo data for institutional/seasonality/price but never for retail sentiment", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
 
     const detail = await getLiveMarketDetail("NZDUSD", "hybrid");
@@ -160,9 +160,9 @@ describe("getLiveMarketDetail", () => {
 
   it("in hybrid mode for GBPUSD (strict-live), never falls back to demo data for any card", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
 
     const detail = await getLiveMarketDetail("GBPUSD", "hybrid");

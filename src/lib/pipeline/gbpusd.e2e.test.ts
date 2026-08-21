@@ -15,6 +15,7 @@ import { buildTrendingCandles } from "@/lib/engines/__fixtures__/candles";
 import type { NormalizedCandle } from "@/services/types";
 
 vi.mock("@/services/market-data/fmp");
+vi.mock("@/services/market-data/market-data-router");
 vi.mock("@/services/market-data/cftc");
 vi.mock("@/services/market-data/fred");
 vi.mock("@/services/market-data/ig");
@@ -22,6 +23,7 @@ vi.mock("@/db/queries/market-data");
 vi.mock("@/db/queries/scores");
 
 import * as fmp from "@/services/market-data/fmp";
+import * as marketData from "@/services/market-data/market-data-router";
 import * as cftc from "@/services/market-data/cftc";
 import * as fred from "@/services/market-data/fred";
 import * as ig from "@/services/market-data/ig";
@@ -31,7 +33,7 @@ import { computeLiveMarketScore } from "./scoring-engine";
 const dailyCandles: NormalizedCandle[] = buildTrendingCandles({ bars: 260, startPrice: 1.24, trendPerBar: 0.0012, noise: 0.0008, seed: 55 });
 
 function mockFmpLive() {
-  vi.mocked(fmp.getQuote).mockResolvedValue({
+  vi.mocked(marketData.getQuote).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
     status: "live",
@@ -40,7 +42,7 @@ function mockFmpLive() {
     nextExpectedUpdate: null,
     value: { symbol: "GBPUSD", price: dailyCandles[dailyCandles.length - 1].close, changePct24h: 0.3, timestamp: new Date().toISOString() },
   });
-  vi.mocked(fmp.getDailyCandles).mockResolvedValue({
+  vi.mocked(marketData.getDailyCandles).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
     status: "live",
@@ -49,7 +51,7 @@ function mockFmpLive() {
     nextExpectedUpdate: null,
     value: dailyCandles,
   });
-  vi.mocked(fmp.getIntradayCandles).mockResolvedValue({
+  vi.mocked(marketData.getIntradayCandles).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
     status: "live",
@@ -272,9 +274,9 @@ describe("GBPUSD end-to-end live pipeline", () => {
 
   it("never fabricates a value when every live provider fails — factors go unavailable and confidence drops", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "simulated outage" };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     vi.mocked(fred.getSeries).mockResolvedValue(down);
@@ -290,9 +292,9 @@ describe("GBPUSD end-to-end live pipeline", () => {
 
   it("in hybrid mode, ordinary markets fall back to clearly-labeled demo data per factor instead of showing unavailable", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     vi.mocked(fred.getSeries).mockResolvedValue(down);
@@ -314,9 +316,9 @@ describe("GBPUSD end-to-end live pipeline", () => {
 
   it("in hybrid mode, GBPUSD (the strict-live reference market) never falls back to demo data — it shows unavailable and confidence drops", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     vi.mocked(fred.getSeries).mockResolvedValue(down);
@@ -333,9 +335,9 @@ describe("GBPUSD end-to-end live pipeline", () => {
 
   it("in hybrid mode, the second-phase batch (EURUSD, USDJPY, XAUUSD, BTCUSD, SPX500) also never falls back to demo data — same strict-live bar as GBPUSD", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     vi.mocked(fred.getSeries).mockResolvedValue(down);
@@ -351,9 +353,9 @@ describe("GBPUSD end-to-end live pipeline", () => {
 
   it("in hybrid mode, the third-phase batch (AUDUSD, USDCAD, XAGUSD, DJ30) also never falls back to demo data — same strict-live bar as GBPUSD", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     vi.mocked(fred.getSeries).mockResolvedValue(down);
