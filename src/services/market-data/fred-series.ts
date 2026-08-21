@@ -52,9 +52,25 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
   // Non-US series are lower-confidence OECD-sourced FRED mirrors — every ID
   // below needs confirmation via FRED's series search before use in scoring.
   EU: {
-    cpi: { id: "CP0000EZ19M086NEST", verified: false },
-    unemploymentRate: { id: "LRHUTTTTEZM156S", verified: false },
-    policyRate: { id: "ECBDFR", verified: false },
+    // Verified against the real FRED API (npm run test:fred-verify +
+    // test:fred-metadata) for the EURUSD second-phase-batch expansion:
+    //   cpi (CP0000EZ19M086NEST): "Harmonized Index of Consumer Prices:
+    //     Total for Euro Area (19 Countries)", Index 2025=100, Monthly,
+    //     observations through 2026-07-01. Matches Inflation.
+    //   unemploymentRate (LRHUTTTTEZM156S): "Harmonised Unemployment...
+    //     Total: All Persons for the Euro Area (19 Countries)", Percent,
+    //     Monthly — correct series for Labor Market, but FRED's own last
+    //     observation is 2023-01-01 (~3.5 years stale as of this
+    //     verification); the pipeline's own staleness classification
+    //     (classifyFredFreshness) will correctly surface this as "stale",
+    //     not "live" — same handling GB CPI already gets for its own
+    //     ~17-month lag. Kept verified since the series itself is right.
+    //   policyRate (ECBDFR): "ECB Deposit Facility Rate for Euro Area",
+    //     Percent, Daily, observations through 2026-08-20. Matches
+    //     Interest Rates.
+    cpi: { id: "CP0000EZ19M086NEST", verified: true },
+    unemploymentRate: { id: "LRHUTTTTEZM156S", verified: true },
+    policyRate: { id: "ECBDFR", verified: true },
     yield10y: { id: "IRLTLT01EZM156N", verified: false },
   },
   GB: {
@@ -97,8 +113,20 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     yield10y: { id: "IRLTLT01GBM156N", verified: false },
   },
   JP: {
-    cpi: { id: "JPNCPIALLMINMEI", verified: false },
-    unemploymentRate: { id: "LRHUTTTTJPM156S", verified: false },
+    // Verified against the real FRED API for the USDJPY second-phase-batch
+    // expansion:
+    //   cpi (JPNCPIALLMINMEI): "Consumer Price Indices... Total for
+    //     Japan", Index 2015=100, Monthly — correct series for Inflation,
+    //     but FRED's own last observation is 2021-06-01 (~5 years stale as
+    //     of this verification); same "correct mapping, stale FRED data"
+    //     handling as EU/unemploymentRate above — the freshness classifier
+    //     downgrades it honestly rather than excluding real data.
+    //   unemploymentRate (LRHUTTTTJPM156S): "Infra-Annual Labor
+    //     Statistics: Monthly Unemployment Rate Total... for Japan",
+    //     Percent, Monthly, observations through 2026-06-01. Matches Labor
+    //     Market, fresh.
+    cpi: { id: "JPNCPIALLMINMEI", verified: true },
+    unemploymentRate: { id: "LRHUTTTTJPM156S", verified: true },
     yield10y: { id: "IRLTLT01JPM156N", verified: false },
   },
   CA: {

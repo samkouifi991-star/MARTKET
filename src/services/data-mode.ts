@@ -37,9 +37,25 @@ export function allowsLiveProviders(): boolean {
 // to end, so hybrid mode's usual "fall back to demo, but flag it" leniency
 // is deliberately withheld for it. A strict-live symbol that hits a missing
 // or failed provider goes straight to unavailable/error, same as live mode,
-// so it's never possible to mistake a demo GBPUSD factor for a real one.
+// so it's never possible to mistake a demo factor for a real one.
 // Add a symbol here only once it is being actively verified end-to-end.
-const STRICT_LIVE_SYMBOLS = new Set<string>(["GBPUSD"]);
+//
+// Second-phase batch (5 markets, added together after individually
+// verifying FMP/CFTC/FRED/retail-sentiment mappings and seeding real
+// stored data — see scripts/five-market-verify.ts and the FRED/CFTC
+// verification scripts' real-API output):
+//   EURUSD    — FX major, EUR/USD two-country macro differential (EU FRED
+//               series newly verified for this batch)
+//   USDJPY    — FX major, USD/JPY differential (JP FRED series newly
+//               verified for this batch)
+//   XAUUSD    — commodity, CFTC disaggregated coverage, US macro proxy
+//   BTCUSD    — crypto, CFTC financial_futures (CME) coverage, US macro
+//               proxy, retail sentiment correctly NOT_APPLICABLE (no
+//               Myfxbook/IG coverage for crypto)
+//   SPX500    — equity index, CFTC financial_futures (E-mini) coverage, US
+//               macro proxy, retail sentiment correctly NOT_APPLICABLE (no
+//               Myfxbook/IG coverage for indices)
+const STRICT_LIVE_SYMBOLS = new Set<string>(["GBPUSD", "EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500"]);
 
 export function isStrictLiveSymbol(symbol: string): boolean {
   return STRICT_LIVE_SYMBOLS.has(symbol);
