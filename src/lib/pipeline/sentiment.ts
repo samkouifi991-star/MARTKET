@@ -49,11 +49,11 @@ export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMo
   if (pctLong > extremeLongThreshold) {
     const severity = clamp((pctLong - extremeLongThreshold) / 40, 0, 1);
     raw = -severity * 10;
-    explanation = `${pctLong.toFixed(0)}% of retail traders are long (above the ${extremeLongThreshold}% extreme threshold), generating a contrarian bearish contribution that strengthens with how extreme positioning is.`;
+    explanation = `${pctLong.toFixed(0)}% of retail traders are long / ${pctShort.toFixed(0)}% short — long positioning is above the ${extremeLongThreshold}% extreme threshold, generating a contrarian bearish contribution that strengthens with how extreme positioning is.`;
   } else if (pctShort > extremeShortThreshold) {
     const severity = clamp((pctShort - extremeShortThreshold) / 40, 0, 1);
     raw = severity * 10;
-    explanation = `${pctShort.toFixed(0)}% of retail traders are short (above the ${extremeShortThreshold}% extreme threshold), generating a contrarian bullish contribution that strengthens with how extreme positioning is.`;
+    explanation = `${pctLong.toFixed(0)}% of retail traders are long / ${pctShort.toFixed(0)}% short — short positioning is above the ${extremeShortThreshold}% extreme threshold, generating a contrarian bullish contribution that strengthens with how extreme positioning is.`;
   }
   if (sentiment.status === "stale") explanation += ` This reflects the last stored snapshot (${sentiment.fetchedAt}), older than the usual refresh window — the scheduled ingestion job has not refreshed it recently.`;
 
