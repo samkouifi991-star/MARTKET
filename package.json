@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && next build",
+    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/nas100-index-discovery.ts; next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -22,6 +22,7 @@
     "test:five-market-seed": "tsx scripts/five-market-seed.ts",
     "test:cftc-find-indices": "tsx scripts/cftc-find-indices.ts",
     "test:provider-storage-seed": "tsx scripts/provider-storage-seed.ts",
+    "test:nas100-discovery": "tsx scripts/nas100-index-discovery.ts",
     "test:fred-verify": "tsx scripts/fred-verify.ts",
     "test:fred-metadata": "tsx scripts/fred-metadata-check.ts",
     "db:generate": "drizzle-kit generate",

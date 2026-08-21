@@ -380,3 +380,106 @@ export async function getForexAndMarketNews(limit = 50): Promise<Provenance<Norm
   const now = new Date().toISOString();
   return { provider: "fmp", source: SOURCE, status: "live", fetchedAt: now, sourceUpdatedAt: now, nextExpectedUpdate: null, value: articles };
 }
+
+// ---- Index/ticker discovery — diagnostic use only ----
+// Used to find the correct FMP symbol for a market before it's added to
+// symbol-map.ts (e.g. confirming which index ticker actually represents
+// the Nasdaq-100 under this account's plan, rather than guessing one).
+// Never called from the live scoring/display pipeline, which always
+// resolves through symbol-map.ts — these skip that resolution and take a
+// raw ticker directly. Still routed through the same fmpGet (rate-limit
+// circuit breaker, no naive retries) and cached() as every other endpoint
+// in this file.
+
+export type FmpIndexListItem = { symbol: string; name: string; exchange: string; currency: string };
+
+export async function getIndexList(): Promise<Provenance<FmpIndexListItem[]>> {
+  try {
+    return await cached("fmp:index-list", 24 * 60 * 60_000, async () => {
+      type FmpIndex = { symbol?: string; name?: string; exchange?: string; currency?: string };
+      const data = await fmpGet<FmpIndex[]>("/index-list");
+      const rows = extractArray<FmpIndex>(data, []);
+      const value: FmpIndexListItem[] = rows
+        .filter((r): r is FmpIndex & { symbol: string; name: string } => Boolean(r.symbol && r.name))
+        .map((r) => ({ symbol: r.symbol, name: r.name, exchange: r.exchange ?? "", currency: r.currency ?? "" }));
+      const now = new Date().toISOString();
+      const result: Provenance<FmpIndexListItem[]> = { provider: "fmp", source: SOURCE, status: "live", fetchedAt: now, sourceUpdatedAt: now, nextExpectedUpdate: null, value };
+      return result;
+    });
+  } catch (err) {
+    if (isRateLimited(err)) return unavailable("fmp", SOURCE, rateLimitMessage(err));
+    if (isPlanLimited(err)) return unavailable("fmp", SOURCE, "provider plan does not include the index-list endpoint");
+    return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
+  }
+}
+
+/** Same as getQuote(), but takes a raw FMP ticker directly instead of
+ * resolving through symbol-map.ts — for testing a candidate ticker before
+ * it's added to the map. Diagnostic use only, never the live pipeline. */
+export async function getQuoteForTicker(ticker: string): Promise<Provenance<NormalizedQuote>> {
+  try {
+    return await cached(`fmp:quote:${ticker}`, QUOTE_TTL_MS, async () => {
+      type FmpQuote = { symbol?: string; price?: number; changePercentage?: number; changesPercentage?: number; timestamp?: number };
+      const data = await fmpGet<FmpQuote[] | FmpQuote>("/quote", { symbol: ticker });
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row || row.price === undefined) throw new Error("Empty response");
+      const changePct = row.changePercentage ?? row.changesPercentage;
+      if (changePct === undefined) throw new Error("Quote response missing change-percentage field");
+      const now = new Date().toISOString();
+      const result: Provenance<NormalizedQuote> = {
+        provider: "fmp",
+        source: SOURCE,
+        status: "live",
+        fetchedAt: now,
+        sourceUpdatedAt: row.timestamp ? new Date(row.timestamp * 1000).toISOString() : now,
+        nextExpectedUpdate: null,
+        value: { symbol: ticker, price: row.price, changePct24h: changePct, timestamp: now },
+        raw: row,
+      };
+      return result;
+    });
+  } catch (err) {
+    if (isRateLimited(err)) return unavailable("fmp", SOURCE, rateLimitMessage(err));
+    if (isPlanLimited(err)) return unavailable("fmp", SOURCE, "provider plan does not include this endpoint for this ticker");
+    if (err instanceof Error && (err.message === "Empty response" || err.message.startsWith("Quote response missing"))) {
+      return unavailable("fmp", SOURCE, err.message);
+    }
+    return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
+  }
+}
+
+/** Same as getDailyCandles(), but takes a raw FMP ticker directly.
+ * Diagnostic use only, never the live pipeline. */
+export async function getDailyCandlesForTicker(ticker: string, days = 260): Promise<Provenance<NormalizedCandle[]>> {
+  try {
+    return await cached(`fmp:daily:${ticker}:${days}`, DAILY_CANDLES_TTL_MS, async () => {
+      type FmpBar = { date: string; open: number; high: number; low: number; close: number; volume?: number };
+      const data = await fmpGet<FmpBar[] | { historical: FmpBar[] }>("/historical-price-eod/full", {
+        symbol: ticker,
+        from: isoDaysAgo(days + 5),
+        to: isoDaysAgo(0),
+      });
+      const rows = extractArray<FmpBar>(data, ["historical"]);
+      if (rows.length === 0) throw new Error("No historical data returned");
+      const candles: NormalizedCandle[] = [...rows]
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .map((h) => ({ date: new Date(h.date).toISOString(), open: h.open, high: h.high, low: h.low, close: h.close, volume: h.volume ?? null }));
+      const now = new Date().toISOString();
+      const result: Provenance<NormalizedCandle[]> = {
+        provider: "fmp",
+        source: SOURCE,
+        status: "live",
+        fetchedAt: now,
+        sourceUpdatedAt: candles[candles.length - 1]?.date ?? now,
+        nextExpectedUpdate: null,
+        value: candles,
+      };
+      return result;
+    });
+  } catch (err) {
+    if (isRateLimited(err)) return unavailable("fmp", SOURCE, rateLimitMessage(err));
+    if (isPlanLimited(err)) return unavailable("fmp", SOURCE, "provider plan does not include this endpoint for this ticker");
+    if (err instanceof Error && err.message === "No historical data returned") return unavailable("fmp", SOURCE, err.message);
+    return errorResult("fmp", SOURCE, err instanceof Error ? err.message : String(err));
+  }
+}
