@@ -62,8 +62,15 @@ export const SYMBOL_MAP: Record<string, SymbolMapping> = {
 
   // ---- Indices — CFTC Traders in Financial Futures (equity index futures) ----
   SPX500: { symbol: "SPX500", fmp: { ticker: "^GSPC", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
-  NAS100: { symbol: "NAS100", fmp: { ticker: "^NDX", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "NASDAQ-100 CONSOLIDATED - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
-  DJ30: { symbol: "DJ30", fmp: { ticker: "^DJI", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "DJIA CONSOLIDATED - CHICAGO BOARD OF TRADE" }, igEpic: null, myfxbookSymbol: null },
+  // NAS100/DJ30: cftc-verify.ts flagged the previous all-caps reportName
+  // values ("NASDAQ-100 CONSOLIDATED", "DJIA CONSOLIDATED") as resolving
+  // via discovery but returning 0 rows from an exact-match fetch — found
+  // (scripts/cftc-find-indices.ts, run against the real CFTC API) to be a
+  // pure case mismatch: CFTC's actual market_and_exchange_names strings
+  // use mixed case ("Consolidated", not "CONSOLIDATED"), confirmed fresh
+  // (latest report 2026-08-11) under the correct casing below.
+  NAS100: { symbol: "NAS100", fmp: { ticker: "^NDX", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "NASDAQ-100 Consolidated - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
+  DJ30: { symbol: "DJ30", fmp: { ticker: "^DJI", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "DJIA Consolidated - CHICAGO BOARD OF TRADE" }, igEpic: null, myfxbookSymbol: null },
   RUT2000: { symbol: "RUT2000", fmp: { ticker: "^RUT", kind: "index" }, cftc: { reportType: "financial_futures", reportName: "RUSSELL E-MINI - CHICAGO MERCANTILE EXCHANGE" }, igEpic: null, myfxbookSymbol: null },
   // DAX/FTSE/Nikkei futures are not CFTC-reportable (traded on Eurex/ICE
   // Europe/OSE, outside CFTC jurisdiction) — no COT coverage exists for these.
