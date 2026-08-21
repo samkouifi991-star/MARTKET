@@ -16,14 +16,18 @@
 // prints an explicit DB_MIGRATE_RESULT line carrying the exact underlying
 // driver/Postgres error — never a generic "Failed query" — so a failure is
 // diagnosable straight from Vercel's build output.
+//
+// Deliberately has ZERO dependency on any external market-data provider
+// (FMP/FRED/CFTC/Myfxbook) — a database migration must never be coupled to
+// a third-party API's availability or rate limits. This script only:
+// connect to Neon -> apply schema -> verify tables exist -> exit. Provider
+// verification and data seeding belong in their own controlled scripts
+// (see fmp-*.ts, fred-*.ts, cftc-*.ts, five-market-seed.ts,
+// provider-storage-seed.ts), run explicitly and separately from the build.
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { migrate } from "drizzle-orm/neon-http/migrator";
-import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
-import { marketPrices } from "../src/db/schema";
-import * as fmp from "../src/services/market-data/fmp";
-import { upsertMarketPrice } from "../src/db/queries/market-data";
 
 const EXPECTED_TABLES = [
   "market_prices",
@@ -97,45 +101,9 @@ async function main() {
       return;
     }
     console.log(`DB_MIGRATE_STEP: all ${EXPECTED_TABLES.length} expected tables present`);
+    console.log("DB_MIGRATE_RESULT: SUCCESS — schema verified");
   } catch (err) {
     console.log(`DB_MIGRATE_RESULT: FAIL (table-existence check) — ${describeError(err)}`);
-    return;
-  }
-
-  // 4/5. Real insert + read-back, using the actual production pipeline
-  // (fmp.getQuote -> upsertMarketPrice), not synthetic test data — this is
-  // GBPUSD's real current price landing in Neon for real, the same write
-  // the prices cron performs. Gated to non-demo DATA_MODE (Preview=hybrid)
-  // so a Production build (DATA_MODE=demo) never writes live data, per the
-  // standing "do not switch Production to live" constraint — schema
-  // migration above still always runs, since empty tables change nothing
-  // user-visible.
-  const dataMode = (process.env.DATA_MODE ?? "demo").toLowerCase().trim();
-  if (dataMode === "demo") {
-    console.log("DB_MIGRATE_RESULT: SUCCESS — schema verified (insert/readback skipped, DATA_MODE=demo)");
-    return;
-  }
-
-  try {
-    const quote = await fmp.getQuote("GBPUSD");
-    if (quote.status !== "live" || !quote.value) {
-      console.log(`DB_MIGRATE_STEP: write/readback skipped — FMP quote unavailable right now (${quote.error ?? quote.status}); schema is still verified`);
-      console.log("DB_MIGRATE_RESULT: SUCCESS — schema verified, write/readback deferred to the next successful prices cron run");
-      return;
-    }
-
-    await upsertMarketPrice("GBPUSD", quote.value, "fmp");
-    const readBack = await db.select().from(marketPrices).where(eq(marketPrices.symbol, "GBPUSD")).limit(1);
-
-    if (readBack.length === 0 || readBack[0].price !== quote.value.price) {
-      console.log("DB_MIGRATE_RESULT: FAIL (readback mismatch) — wrote a GBPUSD price row but could not read the same value back");
-      return;
-    }
-
-    console.log(`DB_MIGRATE_STEP: wrote and read back a real GBPUSD price (${readBack[0].price}, fetched ${readBack[0].fetchedAt.toISOString()})`);
-    console.log("DB_MIGRATE_RESULT: SUCCESS");
-  } catch (err) {
-    console.log(`DB_MIGRATE_RESULT: FAIL (insert/readback) — ${describeError(err)}`);
   }
 }
 

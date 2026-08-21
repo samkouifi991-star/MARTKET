@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/five-market-seed.ts; tsx scripts/five-market-verify.ts; next build",
+    "vercel-build": "tsx scripts/migrate.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -26,6 +26,7 @@
     "test:fmp-error-detail": "tsx scripts/fmp-error-detail.ts",
     "test:fred-verify": "tsx scripts/fred-verify.ts",
     "test:fred-metadata": "tsx scripts/fred-metadata-check.ts",
+    "test:fmp-rate-limit-diagnose": "tsx scripts/fmp-rate-limit-diagnose.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
