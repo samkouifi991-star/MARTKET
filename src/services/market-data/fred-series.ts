@@ -127,13 +127,14 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     //     Market, fresh.
     cpi: { id: "JPNCPIALLMINMEI", verified: true },
     unemploymentRate: { id: "LRHUTTTTJPM156S", verified: true },
-    // Candidates found via fred-verify.ts's live search for the NIKKEI225
-    // batch (JP had no growth/policy-rate series configured at all) —
-    // same GB/AU/CA patterns (NGDPRSAXDCxxQ, NAEXKP01xxQ657S,
-    // IRSTCI01xxM156N). Not yet metadata-confirmed.
-    realGdp: { id: "NGDPRSAXDCJPQ", verified: false },
-    gdpGrowth: { id: "NAEXKP01JPQ657S", verified: false },
-    policyRate: { id: "IRSTCI01JPM156N", verified: false },
+    // Verified against the real FRED API for the NIKKEI225 batch, same
+    // GB/AU/CA patterns: realGdp/gdpGrowth both fresh (through
+    // 2026-01-01); policyRate (IRSTCI01JPM156N) — "Interest Rates:
+    // Immediate Rates... Interbank Rate: Total for Japan" — fresh (through
+    // 2026-06-01), the real BoJ-equivalent series.
+    realGdp: { id: "NGDPRSAXDCJPQ", verified: true },
+    gdpGrowth: { id: "NAEXKP01JPQ657S", verified: true },
+    policyRate: { id: "IRSTCI01JPM156N", verified: true },
     yield10y: { id: "IRLTLT01JPM156N", verified: false },
   },
   CA: {
@@ -179,41 +180,61 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     policyRate: { id: "IRSTCI01AUM156N", verified: true },
   },
   NZ: {
-    cpi: { id: "NZLCPIALLQINMEI", verified: false },
-    // Candidates found via fred-verify.ts's live search for the NZDUSD
-    // batch. unemploymentRate/policyRate follow the LRHUTTTTxx/IRSTCI01xx
-    // patterns already verified for GB/AU/CA/JP, but NZ's unemployment
-    // series in FRED is genuinely quarterly (real-world: Stats NZ's
-    // Household Labour Force Survey is quarterly, not monthly, unlike
-    // GB/AU/JP) — hence the "Q" not "M" in the ID despite the title text
-    // still reading "Monthly Unemployment Rate" (an OECD-source label
-    // quirk, not a wrong series). realGdp has no NGDPRSAXDCNZQ-style level
-    // series available; NZLGDPRQPSMEI is the closest real candidate —
-    // needs metadata confirmation of its actual units before trusting it
-    // as a level rather than a growth rate. Not yet metadata-confirmed.
+    // Verified against the real FRED API for the NZDUSD batch:
+    //   cpi: correct series, but FRED's own last observation is
+    //     2025-01-01 (~19 months stale) — same "correct mapping, stale
+    //     FRED data" handling as GB/EU/AU/CH CPI; kept verified.
+    //   gdpGrowth (NAEXKP01NZQ657S): matches the exact established
+    //     pattern/title, fresh (through 2026-01-01).
+    //   unemploymentRate (LRHUTTTTNZQ156S): same series family as
+    //     GB/AU/CA/JP ("15 Years or over"), fresh (through 2026-04-01) —
+    //     genuinely quarterly in FRED (NZ's Household Labour Force Survey
+    //     is quarterly, unlike GB/AU/JP's monthly data), hence "Q" not
+    //     "M" in the ID despite the inherited OECD title text still
+    //     reading "Monthly Unemployment Rate".
+    //   policyRate (IRSTCI01NZM156N): correct RBNZ-equivalent series,
+    //     ~20 months stale (through 2024-12-01) — same stale-but-correct
+    //     handling as CH's policyRate below.
+    // realGdp deliberately NOT verified: NZLGDPRQPSMEI (the only
+    // candidate FRED's search returned) turned out to be a "Growth rate
+    // same period previous year" series, not a real-GDP level like every
+    // other country's realGdp entry — feeding a growth rate into a slot
+    // meant for a level would double-differentiate it. gdpGrowth alone
+    // already covers NZ's Growth category with a correctly-typed series.
+    cpi: { id: "NZLCPIALLQINMEI", verified: true },
+    gdpGrowth: { id: "NAEXKP01NZQ657S", verified: true },
+    unemploymentRate: { id: "LRHUTTTTNZQ156S", verified: true },
+    policyRate: { id: "IRSTCI01NZM156N", verified: true },
     realGdp: { id: "NZLGDPRQPSMEI", verified: false },
-    gdpGrowth: { id: "NAEXKP01NZQ657S", verified: false },
-    unemploymentRate: { id: "LRHUTTTTNZQ156S", verified: false },
-    policyRate: { id: "IRSTCI01NZM156N", verified: false },
   },
   CH: {
-    cpi: { id: "CHECPIALLMINMEI", verified: false },
-    policyRate: { id: "IRSTCI01CHM156N", verified: false },
-    // Candidates found via fred-verify.ts's live search for the USDCHF
-    // batch. gdpGrowth follows the established NAEXKP01xxQ657S pattern.
-    // realGdp has no NGDPRSAXDCCHQ-style level series available; FRED's
-    // CH real-GDP coverage instead uses Eurostat-style Chain-Linked-Volume
-    // naming (CLVMNACSAB1GQCH — "S" = seasonally adjusted, picked over the
-    // "SC"/"NS" variants for consistency with every other verified series
-    // here being seasonally adjusted). unemploymentRate has no
-    // LRHUTTTTCHM156S-style series either; the closest real candidate
-    // (LRUN64TTCHQ156S) is Quarterly and covers ages 15-64 rather than
-    // 15+, a genuinely different definition from GB/AU/CA/JP's series —
-    // flagged here so it's judged on its own metadata, not assumed
-    // identical. Not yet metadata-confirmed.
-    realGdp: { id: "CLVMNACSAB1GQCH", verified: false },
-    gdpGrowth: { id: "NAEXKP01CHQ657S", verified: false },
-    unemploymentRate: { id: "LRUN64TTCHQ156S", verified: false },
+    // Verified against the real FRED API for the USDCHF batch:
+    //   cpi: correct series, ~16 months stale (through 2025-04-01) —
+    //     same stale-but-correct handling as GB/EU/AU/NZ CPI.
+    //   policyRate: correct SNB-equivalent series, ~2.5 years stale
+    //     (through 2024-03-01) — the staleness classifier downgrades this
+    //     honestly rather than excluding real data, same principle as
+    //     every other stale-but-correctly-mapped series here.
+    //   realGdp (CLVMNACSAB1GQCH): title confirms "Real Gross Domestic
+    //     Product for Switzerland", fresh (through 2026-01-01) — units
+    //     are "Millions of Chained 2010 Euros" (a real Eurostat
+    //     cross-country-comparability convention for non-Euro European
+    //     economies, not a data error). Harmless for scoring: the engine
+    //     (macro-differential.ts's scoreIndicator) only ever z-scores
+    //     period-over-period CHANGES, never absolute cross-currency
+    //     levels, so the Euro denomination doesn't affect the signal.
+    //   gdpGrowth: matches the exact established pattern/title, fresh
+    //     (through 2026-01-01).
+    //   unemploymentRate (LRUN64TTCHQ156S): a real, correctly-titled CH
+    //     unemployment series, fresh (through 2026-01-01) — covers ages
+    //     15-64 rather than GB/AU/CA/JP's "15 Years or over", a genuinely
+    //     different definition (no equivalent "15+" series exists for CH
+    //     in FRED), but still a legitimate real unemployment rate.
+    cpi: { id: "CHECPIALLMINMEI", verified: true },
+    policyRate: { id: "IRSTCI01CHM156N", verified: true },
+    realGdp: { id: "CLVMNACSAB1GQCH", verified: true },
+    gdpGrowth: { id: "NAEXKP01CHQ657S", verified: true },
+    unemploymentRate: { id: "LRUN64TTCHQ156S", verified: true },
   },
 };
 
