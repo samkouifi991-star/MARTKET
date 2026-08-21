@@ -108,19 +108,36 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
     };
   }
 
+  // Every index has a genuine home market — its macroCountry (defaulting
+  // to US) is that index's actual local economy, used as the PRIMARY
+  // macro model, not a proxy standing in for something else. Commodities
+  // and crypto have no single home-market economy, so US data is used
+  // explicitly as a risk-appetite/liquidity proxy instead — crypto gets
+  // its own distinct label per spec ("US / Global Liquidity Macro Proxy"),
+  // never presented as a country-specific model for the asset.
+  const country = instrument.macroCountry ?? "US";
   const weight = instrument.assetClass === "Indices" ? 0.8 : instrument.assetClass === "Crypto" ? 0.35 : 0.45;
-  const usScores = await fetchCountryScores("US", meta.indicators);
-  const usVal = category === "growth" ? usScores.growthScore : category === "labor" ? usScores.laborScore : usScores.inflationScore;
-  if (usVal === null) return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor(meta.key, source, "Insufficient verified FRED coverage for US indicators");
+  const scores = await fetchCountryScores(country, meta.indicators);
+  const val = category === "growth" ? scores.growthScore : category === "labor" ? scores.laborScore : scores.inflationScore;
+  if (val === null) return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor(meta.key, source, `Insufficient verified FRED coverage for ${country} indicators`);
 
-  const usFreshness = usScores.freshness ?? "live";
+  const freshness = scores.freshness ?? "live";
+  const staleNote = freshness !== "live" ? ` Includes a ${freshness} series — confidence reflects this.` : "";
+  const signed = `${val > 0 ? "+" : ""}${val.toFixed(1)}`;
+  const explanation =
+    instrument.assetClass === "Indices"
+      ? `${country} ${meta.label} score is ${signed} (real FRED data) — ${instrument.name}'s primary local macro profile.${staleNote}`
+      : instrument.assetClass === "Crypto"
+        ? `US ${meta.label} score is ${signed} (real FRED data), used as a US / Global Liquidity Macro Proxy — crypto has no two-country FX differential or single home-market economy to model directly.${staleNote}`
+        : `US ${meta.label} score is ${signed} (real FRED data), applied as a global risk-appetite proxy scaled for ${instrument.assetClass.toLowerCase()}.${staleNote}`;
+
   return {
     key: meta.key,
-    rawScore: clamp(usVal * weight),
-    explanation: `US ${meta.label} score is ${usVal > 0 ? "+" : ""}${usVal.toFixed(1)} (real FRED data), applied as a global risk-appetite proxy scaled for ${instrument.assetClass.toLowerCase()}.${usFreshness !== "live" ? ` Includes a ${usFreshness} series — confidence reflects this.` : ""}`,
+    rawScore: clamp(val * weight),
+    explanation,
     source,
     provider: "fred",
-    freshness: usFreshness,
+    freshness,
     lastUpdated: new Date().toISOString(),
     nextUpdate: new Date().toISOString(),
   };
@@ -161,19 +178,30 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode)
     };
   }
 
-  const usRates = await fetchLatestRates("US");
-  if (usRates.policyRate === null) return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor("interestRates", source, "Missing verified US policy-rate series");
+  // Same primary-local-model-vs-proxy split as resolveMacroCategory above.
+  const country = instrument.macroCountry ?? "US";
+  const rates = await fetchLatestRates(country);
+  if (rates.policyRate === null) return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor("interestRates", source, `Missing verified ${country} policy-rate series`);
   const scale = instrument.assetClass === "Crypto" ? 0.7 : instrument.assetClass === "Indices" ? 0.8 : 0.9;
   // Without a stance classifier from FRED alone, use the rate's own recent
   // trend direction as a simple hawkish(+)/dovish(-) proxy for non-FX assets.
-  const trendSign = usRates.trend;
+  const trendSign = rates.trend;
+  const trendPhrase = trendSign > 0 ? "trending higher" : trendSign < 0 ? "trending lower" : "holding steady";
+  const staleNote = rates.freshness !== "live" ? ` Series is ${rates.freshness} — confidence reflects this.` : "";
+  const explanation =
+    instrument.assetClass === "Indices"
+      ? `${country} policy rate is ${rates.policyRate}% and ${trendPhrase} (FRED) — ${instrument.name}'s primary local rate environment, weighing on the index accordingly.${staleNote}`
+      : instrument.assetClass === "Crypto"
+        ? `US policy rate is ${rates.policyRate}% and ${trendPhrase} (FRED), used as a US / Global Liquidity Macro Proxy for rate-sensitive risk appetite — not a country-specific rate model for crypto.${staleNote}`
+        : `US policy rate is ${rates.policyRate}% and ${trendPhrase} (FRED), weighing on rate-sensitive assets accordingly.${staleNote}`;
+
   return {
     key: "interestRates",
     rawScore: clamp(-trendSign * scale * 5),
-    explanation: `US policy rate is ${usRates.policyRate}% and ${trendSign > 0 ? "trending higher" : trendSign < 0 ? "trending lower" : "holding steady"} (FRED), weighing on rate-sensitive assets accordingly.${usRates.freshness !== "live" ? ` Series is ${usRates.freshness} — confidence reflects this.` : ""}`,
+    explanation,
     source,
     provider: "fred",
-    freshness: usRates.freshness,
+    freshness: rates.freshness,
     lastUpdated: new Date().toISOString(),
     nextUpdate: new Date().toISOString(),
   };

@@ -70,6 +70,23 @@ const SEARCH_QUERIES: { country: string; indicator: FredIndicatorKey; query: str
   // unverified — the main verification loop above already checks it live).
   { country: "CA", indicator: "realGdp", query: "Canada Real GDP" },
   { country: "CA", indicator: "gdpGrowth", query: "Canada GDP Growth Rate" },
+  // NIKKEI225 batch: JP has cpi/unemploymentRate verified already, but no
+  // growth or policy-rate series configured at all — needed for the full
+  // 4-category primary local macro model (growth/inflation/labor/rates).
+  { country: "JP", indicator: "realGdp", query: "Japan Real GDP" },
+  { country: "JP", indicator: "gdpGrowth", query: "Japan GDP Growth Rate" },
+  { country: "JP", indicator: "policyRate", query: "Japan Interbank Rate" },
+  // USDCHF batch: CH has cpi/policyRate configured (unverified), but no
+  // growth or labor series at all.
+  { country: "CH", indicator: "realGdp", query: "Switzerland Real GDP" },
+  { country: "CH", indicator: "gdpGrowth", query: "Switzerland GDP Growth Rate" },
+  { country: "CH", indicator: "unemploymentRate", query: "Switzerland Unemployment Rate" },
+  // NZDUSD batch: NZ has only cpi configured (unverified) — needs growth,
+  // labor, and policy-rate series (RBNZ).
+  { country: "NZ", indicator: "realGdp", query: "New Zealand Real GDP" },
+  { country: "NZ", indicator: "gdpGrowth", query: "New Zealand GDP Growth Rate" },
+  { country: "NZ", indicator: "unemploymentRate", query: "New Zealand Unemployment Rate" },
+  { country: "NZ", indicator: "policyRate", query: "New Zealand Interbank Rate" },
 ];
 
 async function main() {

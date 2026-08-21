@@ -13,6 +13,15 @@ export type Instrument = {
   assetClass: AssetClass;
   /** For FX pairs: [base, quote] currency codes used to pull two-sided macro data. */
   currencies?: [string, string];
+  /** For instruments without `currencies` (indices/commodities/crypto): the
+   * FRED country code whose macro data feeds the single-country model —
+   * only meaningful when assetClass is "Indices", where it names the
+   * index's real home market (e.g. "GB" for FTSE100) and is used as that
+   * index's primary local macro profile, not a proxy. Defaults to "US" in
+   * macro.ts when unset. Ignored for commodities/crypto, which have no
+   * single home-market economy and always use US data as an explicit
+   * risk-appetite/liquidity proxy regardless of this field. */
+  macroCountry?: string;
   decimals: number;
 };
 

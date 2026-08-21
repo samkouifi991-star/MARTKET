@@ -14,13 +14,16 @@ export const INSTRUMENTS: Instrument[] = [
   { symbol: "EURJPY", name: "Euro / Japanese Yen", assetClass: "Forex", currencies: ["EUR", "JPY"], decimals: 2 },
   { symbol: "GBPJPY", name: "British Pound / Japanese Yen", assetClass: "Forex", currencies: ["GBP", "JPY"], decimals: 2 },
 
-  { symbol: "SPX500", name: "S&P 500", assetClass: "Indices", decimals: 2 },
-  { symbol: "NAS100", name: "NASDAQ 100", assetClass: "Indices", decimals: 2 },
-  { symbol: "DJ30", name: "Dow Jones Industrial Average", assetClass: "Indices", decimals: 2 },
-  { symbol: "RUT2000", name: "Russell 2000", assetClass: "Indices", decimals: 2 },
-  { symbol: "DAX40", name: "DAX", assetClass: "Indices", decimals: 2 },
-  { symbol: "FTSE100", name: "FTSE 100", assetClass: "Indices", decimals: 2 },
-  { symbol: "NIKKEI225", name: "Nikkei 225", assetClass: "Indices", decimals: 2 },
+  // macroCountry names each index's real home market so its macro factors
+  // use that country's actual growth/inflation/labor/rates as the primary
+  // local model — not a generic US proxy. See lib/types.ts's doc comment.
+  { symbol: "SPX500", name: "S&P 500", assetClass: "Indices", macroCountry: "US", decimals: 2 },
+  { symbol: "NAS100", name: "NASDAQ 100", assetClass: "Indices", macroCountry: "US", decimals: 2 },
+  { symbol: "DJ30", name: "Dow Jones Industrial Average", assetClass: "Indices", macroCountry: "US", decimals: 2 },
+  { symbol: "RUT2000", name: "Russell 2000", assetClass: "Indices", macroCountry: "US", decimals: 2 },
+  { symbol: "DAX40", name: "DAX", assetClass: "Indices", macroCountry: "DE", decimals: 2 },
+  { symbol: "FTSE100", name: "FTSE 100", assetClass: "Indices", macroCountry: "GB", decimals: 2 },
+  { symbol: "NIKKEI225", name: "Nikkei 225", assetClass: "Indices", macroCountry: "JP", decimals: 2 },
 
   { symbol: "XAUUSD", name: "Gold", assetClass: "Commodities", decimals: 2 },
   { symbol: "XAGUSD", name: "Silver", assetClass: "Commodities", decimals: 3 },
