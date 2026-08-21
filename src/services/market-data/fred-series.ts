@@ -252,6 +252,34 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     gdpGrowth: { id: "NAEXKP01CHQ657S", verified: true },
     unemploymentRate: { id: "LRUN64TTCHQ156S", verified: true },
   },
+  // DE: needed for DAX40's macro. Discovered via a real FRED search
+  // (fred-verify.ts) and confirmed via real metadata (fred-metadata-check.ts):
+  //   realGdp (CLVMNACSCAB1GQDE): title confirms "Real Gross Domestic
+  //     Product for Germany", Seasonally Adjusted, fresh (through
+  //     2026-04-01) — uses the EU-style "SCA" 3-letter code (the simpler
+  //     single-country "SA" 2-letter variant CH uses did not appear in
+  //     Germany's real search results at all, so this is the confirmed
+  //     ID, not an assumption from CH's pattern).
+  //   gdpGrowth (NAEXKP01DEQ657S): matches the exact established pattern/
+  //     title used by every other verified country, Seasonally Adjusted,
+  //     fresh (through 2026-04-01).
+  //   cpi (DEUCPIALLMINMEI): correct title, Not Seasonally Adjusted (same
+  //     convention as every other verified country's cpi), fresh enough
+  //     (through 2025-03-01).
+  //   policyRate (IRSTCI01DEM156N): matches the exact established Call
+  //     Money/Interbank Rate pattern/title, fresh (through 2026-06-01).
+  // unemploymentRate is deliberately NOT included here: the metadata
+  // confirmation request for LRHUTTTTDEM156S (the pattern-matching
+  // candidate real search returned) hit a genuine FRED-side HTTP 500 — it
+  // was never confirmed, so per this project's rule it is left unconfigured
+  // rather than guessed. DAX40's labor factor will read unavailable (or
+  // demo-fallback in hybrid) until this is retried and actually confirmed.
+  DE: {
+    realGdp: { id: "CLVMNACSCAB1GQDE", verified: true },
+    gdpGrowth: { id: "NAEXKP01DEQ657S", verified: true },
+    cpi: { id: "DEUCPIALLMINMEI", verified: true },
+    policyRate: { id: "IRSTCI01DEM156N", verified: true },
+  },
 };
 
 export function getFredSeriesId(country: string, indicator: FredIndicatorKey): { id: string; verified: boolean } | null {
