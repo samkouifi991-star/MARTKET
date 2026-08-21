@@ -300,24 +300,22 @@ describe("GBPUSD end-to-end live pipeline", () => {
     vi.mocked(fred.getSeries).mockResolvedValue(down);
     mockIgUnavailable();
 
-    // EURGBP, not GBPUSD/EURUSD/USDCAD/etc: all of those (plus USDCHF/
-    // NZDUSD/GBPJPY as of the OANDA FX batch) are strict-live symbols with
-    // stricter no-fallback rules (see the next tests), so this proves an
-    // ordinary, not-yet-promoted market keeps the normal hybrid leniency.
-    const score = await computeLiveMarketScore("EURGBP", "hybrid");
+    // NAS100, not GBPUSD/EURUSD/USDCAD/etc: all 10 configured OANDA FX pairs
+    // are now strict-live symbols (through EURGBP/EURJPY, the final batch),
+    // and every other symbol with a real CFTC mapping and a myfxbook/IG
+    // retail mapping has also been promoted. NAS100 has a real CFTC mapping
+    // ("NASDAQ-100 Consolidated") but is still blocked from promotion by an
+    // unrelated FMP 402 issue, so it stays the ordinary, not-yet-promoted
+    // example that keeps the normal hybrid leniency for institutional too.
+    const score = await computeLiveMarketScore("NAS100", "hybrid");
 
-    // institutional is excluded here too: EURGBP is a cross with no
-    // CFTC-reportable futures contract, so it resolves NOT_APPLICABLE
-    // unconditionally (see hasCftcCoverage in positioning.ts) regardless of
-    // mode or provider state — asserted separately below.
-    const nonRetailFactors = score.factors.filter((f) => f.key !== "retailSentiment" && f.key !== "institutional");
+    const nonRetailFactors = score.factors.filter((f) => f.key !== "retailSentiment");
     expect(nonRetailFactors.every((f) => f.freshness === "estimated")).toBe(true);
-    const institutional = score.factors.find((f) => f.key === "institutional")!;
-    expect(institutional.freshness).toBe("not_applicable");
-    // Retail sentiment has no demo-fallback path here because IG explicitly
-    // has no epic for this market — hybrid must not invent a percentage either.
+    // Retail sentiment has no demo-fallback path here because NAS100 has no
+    // myfxbook/IG/OANDA mapping at all — hybrid must not invent a
+    // percentage either (NOT_APPLICABLE, not merely unavailable).
     const retail = score.factors.find((f) => f.key === "retailSentiment")!;
-    expect(retail.freshness).toBe("unavailable");
+    expect(retail.freshness).toBe("not_applicable");
   });
 
   it("in hybrid mode, GBPUSD (the strict-live reference market) never falls back to demo data — it shows unavailable and confidence drops", async () => {

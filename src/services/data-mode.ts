@@ -106,13 +106,43 @@ export function allowsLiveProviders(): boolean {
 //               pipeline dry run, and NOT_APPLICABLE does not depress
 //               confidence the way UNAVAILABLE does.
 //
-// EURGBP and EURJPY are deliberately NOT added this batch. Their OANDA
-// price/candle coverage is equally solid, and EU FRED growth coverage was
-// verified alongside this batch (CLVMNACSCAB1GQEA19 / NAEXKP01EZQ657S in
-// fred-series.ts), but promotion for these two crosses is being held
-// pending a separate explicit decision — see the pipeline dry-run output
-// for their current (non-demo, non-promoted) factor behavior.
-const STRICT_LIVE_SYMBOLS = new Set<string>(["GBPUSD", "EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500", "AUDUSD", "USDCAD", "XAGUSD", "DJ30", "USDCHF", "NZDUSD", "GBPJPY"]);
+// Fifth-phase batch (2 markets) — the two crosses held back from the fourth
+// batch, promoted once a dedicated final gate
+// (scripts/eurgbp-eurjpy-promotion-verify.ts) ran the exact production
+// computeLiveMarketScore("live") path for both and confirmed, against real
+// providers, all of: OANDA quote/Daily/H4/H1 live, a stored Neon fallback
+// present, Technical Trend calculating from real OANDA candles, Seasonality
+// resolving 17.7+ years of real history, OANDA Retail Sentiment live,
+// Institutional Positioning and Smart Money both NOT_APPLICABLE (never a
+// fabricated CFTC value), totalScore exactly equal to the sum of the
+// visible factor contributions, confidence correctly reflecting the
+// stale/delayed FRED macro series rather than pinning at the max, and no
+// factor anywhere using demo/estimated data:
+//   EURGBP    — FX cross, EU vs GB macro differential (EU FRED growth
+//               series verified in the fourth batch, confirmed live in this
+//               gate's real pipeline run).
+//   EURJPY    — FX cross, EU vs JP macro differential (same EU FRED series;
+//               JP series already verified in an earlier batch).
+//
+// This completes all 10 configured OANDA FX pairs — every FX market with a
+// verified OANDA mapping is now STRICT_LIVE.
+const STRICT_LIVE_SYMBOLS = new Set<string>([
+  "GBPUSD",
+  "EURUSD",
+  "USDJPY",
+  "XAUUSD",
+  "BTCUSD",
+  "SPX500",
+  "AUDUSD",
+  "USDCAD",
+  "XAGUSD",
+  "DJ30",
+  "USDCHF",
+  "NZDUSD",
+  "GBPJPY",
+  "EURGBP",
+  "EURJPY",
+]);
 
 export function isStrictLiveSymbol(symbol: string): boolean {
   return STRICT_LIVE_SYMBOLS.has(symbol);

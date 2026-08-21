@@ -149,19 +149,21 @@ describe("getLiveMarketDetail", () => {
     vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
 
-    // EURGBP: NZDUSD was promoted to STRICT_LIVE_SYMBOLS in the OANDA FX
-    // batch (along with USDCHF/GBPJPY), so EURGBP is now the ordinary,
-    // not-yet-promoted example. Unlike the scoring-engine's "institutional"
-    // factor (positioning.ts), this card's institutionalCard() has no
-    // CFTC-coverage gate of its own — it just falls back to demo data like
-    // price/seasonality, so "estimated" is still correct here even though
-    // EURGBP has no real CFTC contract.
-    const detail = await getLiveMarketDetail("EURGBP", "hybrid");
+    // NAS100: all 10 configured OANDA FX pairs (through EURGBP/EURJPY, the
+    // final batch) and every symbol with a real CFTC + myfxbook/IG mapping
+    // are now promoted, so NAS100 is the ordinary, not-yet-promoted example
+    // — blocked only by an unrelated FMP 402 issue on ^NDX. It has a real
+    // CFTC mapping ("NASDAQ-100 Consolidated"), so institutionalCard()'s
+    // demo fallback still applies normally ("estimated"), same as
+    // price/seasonality. It has no myfxbook/IG/OANDA retail mapping at all,
+    // so retail resolves NOT_APPLICABLE, not merely unavailable — demo
+    // fallback must never invent a percentage either way.
+    const detail = await getLiveMarketDetail("NAS100", "hybrid");
 
     expect(detail.price.freshness).toBe("estimated");
     expect(detail.institutional.freshness).toBe("estimated");
     expect(detail.seasonality.freshness).toBe("estimated");
-    expect(detail.retail.freshness).toBe("unavailable");
+    expect(detail.retail.freshness).toBe("not_applicable");
     expect(detail.retail.data).toBeNull();
   });
 
