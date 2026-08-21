@@ -62,7 +62,7 @@ async function verifyOne(symbol: string): Promise<boolean> {
 
   // 5. Seasonality has >10 years of real history
   const seasonality = await resolveSeasonalityFactor(symbol, "live");
-  const yearsMatch = seasonality.explanation.match(/Sample covers (\d+) years/);
+  const yearsMatch = seasonality.explanation.match(/Sample covers ([\d.]+) years/);
   const years = yearsMatch ? Number(yearsMatch[1]) : 0;
   allPass = check(
     "Seasonality >10 years real history",
