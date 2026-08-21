@@ -67,6 +67,21 @@ const SERIES_TO_CHECK: { country: string; indicator: string; id: string }[] = [
   // countries like CH — confirming here rather than assuming.
   { country: "EU", indicator: "realGdp", id: "CLVMNACSCAB1GQEA19" },
   { country: "EU", indicator: "gdpGrowth", id: "NAEXKP01EZQ657S" },
+  // DE: needed for DAX40's macro. All five candidates below are the ones
+  // fred-verify.ts's real search returned for Germany (DE had zero FRED
+  // coverage configured at all) — each matches the exact naming convention
+  // an already-verified country used for the same indicator (gdpGrowth/cpi/
+  // unemploymentRate/policyRate all follow the identical OECD MEI pattern
+  // proven by CH/JP/NZ/AU/CA/EU; realGdp uses the EU-style "SCA" 3-letter
+  // code since the simpler single-country "SA" 2-letter variant did not
+  // appear in Germany's real search results at all) — confirming metadata
+  // here, not assuming from the pattern alone. This does NOT by itself
+  // unblock DAX40 — its price/candle source is a separate, still-open gap.
+  { country: "DE", indicator: "realGdp", id: "CLVMNACSCAB1GQDE" },
+  { country: "DE", indicator: "gdpGrowth", id: "NAEXKP01DEQ657S" },
+  { country: "DE", indicator: "cpi", id: "DEUCPIALLMINMEI" },
+  { country: "DE", indicator: "unemploymentRate", id: "LRHUTTTTDEM156S" },
+  { country: "DE", indicator: "policyRate", id: "IRSTCI01DEM156N" },
 ];
 
 async function main() {
