@@ -12,6 +12,7 @@ const FRESHNESS_WEIGHT: Record<ResolvedFactor["freshness"], number> = {
   stale: 0.3,
   unavailable: 0.1,
   error: 0.1,
+  not_applicable: 0, // unused — not_applicable factors are excluded below, never averaged in
 };
 
 function clamp(v: number, min: number, max: number): number {
@@ -19,10 +20,16 @@ function clamp(v: number, min: number, max: number): number {
 }
 
 export function computeConfidence(factors: ResolvedFactor[]): number {
-  if (factors.length === 0) return 0;
+  // not_applicable factors (e.g. no CFTC contract for this asset, no
+  // retail-sentiment provider for this asset class) are a permanent,
+  // by-design gap, not a data-quality problem — an asset with fewer
+  // structurally-applicable factors must not be penalized versus one that
+  // has all nine. Confidence is computed only over the applicable set.
+  const applicable = factors.filter((f) => f.freshness !== "not_applicable");
+  if (applicable.length === 0) return 0;
 
-  const available = factors.filter((f) => f.freshness !== "unavailable" && f.freshness !== "error");
-  const completeness = available.length / factors.length;
+  const available = applicable.filter((f) => f.freshness !== "unavailable" && f.freshness !== "error");
+  const completeness = available.length / applicable.length;
 
   // Agreement is only meaningful across factors that actually have data —
   // an all-unavailable set has rawScore=0 by convention, which is a
@@ -35,7 +42,7 @@ export function computeConfidence(factors: ResolvedFactor[]): number {
     agreement = Math.max(0, 1 - Math.sqrt(variance) / 10);
   }
 
-  const freshnessScore = factors.reduce((s, f) => s + FRESHNESS_WEIGHT[f.freshness], 0) / factors.length;
+  const freshnessScore = applicable.reduce((s, f) => s + FRESHNESS_WEIGHT[f.freshness], 0) / applicable.length;
 
   // No flat baseline: confidence must be able to fall close to the floor
   // when almost nothing is available, not just dip modestly.

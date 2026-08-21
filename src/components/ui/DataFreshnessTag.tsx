@@ -8,6 +8,9 @@ const LABELS: Record<DataFreshness, { text: string; classes: string }> = {
   stale: { text: "Stale", classes: "text-rose-400 bg-rose-500/10" },
   unavailable: { text: "Unavailable", classes: "text-(--text-faint) bg-slate-500/10" },
   error: { text: "Error", classes: "text-rose-400 bg-rose-500/15" },
+  // Quieter than "Unavailable" on purpose — this isn't a data problem to
+  // worry about, it's a factor that structurally doesn't exist for this asset.
+  not_applicable: { text: "N/A", classes: "text-(--text-faint) opacity-60" },
 };
 
 export function DataFreshnessTag({ freshness, lastUpdated }: { freshness: DataFreshness; lastUpdated?: string }) {

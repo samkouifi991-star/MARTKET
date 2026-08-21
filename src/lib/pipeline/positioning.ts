@@ -3,8 +3,9 @@ import { institutionalFactor as demoInstitutionalFactor } from "@/lib/scoring";
 import { computeInstitutionalMomentum, detectDivergenceSignal, DivergenceInput, SmartMoneySignal } from "@/lib/engines/smart-money";
 import * as cftc from "@/services/market-data/cftc";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
+import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import { getQuoteWithFallback } from "@/services/market-data/last-known-good";
-import { demoFallbackFactor, errorFactor, ResolvedFactor, unavailableFactor } from "./types";
+import { demoFallbackFactor, errorFactor, notApplicableFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 
 const SOURCE = "CFTC Commitments of Traders";
@@ -13,9 +14,20 @@ function clamp(v: number, min = -10, max = 10): number {
   return Math.max(min, Math.min(max, v));
 }
 
+// No CFTC-reportable futures contract exists for this symbol at all (e.g.
+// FX crosses, non-US-regulated index futures — see symbol-map.ts's own
+// comments on exactly which and why). That's a permanent, structural gap,
+// not a temporary provider outage, so both Institutional Positioning and
+// Smart Money (which is built on the same CFTC data) should say so plainly
+// rather than reading as "should have data, currently doesn't."
+function hasCftcCoverage(symbol: string): boolean {
+  return getSymbolMapping(symbol)?.cftc != null;
+}
+
 export async function resolveInstitutionalFactor(symbol: string, mode: DataMode): Promise<ResolvedFactor> {
   const instrument = getInstrument(symbol);
   if (!instrument) return unavailableFactor("institutional", SOURCE, `Unknown instrument ${symbol}`);
+  if (!hasCftcCoverage(symbol)) return notApplicableFactor("institutional", SOURCE, `no CFTC-reportable futures contract exists for ${symbol}`);
 
   const positioning = await cftc.getInstitutionalPositioning(symbol);
   if (!positioning.value) {
@@ -58,10 +70,19 @@ export type SmartMoneyResolution = {
   confidence: number;
   explanation: string;
   provider: string;
-  freshness: "live" | "stale" | "unavailable" | "error";
+  freshness: "live" | "stale" | "unavailable" | "error" | "not_applicable";
 };
 
 export async function resolveSmartMoney(symbol: string): Promise<SmartMoneyResolution> {
+  if (!hasCftcCoverage(symbol)) {
+    return {
+      signal: "None",
+      confidence: 0,
+      explanation: `Smart Money is built on CFTC institutional positioning momentum, and no CFTC-reportable futures contract exists for ${symbol} — not applicable for this asset, not a temporary outage.`,
+      provider: "cftc",
+      freshness: "not_applicable",
+    };
+  }
   const [positioning, sentiment, quote] = await Promise.all([cftc.getInstitutionalPositioning(symbol), retailSentiment.getRetailSentiment(symbol), getQuoteWithFallback(symbol)]);
 
   if (!positioning.value) {

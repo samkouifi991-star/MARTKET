@@ -1,7 +1,8 @@
 import { getInstrument } from "@/lib/instruments";
 import { DEFAULT_RETAIL_SENTIMENT_CONFIG } from "@/lib/config";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
-import { errorFactor, ResolvedFactor, unavailableFactor } from "./types";
+import { getSymbolMapping } from "@/services/market-data/symbol-map";
+import { errorFactor, notApplicableFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { DataMode } from "@/services/data-mode";
 
 function clamp(v: number, min = -10, max = 10): number {
@@ -17,6 +18,16 @@ export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMo
   void _mode;
   const instrument = getInstrument(symbol);
   if (!instrument) return unavailableFactor("retailSentiment", "Retail Sentiment", `Unknown instrument ${symbol}`);
+
+  // A permanent, structural gap (this asset class has no configured
+  // retail-sentiment provider at all — e.g. crypto/indices aren't covered
+  // by Myfxbook or IG today) is not the same thing as "the provider is
+  // temporarily down." Checking the symbol map before calling the provider
+  // means this never gets counted as a data-quality problem in confidence.
+  const mapping = getSymbolMapping(symbol);
+  if (!mapping?.myfxbookSymbol && !mapping?.igEpic) {
+    return notApplicableFactor("retailSentiment", "Retail Sentiment", `no retail-sentiment provider (Myfxbook/IG) covers ${symbol} in the current provider set`);
+  }
 
   const sentiment = await retailSentiment.getRetailSentiment(symbol);
   const SOURCE = sentiment.source;

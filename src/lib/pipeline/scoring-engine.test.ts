@@ -23,4 +23,8 @@ describe("contributionFor freshness dampening", () => {
     expect(contributionFor(factor("unavailable"), 0.2)).toBe(0);
     expect(contributionFor(factor("error"), 0.2)).toBe(0);
   });
+
+  it("zeroes not_applicable — a structurally-inapplicable factor never contributes, same as unavailable/error", () => {
+    expect(contributionFor(factor("not_applicable"), 0.2)).toBe(0);
+  });
 });

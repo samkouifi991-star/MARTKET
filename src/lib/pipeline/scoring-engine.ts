@@ -45,7 +45,7 @@ export function contributionFor(factor: ResolvedFactor, weight: number): number 
   if (factor.freshness === "delayed") contribution *= 0.85;
   else if (factor.freshness === "stale") contribution *= 0.5;
   else if (factor.freshness === "estimated") contribution *= 0.7;
-  else if (factor.freshness === "unavailable" || factor.freshness === "error") contribution = 0;
+  else if (factor.freshness === "unavailable" || factor.freshness === "error" || factor.freshness === "not_applicable") contribution = 0;
   return Number(contribution.toFixed(2));
 }
 

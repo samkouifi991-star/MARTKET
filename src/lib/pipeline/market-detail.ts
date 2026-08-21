@@ -26,6 +26,7 @@ import * as cftc from "@/services/market-data/cftc";
 import { getQuoteWithFallback, getDailyCandlesWithFallback } from "@/services/market-data/last-known-good";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
+import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import { seasonalityDepthFreshness, worseOf } from "./types";
 import { resolveSmartMoney } from "./positioning";
 import { fetchTechnicalTrend } from "./technical";
@@ -104,7 +105,13 @@ async function institutionalCard(symbol: string, mode: DataMode): Promise<CardRe
 async function retailCard(symbol: string): Promise<CardResult<NormalizedRetailSentiment>> {
   // Retail sentiment never falls back to demo data, in any mode — see
   // src/lib/pipeline/sentiment.ts for the same absolute rule applied to the
-  // score factor.
+  // score factor. Same not_applicable distinction as sentiment.ts too: no
+  // configured provider for this asset class is a permanent, structural
+  // gap, not a temporary outage.
+  const mapping = getSymbolMapping(symbol);
+  if (!mapping?.myfxbookSymbol && !mapping?.igEpic) {
+    return { data: null, freshness: "not_applicable", source: "Retail Sentiment", lastUpdated: null, reason: `No retail-sentiment provider (Myfxbook/IG) covers ${symbol} in the current provider set` };
+  }
   const result = await retailSentiment.getRetailSentiment(symbol);
   if (result.status === "live" && result.value) {
     return { data: result.value, freshness: "live", source: result.source, lastUpdated: result.sourceUpdatedAt };

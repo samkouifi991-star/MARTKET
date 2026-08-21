@@ -52,6 +52,30 @@ export function demoFallbackFactor(base: Omit<ResolvedFactor, "freshness" | "pro
   return { ...base, provider: "demo", freshness: "estimated" };
 }
 
+/** For a factor that structurally does not exist for this asset — no
+ * CFTC-reportable futures contract, no retail-sentiment provider covers
+ * this asset class, etc. Distinct from unavailableFactor(): that means
+ * "should have data, doesn't right now" (a real gap that should lower
+ * confidence); this means "this concept doesn't apply here, by design" (not
+ * a data-quality problem — confidence.ts excludes it from its average
+ * entirely rather than penalizing the asset for a factor it was never going
+ * to have). Never use this for a temporary provider outage or rate limit —
+ * only for a permanent, structural absence (e.g. SYMBOL_MAP's cftc/
+ * myfxbookSymbol/igEpic being null for this symbol). */
+export function notApplicableFactor(key: ScoreFactorKey, source: string, reason: string): ResolvedFactor {
+  const now = new Date().toISOString();
+  return {
+    key,
+    rawScore: 0,
+    explanation: `Not applicable: ${reason}`,
+    source,
+    provider: "none",
+    freshness: "not_applicable",
+    lastUpdated: now,
+    nextUpdate: now,
+  };
+}
+
 export type FactorResolverContext = {
   symbol: string;
   mode: DataMode;
@@ -69,6 +93,7 @@ const FRESHNESS_RANK: Record<DataFreshness, number> = {
   stale: 2,
   unavailable: 3,
   error: 3,
+  not_applicable: 3,
 };
 
 export function worseOf(a: DataFreshness, b: DataFreshness): DataFreshness {

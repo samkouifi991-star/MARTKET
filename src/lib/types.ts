@@ -45,8 +45,13 @@ export const FACTOR_LABELS: Record<ScoreFactorKey, string> = {
 // "estimated" is a demo-mode-only label (aggregated/synthetic value shown
 // honestly as such). "unavailable" / "error" are the live-pipeline states a
 // factor must fall into when its provider has no data or the request
-// failed — never silently substituted with demo data.
-export type DataFreshness = "live" | "delayed" | "estimated" | "stale" | "unavailable" | "error";
+// failed — never silently substituted with demo data. "not_applicable" is
+// distinct from both: it means the factor concept structurally does not
+// exist for this asset (e.g. no CFTC-reportable futures contract, no
+// retail-sentiment provider covers this asset class) — a permanent,
+// by-design gap, not a temporary data-quality problem, so it must not drag
+// down confidence the way a real missing/failed fetch does.
+export type DataFreshness = "live" | "delayed" | "estimated" | "stale" | "unavailable" | "error" | "not_applicable";
 
 export type ScoreFactor = {
   key: ScoreFactorKey;
