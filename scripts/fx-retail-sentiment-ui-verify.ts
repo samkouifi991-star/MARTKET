@@ -79,7 +79,13 @@ async function checkMetal(symbol: string): Promise<boolean> {
 
   const checks: { label: string; pass: boolean }[] = [
     { label: "freshness is unavailable", pass: f.freshness === "unavailable" },
-    { label: 'explanation is exactly the concise message', pass: f.explanation === "No verified retail-positioning source is currently available for this market." },
+    // unavailableFactor() (types.ts) prefixes every unavailable factor's
+    // reason with "Data temporarily unavailable: " app-wide — the correct,
+    // consistent wrapper here (this is a real "should have data, doesn't
+    // right now" gap, not a structural absence, so unavailableFactor is the
+    // right helper, not notApplicableFactor). Checking for the concise
+    // sentence as a substring, not exact equality.
+    { label: "explanation contains the concise message, no more", pass: f.explanation === "Data temporarily unavailable: No verified retail-positioning source is currently available for this market." },
     { label: "no Myfxbook wording present", pass: !/myfxbook/i.test(f.explanation) && !/myfxbook/i.test(f.source) },
     { label: "no credential/session/error text leaked", pass: !/credential|session|login|password|token/i.test(f.explanation) },
   ];
