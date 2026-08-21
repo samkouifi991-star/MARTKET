@@ -68,10 +68,26 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     //   policyRate (ECBDFR): "ECB Deposit Facility Rate for Euro Area",
     //     Percent, Daily, observations through 2026-08-20. Matches
     //     Interest Rates.
+    // Verified against the real FRED API for the EURGBP/EURJPY macro batch
+    // (EU had cpi/unemploymentRate/policyRate but no growth series at all):
+    //   realGdp (CLVMNACSCAB1GQEA19): "Real Gross Domestic Product for Euro
+    //     Area (19 Countries)", Millions of Chained 2010 Euros, Quarterly,
+    //     Seasonally Adjusted, observations through 2026-04-01. Euro-
+    //     denominated like CH's realGdp — harmless, see macro-differential.ts's
+    //     scoreIndicator() (z-scores period-over-period changes only, never
+    //     absolute cross-currency levels). Matches Economic Growth.
+    //   gdpGrowth (NAEXKP01EZQ657S): same "...GDP by Expenditure: Constant
+    //     Prices..." pattern every other country's gdpGrowth uses, "Growth
+    //     rate previous period", Quarterly, Seasonally Adjusted — but FRED's
+    //     own last observation is 2023-01-01 (~3.5 years stale as of this
+    //     verification), the same "correct mapping, stale FRED data"
+    //     handling as EU/unemploymentRate above. Kept verified.
     cpi: { id: "CP0000EZ19M086NEST", verified: true },
     unemploymentRate: { id: "LRHUTTTTEZM156S", verified: true },
     policyRate: { id: "ECBDFR", verified: true },
     yield10y: { id: "IRLTLT01EZM156N", verified: false },
+    realGdp: { id: "CLVMNACSCAB1GQEA19", verified: true },
+    gdpGrowth: { id: "NAEXKP01EZQ657S", verified: true },
   },
   GB: {
     // Verified against the real FRED API (npm run test:fred-verify +
