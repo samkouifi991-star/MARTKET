@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { allowsDemoFallback, isStrictLiveSymbol } from "./data-mode";
 
-const STRICT_LIVE = ["GBPUSD", "EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500", "AUDUSD", "USDCAD", "XAGUSD", "DJ30", "USDCHF", "NZDUSD", "GBPJPY", "EURGBP", "EURJPY"];
+const STRICT_LIVE = ["GBPUSD", "EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500", "AUDUSD", "USDCAD", "XAGUSD", "DJ30", "RUT2000", "FTSE100", "NIKKEI225", "ETHUSD", "USDCHF", "NZDUSD", "GBPJPY", "EURGBP", "EURJPY"];
 
 describe("data-mode strict-live symbols", () => {
   it("marks GBPUSD and every promoted batch as strict-live, ordinary symbols as not", () => {

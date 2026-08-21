@@ -126,6 +126,39 @@ export function allowsLiveProviders(): boolean {
 //
 // This completes all 10 configured OANDA FX pairs — every FX market with a
 // verified OANDA mapping is now STRICT_LIVE.
+//
+// Sixth-phase batch (4 markets) — the fourth non-FX candidate batch
+// (RUT2000, FTSE100, NIKKEI225, ETHUSD), promoted after a real FMP seed +
+// full computeLiveMarketScore("live") verification
+// (scripts/four-market-seed-verify.ts): a real current quote, a real full
+// daily-history fetch, a Neon write/read-back round-trip for both, and the
+// real factor pipeline all confirmed for each symbol — never a demo value.
+//   RUT2000   — equity index, real US macro, and the only one of the four
+//               with a genuine CFTC-reportable contract ("RUSSELL E-MINI"),
+//               so Institutional Positioning/Smart Money resolve real
+//               values here, not NOT_APPLICABLE.
+//   FTSE100   — equity index, real GB macro (Bank of England rate, not the
+//               Fed). No CFTC-reportable contract for this index under the
+//               current methodology, so Institutional Positioning/Smart
+//               Money correctly resolve NOT_APPLICABLE — this does not
+//               depress confidence the way UNAVAILABLE does.
+//   NIKKEI225 — equity index, real JP macro. Same NOT_APPLICABLE CFTC/Smart
+//               Money treatment as FTSE100, for the same structural reason.
+//   ETHUSD    — crypto, US macro used explicitly as a Global Liquidity
+//               Macro Proxy (same convention already proven by BTCUSD), not
+//               a fabricated country model. No CFTC-reportable contract and
+//               no myfxbook/IG/OANDA retail-sentiment mapping, so
+//               Institutional Positioning, Smart Money, and Retail
+//               Sentiment all correctly resolve NOT_APPLICABLE.
+// All four: FMP's intraday (H4/H1) endpoints return 402 Payment Required on
+// this plan for every one of these tickers, so Technical Trend legitimately
+// reports DELAYED (daily candles only, real, live) rather than an
+// artificially-inflated LIVE — this is expected, correct behavior, not a
+// defect to chase. The News factor is unavailable for all four (a systemic
+// FMP news-endpoint gap affecting every market in this system equally, not
+// specific to these four) — News has no demo fallback and, being an
+// ordinary UNAVAILABLE factor rather than a promotion blocker, does not
+// prevent these markets from being real, live, and promotable.
 const STRICT_LIVE_SYMBOLS = new Set<string>([
   "GBPUSD",
   "EURUSD",
@@ -137,6 +170,10 @@ const STRICT_LIVE_SYMBOLS = new Set<string>([
   "USDCAD",
   "XAGUSD",
   "DJ30",
+  "RUT2000",
+  "FTSE100",
+  "NIKKEI225",
+  "ETHUSD",
   "USDCHF",
   "NZDUSD",
   "GBPJPY",
