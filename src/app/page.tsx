@@ -10,9 +10,9 @@ import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { factorLabel } from "@/lib/scoring";
-import { factorSentiment, formatSigned } from "@/lib/format";
+import { factorSentiment, formatSigned, FactorSentiment } from "@/lib/format";
 import { isStrictLiveSymbol } from "@/services/data-mode";
-import { ScoreFactorKey } from "@/lib/types";
+import { SCORE_FACTOR_KEYS, DataFreshness } from "@/lib/types";
 import {
   Activity,
   BarChart3,
@@ -38,14 +38,32 @@ export const metadata = {
 };
 export const dynamic = "force-dynamic";
 
-const FEATURED_FACTOR_KEYS: ScoreFactorKey[] = ["institutional", "retailSentiment", "technical", "economicGrowth"];
+type PreviewRow = { key: string; label: string; sentiment: FactorSentiment; freshness: DataFreshness; contribution: number | null };
+
+function smartMoneySentiment(signal: string): FactorSentiment {
+  if (signal === "Bullish Smart Money Divergence") return "Bullish";
+  if (signal === "Bearish Smart Money Divergence" || signal === "Crowded Institutional Trade") return "Bearish";
+  return "Neutral";
+}
 
 export default async function LandingPage() {
   const sessionUser = await verifySession();
   const user = sessionUser ? { email: sessionUser.email } : null;
-  const { rows, featured } = await getLandingPreview();
+  const { rows, featured, smartMoney } = await getLandingPreview();
 
-  const featuredFactors = FEATURED_FACTOR_KEYS.map((key) => featured.score.factors.find((f) => f.key === key)).filter((f) => f !== undefined);
+  const previewRows: PreviewRow[] = [
+    ...SCORE_FACTOR_KEYS.map((key) => {
+      const f = featured.score.factors.find((x) => x.key === key)!;
+      return { key, label: factorLabel(key), sentiment: factorSentiment(f.contribution), freshness: f.freshness, contribution: f.contribution };
+    }),
+    {
+      key: "smartMoney",
+      label: "Smart Money",
+      sentiment: smartMoneySentiment(smartMoney.signal),
+      freshness: smartMoney.freshness,
+      contribution: null,
+    },
+  ];
 
   const strictLiveCount = rows.filter((r) => isStrictLiveSymbol(r.instrument.symbol)).length;
   const byAssetClass = {
@@ -85,10 +103,16 @@ export default async function LandingPage() {
 
         {/* Product preview */}
         <section id="product" className="max-w-6xl mx-auto px-4 sm:px-6 pb-16">
-          <div className="grid lg:grid-cols-3 gap-4">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-semibold">See exactly what drives every score</h2>
+            <p className="mt-2 text-(--text-dim) max-w-2xl mx-auto text-sm sm:text-base">
+              Every market score is transparent — technicals, positioning, sentiment, macro, seasonality, rates, labor, inflation and more.
+            </p>
+          </div>
+          <div className="grid lg:grid-cols-3 gap-4 items-start">
             <div className="lg:col-span-2 card p-4 sm:p-5">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold">Top Market Setups</h2>
+                <h3 className="text-sm font-semibold">Top Market Setups</h3>
                 <span className="text-[11px] text-(--text-faint)">Live product preview — real data, not a mockup</span>
               </div>
               <TopSetupsTable rows={rows} />
@@ -96,7 +120,7 @@ export default async function LandingPage() {
 
             <div className="card p-4 sm:p-5 flex flex-col">
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-semibold">{featured.instrument.symbol} — Total Score</h2>
+                <h3 className="text-sm font-semibold">{featured.instrument.symbol} — Total Score</h3>
                 <DataFreshnessTag freshness={featured.score.factors[0]?.freshness ?? "live"} />
               </div>
               <div className="flex justify-center py-2">
@@ -105,21 +129,21 @@ export default async function LandingPage() {
               <ConfidenceBar value={featured.score.confidence} />
 
               <div className="mt-4 space-y-2.5">
-                {featuredFactors.map((f) => (
-                  <div key={f.key} className="text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 font-medium">
-                        {factorLabel(f.key)}
-                        <FactorSentimentBadge sentiment={factorSentiment(f.contribution)} />
+                {previewRows.map((row) => (
+                  <div key={row.key} className="text-xs flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 font-medium min-w-0">
+                      <span className="truncate">{row.label}</span>
+                      <FactorSentimentBadge sentiment={row.sentiment} />
+                    </span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <DataFreshnessTag freshness={row.freshness} />
+                      <span className="tabular-nums font-semibold w-12 text-right">
+                        {row.contribution === null ? "—" : formatSigned(row.contribution)}
                       </span>
-                      <span className="tabular-nums font-semibold">{formatSigned(f.contribution)}</span>
-                    </div>
+                    </span>
                   </div>
                 ))}
               </div>
-              <Link href={`/markets/${featured.instrument.symbol}`} className="mt-4 text-xs text-(--accent) hover:underline">
-                Open the full breakdown →
-              </Link>
             </div>
           </div>
         </section>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { signout } from "@/lib/auth/actions";
 
 export function MarketingNav({ user }: { user: { email: string } | null }) {
   return (
@@ -20,9 +21,16 @@ export function MarketingNav({ user }: { user: { email: string } | null }) {
 
         <div className="ml-auto flex items-center gap-3">
           {user ? (
-            <Link href="/dashboard" className="h-9 px-4 rounded-lg bg-(--accent) text-white text-sm font-medium inline-flex items-center">
-              Dashboard
-            </Link>
+            <>
+              <Link href="/dashboard" className="h-9 px-4 rounded-lg bg-(--accent) text-white text-sm font-medium inline-flex items-center">
+                Dashboard
+              </Link>
+              <form action={signout}>
+                <button type="submit" className="h-9 px-4 rounded-lg border border-(--border) text-sm font-medium text-(--text-dim) hover:text-(--text) hover:border-(--border-strong)">
+                  Sign Out
+                </button>
+              </form>
+            </>
           ) : (
             <>
               <Link href="/signin" className="text-sm text-(--text-dim) hover:text-(--text)">Sign In</Link>
