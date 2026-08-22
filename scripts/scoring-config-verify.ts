@@ -69,7 +69,7 @@ async function main() {
 
   for (const symbol of STRICT_LIVE_SYMBOLS) {
     try {
-      await computeLiveMarketScore(symbol, DATA_MODE, { storageOnly: true, updateCurrent: true, scoringConfig });
+      await computeLiveMarketScore(symbol, DATA_MODE, { storageOnly: true, updateCurrent: true, scoringConfig, awaitPersist: true });
       const read = await getCurrentScore(symbol);
       if (!read) {
         console.log(`SCORING_CONFIG_VERIFY_FAIL: ${symbol} — getCurrentScore returned null right after recompute`);

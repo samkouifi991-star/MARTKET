@@ -96,7 +96,7 @@ export async function saveScoringConfiguration(_prev: AdminActionState, formData
     const scoringConfig = { id: configRow.id, weights: configRow.weights, biasThresholds: configRow.biasThresholds };
     const symbols = strictLiveSymbolList();
     const results = await Promise.allSettled(
-      symbols.map((symbol) => computeLiveMarketScore(symbol, DATA_MODE, { storageOnly: true, updateCurrent: true, scoringConfig }))
+      symbols.map((symbol) => computeLiveMarketScore(symbol, DATA_MODE, { storageOnly: true, updateCurrent: true, scoringConfig, awaitPersist: true }))
     );
     recomputed = results.filter((r) => r.status === "fulfilled").length;
     failed = results.filter((r) => r.status === "rejected").length;
@@ -124,7 +124,7 @@ export async function recomputeAllScores(): Promise<AdminActionState> {
   const scoringConfig = await resolveActiveScoringConfig();
   const symbols = strictLiveSymbolList();
   const results = await Promise.allSettled(
-    symbols.map((symbol) => computeLiveMarketScore(symbol, DATA_MODE, { storageOnly: true, updateCurrent: true, scoringConfig }))
+    symbols.map((symbol) => computeLiveMarketScore(symbol, DATA_MODE, { storageOnly: true, updateCurrent: true, scoringConfig, awaitPersist: true }))
   );
   const recomputed = results.filter((r) => r.status === "fulfilled").length;
 

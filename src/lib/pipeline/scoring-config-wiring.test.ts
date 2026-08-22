@@ -146,4 +146,33 @@ describe("computeLiveMarketScore uses the scoringConfig it's given, not hardcode
     await computeLiveMarketScore("BTCUSD", "live", { storageOnly: true, updateCurrent: true, scoringConfig: CONFIG_B });
     expect(upsertCurrentScore).toHaveBeenCalledWith(expect.objectContaining({ totalScore: 2.5 }), 2);
   });
+
+  // Regression: computeLiveMarketScore used to fire upsertCurrentScore
+  // without awaiting it, so a caller (like the Admin recompute action)
+  // could resolve — and a serverless invocation could be frozen — before
+  // the write actually landed. A read immediately after would race the
+  // write and could observe the OLD row, exactly like the bug report
+  // (Admin's saved weights not reflected in current_factor_scores). This
+  // proves awaitPersist:true genuinely blocks until the write settles.
+  it("awaitPersist:true blocks until upsertCurrentScore's write has actually completed", async () => {
+    let resolveWrite!: () => void;
+    const pendingWrite = new Promise<void>((resolve) => {
+      resolveWrite = resolve;
+    });
+    vi.mocked(upsertCurrentScore).mockReturnValue(pendingWrite);
+
+    let settled = false;
+    const call = computeLiveMarketScore("BTCUSD", "live", { storageOnly: true, updateCurrent: true, scoringConfig: CONFIG_B, awaitPersist: true }).then(
+      () => {
+        settled = true;
+      }
+    );
+
+    await Promise.resolve(); // let microtasks up to the pending write run
+    expect(settled).toBe(false); // must not have resolved while the write is still in flight
+
+    resolveWrite();
+    await call;
+    expect(settled).toBe(true);
+  });
 });

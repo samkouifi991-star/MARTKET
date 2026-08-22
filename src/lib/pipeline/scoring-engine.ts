@@ -62,7 +62,7 @@ export function contributionFor(factor: ResolvedFactor, weight: number): number 
 export async function computeLiveMarketScore(
   symbol: string,
   mode: DataMode,
-  options: { persist?: boolean; storageOnly?: boolean; updateCurrent?: boolean; scoringConfig?: ResolvedScoringConfig } = {}
+  options: { persist?: boolean; storageOnly?: boolean; updateCurrent?: boolean; scoringConfig?: ResolvedScoringConfig; awaitPersist?: boolean } = {}
 ): Promise<MarketScore> {
   const instrument = getInstrument(symbol);
   if (!instrument) throw new Error(`Unknown instrument ${symbol}`);
@@ -139,18 +139,20 @@ export async function computeLiveMarketScore(
   // deploy, so every test deployment this session wrote its own row).
   // Only the periodic scores cron (src/app/api/cron/scores/route.ts) passes
   // persist:true — it's the sole source of truth for score history.
-  // Best-effort either way: never let a DB outage break score computation
-  // or serving.
-  if (options.persist) recordScoreHistory(score, scoringConfig.id).catch(() => {});
-
-  // current_market_scores/current_factor_scores (see db/queries/scores.ts)
-  // is the single canonical "current score" row that both Market Detail and
-  // Top Setups read — persist:true (the scores cron) always updates it, and
-  // Market Detail additionally passes updateCurrent:true on its own as a
-  // bootstrap fallback for a symbol the cron hasn't scored yet, so Top
-  // Setups isn't left with no row to read until the next cron run.
-  // Best-effort: never let a DB outage break score computation or serving.
-  if (options.persist || options.updateCurrent) upsertCurrentScore(score, scoringConfig.id).catch(() => {});
+  //
+  // options.awaitPersist (default false): fire-and-forget is right for a
+  // page render (Market Detail must never block on a write, and a DB
+  // outage must never break serving) but wrong for a caller whose entire
+  // job IS the write — the Admin reweight/recompute actions await this so
+  // "recomputed 19/19" is only reported once every row is actually
+  // committed. Without it, a Server Action can return its response (and
+  // the underlying serverless invocation can be frozen) before an
+  // un-awaited upsert lands, silently dropping the write — this is exactly
+  // what let a saved configuration look successful while current_factor_
+  // scores kept serving stale weights.
+  const historyWrite = options.persist ? recordScoreHistory(score, scoringConfig.id).catch(() => {}) : null;
+  const currentWrite = options.persist || options.updateCurrent ? upsertCurrentScore(score, scoringConfig.id).catch(() => {}) : null;
+  if (options.awaitPersist) await Promise.all([historyWrite, currentWrite]);
 
   return score;
 }

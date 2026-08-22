@@ -81,7 +81,7 @@ describe("saveScoringConfiguration", () => {
     expect(computeLiveMarketScore).toHaveBeenCalledTimes(3);
     for (const [symbol, , options] of vi.mocked(computeLiveMarketScore).mock.calls) {
       expect(["GBPUSD", "EURUSD", "BTCUSD"]).toContain(symbol);
-      expect(options).toMatchObject({ storageOnly: true, updateCurrent: true, scoringConfig: { id: 5 } });
+      expect(options).toMatchObject({ storageOnly: true, updateCurrent: true, awaitPersist: true, scoringConfig: { id: 5 } });
     }
     expect(result?.success).toMatch(/saved and activated/i);
   });
@@ -113,7 +113,7 @@ describe("recomputeAllScores", () => {
     expect(createScoringConfiguration).not.toHaveBeenCalled();
     expect(computeLiveMarketScore).toHaveBeenCalledTimes(3);
     for (const [, , options] of vi.mocked(computeLiveMarketScore).mock.calls) {
-      expect(options).toMatchObject({ storageOnly: true, updateCurrent: true });
+      expect(options).toMatchObject({ storageOnly: true, updateCurrent: true, awaitPersist: true });
     }
     expect(result?.success).toMatch(/recalculated 3\/3/i);
   });
