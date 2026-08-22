@@ -1,10 +1,12 @@
 import { allEconomies } from "@/lib/demo/economies";
 import { EconomicReleaseTable } from "@/components/tables/EconomicReleaseTable";
 import { StatTile } from "@/components/ui/StatTile";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Economic Growth — Market Intelligence AI" };
 
-export default function EconomicGrowthPage() {
+export default async function EconomicGrowthPage() {
+  await requireEntitlement();
   const economies = allEconomies();
 
   return (

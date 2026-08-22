@@ -2,6 +2,7 @@ import { getTopSetupsRows } from "@/lib/pipeline/top-setups";
 import { TopSetupsTable } from "@/components/tables/TopSetupsTable";
 import { InfoTooltip } from "@/components/ui/InfoTooltip";
 import { AutoRefresh } from "@/components/ui/AutoRefresh";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Top Market Setups — Market Intelligence AI" };
 
@@ -14,6 +15,7 @@ export const metadata = { title: "Top Market Setups — Market Intelligence AI" 
 export const dynamic = "force-dynamic";
 
 export default async function TopSetupsPage() {
+  await requireEntitlement();
   const rows = await getTopSetupsRows();
 
   return (

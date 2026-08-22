@@ -9,6 +9,7 @@ import { factorLabel } from "@/lib/scoring";
 import { formatDate, formatRelative } from "@/lib/time";
 import { DATA_MODE } from "@/services/data-mode";
 import { getProviderHealth, ProviderHealthRow } from "@/db/queries/provider-health";
+import { requireAdmin } from "@/lib/auth/dal";
 import Link from "next/link";
 
 export const metadata = { title: "Admin — Market Intelligence AI" };
@@ -24,6 +25,7 @@ async function loadProviderHealth(): Promise<{ rows: ProviderHealthRow[]; error:
 }
 
 export default async function AdminPage() {
+  await requireAdmin();
   const rows = allMarketRows();
   const dataQualityIssues = rows.flatMap((r) =>
     r.score.factors

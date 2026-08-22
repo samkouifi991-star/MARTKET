@@ -26,6 +26,7 @@ import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
 import { factorContributionColorClass, factorSentiment, formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
 import { formatDateTime, formatRelative } from "@/lib/time";
 import { DataFreshness, MarketScore, PriceData } from "@/lib/types";
+import { requireEntitlement } from "@/lib/auth/dal";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 
 export function generateStaticParams() {
@@ -47,6 +48,7 @@ export async function generateMetadata({ params }: { params: Promise<{ symbol: s
 }
 
 export default async function MarketDetailPage({ params }: { params: Promise<{ symbol: string }> }) {
+  await requireEntitlement();
   const { symbol } = await params;
   const instrument = getInstrument(symbol);
   if (!instrument) notFound();

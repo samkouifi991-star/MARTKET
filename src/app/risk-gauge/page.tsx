@@ -1,10 +1,12 @@
 import { generateRiskGauge } from "@/lib/demo/riskGauge";
 import { Card } from "@/components/ui/Card";
 import { DEFAULT_RISK_GAUGE_BANDS } from "@/lib/config";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Risk-On / Risk-Off Gauge — Market Intelligence AI" };
 
-export default function RiskGaugePage() {
+export default async function RiskGaugePage() {
+  await requireEntitlement();
   const risk = generateRiskGauge();
 
   return (

@@ -1,10 +1,12 @@
 import { DEFAULT_WATCHLISTS } from "@/lib/demo/watchlists";
 import { allMarketRows } from "@/lib/market-data";
 import { WatchlistsClient } from "./WatchlistsClient";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Watchlists — Market Intelligence AI" };
 
-export default function WatchlistsPage() {
+export default async function WatchlistsPage() {
+  await requireEntitlement();
   const rows = allMarketRows();
 
   return (

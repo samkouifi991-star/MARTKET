@@ -3,10 +3,12 @@ import { ASSET_CLASSES } from "@/lib/instruments";
 import { allMarketRows } from "@/lib/market-data";
 import { BiasBadge } from "@/components/ui/BiasBadge";
 import { formatPrice, formatSigned, scoreColorClass } from "@/lib/format";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Markets — Market Intelligence AI" };
 
-export default function MarketsPage() {
+export default async function MarketsPage() {
+  await requireEntitlement();
   const rows = allMarketRows();
 
   return (

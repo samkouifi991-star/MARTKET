@@ -1,181 +1,295 @@
 import Link from "next/link";
-import { getDashboardMarketRows } from "@/lib/pipeline/dashboard";
-import { StatTile } from "@/components/ui/StatTile";
-import { Card } from "@/components/ui/Card";
-import { AutoRefresh } from "@/components/ui/AutoRefresh";
-import { formatSigned, scoreColorClass } from "@/lib/format";
-import { generateRiskGauge } from "@/lib/demo/riskGauge";
-import { NEWS_ARTICLES } from "@/lib/demo/news";
-import { upcomingHighImpact } from "@/lib/demo/calendar";
-import { formatDateTime, formatRelative } from "@/lib/time";
-import { INSTRUMENTS } from "@/lib/instruments";
-import { generateSmartMoney } from "@/lib/demo/smartMoney";
-import { ArrowRight, Gauge } from "lucide-react";
+import { getLandingPreview } from "@/lib/pipeline/landing";
+import { verifySession } from "@/lib/auth/dal";
+import { MarketingNav } from "@/components/marketing/MarketingNav";
+import { MarketingFooter } from "@/components/marketing/MarketingFooter";
+import { PricingCard } from "@/components/marketing/PricingCard";
+import { TopSetupsTable } from "@/components/tables/TopSetupsTable";
+import { ScoreGauge } from "@/components/ui/ScoreGauge";
+import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
+import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
+import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
+import { factorLabel } from "@/lib/scoring";
+import { factorSentiment, formatSigned } from "@/lib/format";
+import { isStrictLiveSymbol } from "@/services/data-mode";
+import { ScoreFactorKey } from "@/lib/types";
+import {
+  Activity,
+  BarChart3,
+  Bell,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Coins,
+  Gauge,
+  LineChart,
+  ListChecks,
+  Newspaper,
+  ShieldCheck,
+  Star,
+  TrendingUp,
+  Users,
+} from "lucide-react";
 
-// Without this, the Dashboard would be prerendered once at build time and
-// serve that frozen HTML forever — defeating the canonical current-score
-// read below, which must reflect Neon's latest state on every visit. See
-// /top-setups and /markets/[symbol] for the same rule already applied.
+export const metadata = {
+  title: "Market Intelligence AI — See What's Driving the Markets",
+  description:
+    "Technical trends, institutional positioning, retail sentiment, macro data, seasonality, and market risk — combined into one transparent score for every supported market.",
+};
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
-  const rows = await getDashboardMarketRows();
-  // Only markets with a genuine canonical score AND no demo-fallback
-  // exposure (strict-live symbols) feed the rankings/counts below — see
-  // pipeline/dashboard.ts's DashboardMarketRow.eligible for why a
-  // non-strict-live symbol's current score can't be trusted for this.
-  const eligible = rows.filter((r) => r.eligible && r.score);
-  const blockedCount = rows.length - eligible.length;
-  const sorted = [...eligible].sort((a, b) => b.score!.totalScore - a.score!.totalScore);
-  const topBullish = sorted.slice(0, 5);
-  const topBearish = sorted.slice(-5).reverse();
-  const avgConfidence = eligible.length > 0 ? Math.round(eligible.reduce((s, r) => s + r.score!.confidence, 0) / eligible.length) : 0;
-  const veryBullish = eligible.filter((r) => r.score!.bias === "Very Bullish").length;
-  const veryBearish = eligible.filter((r) => r.score!.bias === "Very Bearish").length;
+const FEATURED_FACTOR_KEYS: ScoreFactorKey[] = ["institutional", "retailSentiment", "technical", "economicGrowth"];
 
-  const risk = generateRiskGauge();
-  const topNews = [...NEWS_ARTICLES].sort((a, b) => b.importance - a.importance).slice(0, 4);
-  const events = upcomingHighImpact(72).slice(0, 4);
-  const divergences = INSTRUMENTS.map((i) => generateSmartMoney(i)).filter((d) => d.signal !== "None").slice(0, 3);
+export default async function LandingPage() {
+  const sessionUser = await verifySession();
+  const user = sessionUser ? { email: sessionUser.email } : null;
+  const { rows, featured } = await getLandingPreview();
+
+  const featuredFactors = FEATURED_FACTOR_KEYS.map((key) => featured.score.factors.find((f) => f.key === key)).filter((f) => f !== undefined);
+
+  const strictLiveCount = rows.filter((r) => isStrictLiveSymbol(r.instrument.symbol)).length;
+  const byAssetClass = {
+    Forex: rows.filter((r) => r.instrument.assetClass === "Forex" && isStrictLiveSymbol(r.instrument.symbol)).length,
+    Indices: rows.filter((r) => r.instrument.assetClass === "Indices" && isStrictLiveSymbol(r.instrument.symbol)).length,
+    Commodities: rows.filter((r) => r.instrument.assetClass === "Commodities" && isStrictLiveSymbol(r.instrument.symbol)).length,
+    Crypto: rows.filter((r) => r.instrument.assetClass === "Crypto" && isStrictLiveSymbol(r.instrument.symbol)).length,
+  };
 
   return (
-    <div className="space-y-6">
-      <AutoRefresh intervalSeconds={45} />
-      <div>
-        <h1 className="text-xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-(--text-faint) mt-1">
-          Which markets have the strongest conditions right now, what&apos;s driving them, and what changed recently.
-        </p>
-      </div>
+    <div className="min-h-dvh flex flex-col">
+      <MarketingNav user={user} />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatTile
-          label="Markets tracked"
-          value={String(rows.length)}
-          sub={blockedCount > 0 ? `${eligible.length} live · ${blockedCount} pending coverage` : "Across 4 asset classes"}
-        />
-        <StatTile label="Very Bullish" value={String(veryBullish)} valueClassName="text-emerald-400" sub="Score ≥ +8" />
-        <StatTile label="Very Bearish" value={String(veryBearish)} valueClassName="text-rose-400" sub="Score ≤ -8" />
-        <StatTile label="Avg. confidence" value={`${avgConfidence}%`} sub="Across all markets" />
-      </div>
+      <main className="flex-1">
+        {/* Hero */}
+        <section className="max-w-5xl mx-auto px-4 sm:px-6 pt-16 pb-12 text-center">
+          <h1 className="text-3xl sm:text-5xl font-semibold tracking-tight leading-tight">
+            See What&apos;s Driving the Markets<br className="hidden sm:block" /> Before You Trade
+          </h1>
+          <p className="mt-5 text-(--text-dim) text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
+            Market Intelligence AI combines technical trends, institutional positioning, retail sentiment, macro data, seasonality,
+            and market risk into one transparent score for every supported market.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <Link href="/signup" className="h-11 px-6 rounded-lg bg-(--accent) text-white text-sm font-semibold inline-flex items-center">
+              Start Your 3-Day Free Trial
+            </Link>
+            <Link
+              href="/#how-it-works"
+              className="h-11 px-6 rounded-lg border border-(--border) text-sm font-medium inline-flex items-center text-(--text-dim) hover:text-(--text) hover:border-(--border-strong)"
+            >
+              See How It Works
+            </Link>
+          </div>
+          <p className="mt-4 text-xs text-(--text-faint)">3 days free · then $39/month · cancel anytime</p>
+        </section>
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        <Card title="Strongest bullish conditions" action={<Link href="/top-setups" className="text-xs text-(--accent) hover:underline">View all →</Link>} className="lg:col-span-1">
-          <ul className="space-y-2.5">
-            {topBullish.map((r) => (
-              <li key={r.instrument.symbol}>
-                <Link href={`/markets/${r.instrument.symbol}`} className="flex items-center justify-between text-sm hover:text-(--accent)">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-medium">{r.instrument.symbol}</span>
-                    <span className="text-(--text-faint) text-xs truncate hidden sm:inline">{r.instrument.name}</span>
-                  </div>
-                  <span className={`tabular-nums font-semibold ${scoreColorClass(r.score!.totalScore)}`}>{formatSigned(r.score!.totalScore)}</span>
-                </Link>
-              </li>
-            ))}
-            {topBullish.length === 0 && <p className="text-xs text-(--text-faint)">No live-scored markets available yet.</p>}
-          </ul>
-        </Card>
-
-        <Card title="Strongest bearish conditions" action={<Link href="/top-setups" className="text-xs text-(--accent) hover:underline">View all →</Link>}>
-          <ul className="space-y-2.5">
-            {topBearish.map((r) => (
-              <li key={r.instrument.symbol}>
-                <Link href={`/markets/${r.instrument.symbol}`} className="flex items-center justify-between text-sm hover:text-(--accent)">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-medium">{r.instrument.symbol}</span>
-                    <span className="text-(--text-faint) text-xs truncate hidden sm:inline">{r.instrument.name}</span>
-                  </div>
-                  <span className={`tabular-nums font-semibold ${scoreColorClass(r.score!.totalScore)}`}>{formatSigned(r.score!.totalScore)}</span>
-                </Link>
-              </li>
-            ))}
-            {topBearish.length === 0 && <p className="text-xs text-(--text-faint)">No live-scored markets available yet.</p>}
-          </ul>
-        </Card>
-
-        <Card title="Risk-On / Risk-Off Gauge" action={<Link href="/risk-gauge" className="text-xs text-(--accent) hover:underline">Details →</Link>}>
-          <div className="flex items-center gap-4">
-            <div className="grid place-items-center w-14 h-14 rounded-full bg-(--accent-soft) text-(--accent)">
-              <Gauge size={24} />
+        {/* Product preview */}
+        <section id="product" className="max-w-6xl mx-auto px-4 sm:px-6 pb-16">
+          <div className="grid lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 card p-4 sm:p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold">Top Market Setups</h2>
+                <span className="text-[11px] text-(--text-faint)">Live product preview — real data, not a mockup</span>
+              </div>
+              <TopSetupsTable rows={rows} />
             </div>
-            <div>
-              <div className="text-2xl font-semibold tabular-nums">{risk.value}</div>
-              <div className="text-sm text-(--text-dim)">{risk.label}</div>
+
+            <div className="card p-4 sm:p-5 flex flex-col">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-semibold">{featured.instrument.symbol} — Total Score</h2>
+                <DataFreshnessTag freshness={featured.score.factors[0]?.freshness ?? "live"} />
+              </div>
+              <div className="flex justify-center py-2">
+                <ScoreGauge score={featured.score.totalScore} bias={featured.score.bias} size={140} />
+              </div>
+              <ConfidenceBar value={featured.score.confidence} />
+
+              <div className="mt-4 space-y-2.5">
+                {featuredFactors.map((f) => (
+                  <div key={f.key} className="text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 font-medium">
+                        {factorLabel(f.key)}
+                        <FactorSentimentBadge sentiment={factorSentiment(f.contribution)} />
+                      </span>
+                      <span className="tabular-nums font-semibold">{formatSigned(f.contribution)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <Link href={`/markets/${featured.instrument.symbol}`} className="mt-4 text-xs text-(--accent) hover:underline">
+                Open the full breakdown →
+              </Link>
             </div>
           </div>
-          <div className="h-1.5 w-full rounded-full bg-(--border) mt-4">
-            <div
-              className="h-1.5 rounded-full bg-gradient-to-r from-rose-400 via-slate-400 to-emerald-400"
-              style={{ width: `${risk.value}%` }}
+        </section>
+
+        {/* Key benefits */}
+        <section className="border-t border-(--border) bg-(--bg-elevated)">
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
+            <h2 className="text-2xl font-semibold text-center">One score. Every major market factor.</h2>
+            <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              <Benefit icon={<TrendingUp size={18} />} text="See the strongest bullish and bearish setups" />
+              <Benefit icon={<ListChecks size={18} />} text="Understand exactly why a market received its score" />
+              <Benefit icon={<Building2 size={18} />} text="Track institutional positioning" />
+              <Benefit icon={<Users size={18} />} text="See real retail positioning" />
+              <Benefit icon={<LineChart size={18} />} text="Analyze technical trends" />
+              <Benefit icon={<BarChart3 size={18} />} text="Compare macro conditions" />
+              <Benefit icon={<Calendar size={18} />} text="Review seasonality" />
+              <Benefit icon={<Gauge size={18} />} text="Monitor confidence and freshness" />
+            </div>
+            <p className="mt-8 text-center text-sm text-(--text-faint)">Track FX, indices, metals, and crypto — all in one place.</p>
+          </div>
+        </section>
+
+        {/* How it works */}
+        <section id="how-it-works" className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
+          <h2 className="text-2xl font-semibold text-center mb-10">How it works</h2>
+          <div className="grid sm:grid-cols-3 gap-6">
+            <Step
+              n={1}
+              title="Market data is collected"
+              text="OANDA, CFTC, FRED, and other verified sources feed the platform."
+              icon={<Activity size={18} />}
+            />
+            <Step
+              n={2}
+              title="Factors are scored"
+              text="Technical, positioning, sentiment, macro, seasonality, and risk factors are weighted transparently."
+              icon={<Gauge size={18} />}
+            />
+            <Step
+              n={3}
+              title="Markets are ranked"
+              text="See the strongest setups and open any market to understand the complete score."
+              icon={<Star size={18} />}
             />
           </div>
-        </Card>
-      </div>
+        </section>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        <Card title="High-importance news" action={<Link href="/news" className="text-xs text-(--accent) hover:underline">View all →</Link>}>
-          <ul className="space-y-3">
-            {topNews.map((n) => (
-              <li key={n.id} className="text-sm">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-medium leading-snug">{n.headline}</span>
-                  <span
-                    className={`shrink-0 text-[10px] rounded-full px-1.5 py-0.5 font-medium ${
-                      n.interpretation === "Bullish"
-                        ? "text-emerald-400 bg-emerald-500/10"
-                        : n.interpretation === "Bearish"
-                          ? "text-rose-400 bg-rose-500/10"
-                          : "text-slate-300 bg-slate-500/10"
-                    }`}
-                  >
-                    {n.interpretation}
-                  </span>
+        {/* Transparency */}
+        <section className="border-t border-(--border) bg-(--bg-elevated)">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16">
+            <div className="flex items-center gap-2 justify-center mb-3">
+              <ShieldCheck size={20} className="text-(--accent)" />
+              <h2 className="text-2xl font-semibold">Know why the score changed</h2>
+            </div>
+            <p className="text-center text-(--text-dim) max-w-2xl mx-auto">
+              This is not a black-box signal service. Every factor behind every score is shown in full — never a number with no
+              explanation attached.
+            </p>
+            <div className="mt-8 grid sm:grid-cols-3 gap-4 max-w-2xl mx-auto text-sm text-(--text-dim)">
+              {["Factor direction", "Raw score", "Weight", "Contribution", "Freshness", "Data source"].map((item) => (
+                <div key={item} className="flex items-center gap-2">
+                  <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+                  {item}
                 </div>
-                <div className="text-xs text-(--text-faint) mt-0.5">
-                  {n.source} · {formatRelative(n.publishedAt)} · {n.affectedMarkets.slice(0, 3).join(", ")}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        <Card title="Upcoming high-impact events" action={<Link href="/economic-calendar" className="text-xs text-(--accent) hover:underline">Calendar →</Link>}>
-          <ul className="space-y-3">
-            {events.map((e) => (
-              <li key={e.id} className="text-sm flex items-start justify-between gap-2">
-                <div>
-                  <div className="font-medium">{e.event}</div>
-                  <div className="text-xs text-(--text-faint) mt-0.5">{e.country} · {formatDateTime(e.dateTime)}</div>
-                </div>
-                <span className="shrink-0 text-[10px] rounded-full px-1.5 py-0.5 font-medium text-amber-400 bg-amber-500/10">High</span>
-              </li>
-            ))}
-            {events.length === 0 && <p className="text-xs text-(--text-faint)">No high-impact releases in the next 72 hours.</p>}
-          </ul>
-        </Card>
-      </div>
-
-      {divergences.length > 0 && (
-        <Card title="Smart money signals" action={<Link href="/smart-money" className="text-xs text-(--accent) hover:underline">View all →</Link>}>
-          <div className="grid sm:grid-cols-3 gap-3">
-            {divergences.map((d) => (
-              <Link
-                key={d.symbol}
-                href={`/markets/${d.symbol}`}
-                className="rounded-lg border border-(--border) p-3 hover:border-(--border-strong) transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-sm">{d.symbol}</span>
-                  <ArrowRight size={13} className="text-(--text-faint)" />
-                </div>
-                <div className="text-xs text-(--accent) mt-1">{d.signal}</div>
-                <div className="text-[11px] text-(--text-faint) mt-1">Confidence {d.confidence}%</div>
-              </Link>
-            ))}
+              ))}
+            </div>
           </div>
-        </Card>
-      )}
+        </section>
+
+        {/* Markets */}
+        <section id="markets" className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
+          <h2 className="text-2xl font-semibold text-center">Currently supported live markets</h2>
+          <p className="text-center text-(--text-dim) mt-2 max-w-xl mx-auto">
+            {strictLiveCount} markets are live today, sourced from real providers — never a fabricated score.
+          </p>
+          <div className="mt-10 grid sm:grid-cols-4 gap-4">
+            <MarketClassTile icon={<Coins size={18} />} label="Forex" count={byAssetClass.Forex} />
+            <MarketClassTile icon={<BarChart3 size={18} />} label="Stock indices" count={byAssetClass.Indices} />
+            <MarketClassTile icon={<Gauge size={18} />} label="Precious metals" count={byAssetClass.Commodities} />
+            <MarketClassTile icon={<TrendingUp size={18} />} label="Crypto" count={byAssetClass.Crypto} />
+          </div>
+          <p className="mt-6 text-center text-xs text-(--text-faint)">
+            A small number of additional instruments are tracked but not yet fully live pending confirmed data coverage — those
+            markets are clearly labeled as unavailable rather than shown with a generated score.
+          </p>
+        </section>
+
+        {/* Pricing */}
+        <section className="border-t border-(--border) bg-(--bg-elevated)">
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 py-16 text-center">
+            <h2 className="text-2xl font-semibold">Simple pricing</h2>
+            <p className="mt-2 text-(--text-dim)">3-Day Free Trial · Then $39/month · Cancel anytime</p>
+            <div className="mt-8">
+              <PricingCard
+                cta={
+                  <Link href="/signup" className="block w-full h-10 rounded-lg bg-(--accent) text-white text-sm font-semibold leading-10">
+                    Start 3-Day Free Trial
+                  </Link>
+                }
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* FAQ */}
+        <section className="max-w-3xl mx-auto px-4 sm:px-6 py-16">
+          <h2 className="text-2xl font-semibold text-center mb-10">Frequently asked questions</h2>
+          <dl className="space-y-6">
+            <Faq q="How long is the free trial?" a="3 days." />
+            <Faq q="How much is it after the trial?" a="$39/month." />
+            <Faq q="Can I cancel?" a="Yes, anytime." />
+            <Faq
+              q="Will I be charged today?"
+              a="No, not when the trial starts. Billing begins after the 3-day trial according to the Stripe subscription terms."
+            />
+            <Faq q="Is this investment advice?" a="No. The platform provides informational and educational market intelligence." />
+          </dl>
+        </section>
+
+        <section className="max-w-3xl mx-auto px-4 sm:px-6 pb-16 text-center">
+          <div className="flex items-center justify-center gap-2 mb-3 text-(--text-faint)">
+            <Bell size={16} />
+            <Newspaper size={16} />
+          </div>
+          <Link href="/signup" className="h-11 px-8 rounded-lg bg-(--accent) text-white text-sm font-semibold inline-flex items-center">
+            Start Your 3-Day Free Trial
+          </Link>
+        </section>
+      </main>
+
+      <MarketingFooter />
+    </div>
+  );
+}
+
+function Benefit({ icon, text }: { icon: React.ReactNode; text: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="grid place-items-center w-8 h-8 rounded-lg bg-(--accent-soft) text-(--accent) shrink-0">{icon}</span>
+      <p className="text-sm text-(--text-dim) leading-snug pt-1">{text}</p>
+    </div>
+  );
+}
+
+function Step({ n, title, text, icon }: { n: number; title: string; text: string; icon: React.ReactNode }) {
+  return (
+    <div className="text-center">
+      <div className="mx-auto grid place-items-center w-12 h-12 rounded-full bg-(--accent-soft) text-(--accent) mb-3">{icon}</div>
+      <div className="text-xs text-(--text-faint) mb-1">Step {n}</div>
+      <h3 className="font-semibold text-sm">{title}</h3>
+      <p className="text-sm text-(--text-dim) mt-1.5 leading-relaxed">{text}</p>
+    </div>
+  );
+}
+
+function MarketClassTile({ icon, label, count }: { icon: React.ReactNode; label: string; count: number }) {
+  return (
+    <div className="card p-4 text-center">
+      <div className="mx-auto grid place-items-center w-9 h-9 rounded-lg bg-(--accent-soft) text-(--accent) mb-2">{icon}</div>
+      <div className="text-lg font-semibold tabular-nums">{count}</div>
+      <div className="text-xs text-(--text-faint)">{label}</div>
+    </div>
+  );
+}
+
+function Faq({ q, a }: { q: string; a: string }) {
+  return (
+    <div>
+      <dt className="font-medium text-sm">{q}</dt>
+      <dd className="text-sm text-(--text-dim) mt-1">{a}</dd>
     </div>
   );
 }

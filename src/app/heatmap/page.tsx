@@ -1,9 +1,11 @@
 import { allMarketRows } from "@/lib/market-data";
 import { HeatmapClient } from "./HeatmapClient";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Market Heatmap — Market Intelligence AI" };
 
-export default function HeatmapPage() {
+export default async function HeatmapPage() {
+  await requireEntitlement();
   const rows = allMarketRows();
 
   return (

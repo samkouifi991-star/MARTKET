@@ -244,3 +244,46 @@ export const dataModeAudit = pgTable("data_mode_audit", {
   isLiveVerified: boolean("is_live_verified").notNull().default(false),
   changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ---- Accounts + billing. This is the only place password hashes and
+// Stripe identifiers are stored — never raw card data (Stripe Checkout
+// handles card entry; only Stripe customer/subscription IDs land here). ----
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  name: varchar("name", { length: 255 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Database-backed sessions (not pure stateless JWT) so a session can be
+// revoked (logout, password change) without waiting for token expiry — the
+// signed cookie only carries this row's id, per Next.js's own recommended
+// "Database Sessions" pattern (see node_modules/next/dist/docs/01-app/
+// 02-guides/authentication.md).
+export const sessions = pgTable("sessions", {
+  id: text("id").primaryKey(), // random opaque token, not auto-increment — unguessable
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// One row per user — Stripe webhooks are the sole writer of status/period
+// fields (see app/api/webhooks/stripe/route.ts); this table is the app's
+// local cache of Stripe's billing state, read by the entitlement guard on
+// every protected-page render. status mirrors Stripe's own subscription
+// status vocabulary verbatim (trialing/active/canceled/past_due/unpaid/
+// incomplete/incomplete_expired) rather than inventing a parallel one.
+export const subscriptions = pgTable("subscriptions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  stripeCustomerId: varchar("stripe_customer_id", { length: 255 }).notNull(),
+  stripeSubscriptionId: varchar("stripe_subscription_id", { length: 255 }),
+  status: varchar("status", { length: 32 }).notNull().default("incomplete"),
+  priceId: varchar("price_id", { length: 255 }),
+  trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+  currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

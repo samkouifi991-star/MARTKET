@@ -2,10 +2,12 @@ import Link from "next/link";
 import { allMarketRows } from "@/lib/market-data";
 import { Card } from "@/components/ui/Card";
 import { formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Technical Trends — Market Intelligence AI" };
 
-export default function TechnicalTrendsPage() {
+export default async function TechnicalTrendsPage() {
+  await requireEntitlement();
   const rows = allMarketRows();
 
   return (

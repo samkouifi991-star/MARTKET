@@ -1,9 +1,11 @@
 import { DEFAULT_ALERT_RULES, ALERT_HISTORY } from "@/lib/demo/alerts";
 import { AlertsClient } from "./AlertsClient";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Alerts — Market Intelligence AI" };
 
-export default function AlertsPage() {
+export default async function AlertsPage() {
+  await requireEntitlement();
   return (
     <div className="space-y-6">
       <div>

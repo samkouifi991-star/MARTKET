@@ -43,6 +43,9 @@ const EXPECTED_TABLES = [
   "current_factor_scores",
   "provider_health",
   "data_mode_audit",
+  "users",
+  "sessions",
+  "subscriptions",
 ];
 
 function describeError(err: unknown): string {
