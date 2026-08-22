@@ -7,12 +7,12 @@ import { PricingCard } from "@/components/marketing/PricingCard";
 import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
-import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { BiasBadge } from "@/components/ui/BiasBadge";
 import { factorLabel } from "@/lib/scoring";
-import { factorSentiment, formatSigned, formatPrice, scoreColorClass, FactorSentiment } from "@/lib/format";
+import { factorSentiment, formatSigned, scoreColorClass, FactorSentiment } from "@/lib/format";
 import { isStrictLiveSymbol } from "@/services/data-mode";
-import { SCORE_FACTOR_KEYS } from "@/lib/types";
+import { SCORE_FACTOR_KEYS, ScoreFactorKey } from "@/lib/types";
+import { MarketRow } from "@/lib/market-data";
 import {
   Activity,
   BarChart3,
@@ -46,27 +46,68 @@ function smartMoneySentiment(signal: string): FactorSentiment {
   return "Neutral";
 }
 
+// A fixed, clearly-labeled illustrative example — never derived from live
+// data, never persisted, never shown as Gold's real score anywhere else in
+// the app. Used only when Gold's real current bias isn't a high-conviction
+// bullish setup, so the landing page can still demonstrate what the
+// product looks like when several factors align, without ever claiming
+// this number is the live market score. Per-factor contributions are each
+// exactly that factor's DEFAULT_FACTOR_WEIGHTS share of 7.8, so they sum
+// to the headline score precisely — the same "Total Score = Σ
+// contributions" invariant the real engine guarantees.
+const ILLUSTRATIVE_GOLD_TOTAL_SCORE = 7.8;
+const ILLUSTRATIVE_GOLD_CONFIDENCE = 92;
+const ILLUSTRATIVE_GOLD_FACTORS: { key: ScoreFactorKey; contribution: number }[] = [
+  { key: "institutional", contribution: 1.2 },
+  { key: "retailSentiment", contribution: 0.6 },
+  { key: "technical", contribution: 1.6 },
+  { key: "seasonality", contribution: 0.4 },
+  { key: "economicGrowth", contribution: 0.9 },
+  { key: "inflation", contribution: 0.8 },
+  { key: "labor", contribution: 0.6 },
+  { key: "interestRates", contribution: 1.0 },
+  { key: "news", contribution: 0.7 },
+];
+
 export default async function LandingPage() {
   const sessionUser = await verifySession();
   const user = sessionUser ? { email: sessionUser.email } : null;
   const { rows, featured, smartMoney } = await getLandingPreview();
-  // Same canonical ranking Top Setups defaults to (strongest bullish
-  // totalScore first) — capped to 6 rows so the marketing preview stays
-  // compact; the full ranked list still lives on /top-setups.
-  const topSetups = [...rows].sort((a, b) => b.score.totalScore - a.score.totalScore).slice(0, 6);
 
-  const previewRows: PreviewRow[] = [
-    ...SCORE_FACTOR_KEYS.map((key) => {
-      const f = featured.score.factors.find((x) => x.key === key)!;
-      return { key, label: factorLabel(key), sentiment: factorSentiment(f.contribution), contribution: f.contribution };
-    }),
-    {
-      key: "smartMoney",
-      label: "Smart Money",
-      sentiment: smartMoneySentiment(smartMoney.signal),
-      contribution: null,
-    },
-  ];
+  // Same canonical current scores Top Setups ranks by — 3 strongest
+  // bullish and 3 strongest bearish, visually separated, capped at 6 rows
+  // total so the marketing preview stays compact. The full ranked list
+  // still lives on /top-setups, unaffected by this landing-page-only cut.
+  const rankedByScore = [...rows].sort((a, b) => b.score.totalScore - a.score.totalScore);
+  const topBullish = rankedByScore.slice(0, 3);
+  const topBearish = rankedByScore.slice(-3).reverse(); // most negative first
+
+  // Gold's real current score is "strong" (worth featuring live) once its
+  // bias itself is Bullish/Very Bullish — the same bias vocabulary the
+  // rest of the app uses, not an arbitrary landing-page-only cutoff.
+  const isGoldStrong = featured.score.bias === "Bullish" || featured.score.bias === "Very Bullish";
+
+  const previewRows: PreviewRow[] = isGoldStrong
+    ? [
+        ...SCORE_FACTOR_KEYS.map((key) => {
+          const f = featured.score.factors.find((x) => x.key === key)!;
+          return { key, label: factorLabel(key), sentiment: factorSentiment(f.contribution), contribution: f.contribution };
+        }),
+        { key: "smartMoney", label: "Smart Money", sentiment: smartMoneySentiment(smartMoney.signal), contribution: null },
+      ]
+    : [
+        ...ILLUSTRATIVE_GOLD_FACTORS.map((f) => ({
+          key: f.key,
+          label: factorLabel(f.key),
+          sentiment: factorSentiment(f.contribution),
+          contribution: f.contribution,
+        })),
+        { key: "smartMoney", label: "Smart Money", sentiment: "Bullish" as FactorSentiment, contribution: null },
+      ];
+
+  const goldGauge = isGoldStrong
+    ? { totalScore: featured.score.totalScore, bias: featured.score.bias, confidence: featured.score.confidence }
+    : { totalScore: ILLUSTRATIVE_GOLD_TOTAL_SCORE, bias: "Bullish" as const, confidence: ILLUSTRATIVE_GOLD_CONFIDENCE };
 
   const strictLiveCount = rows.filter((r) => isStrictLiveSymbol(r.instrument.symbol)).length;
   const byAssetClass = {
@@ -115,44 +156,46 @@ export default async function LandingPage() {
           <div className="grid lg:grid-cols-3 gap-4 items-start">
             <div className="lg:col-span-2 card p-4 sm:p-5 flex flex-col">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold">Top 6 Market Setups</h3>
+                <h3 className="text-sm font-semibold">Top Market Setups</h3>
                 <span className="text-[11px] text-(--text-faint)">Live product preview — real data, not a mockup</span>
               </div>
-              <div className="divide-y divide-(--border)">
-                {topSetups.map((row) => (
-                  <Link
-                    key={row.instrument.symbol}
-                    href={`/markets/${row.instrument.symbol}`}
-                    className="flex items-center justify-between gap-3 py-3 hover:bg-white/[.02] -mx-2 px-2 rounded-lg"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium text-sm">{row.instrument.symbol}</div>
-                      <div className="text-[11px] text-(--text-faint) truncate">{row.instrument.name}</div>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="text-xs text-(--text-faint) tabular-nums hidden sm:inline">
-                        {formatPrice(row.price.current, row.instrument.decimals)}
-                      </span>
-                      <BiasBadge bias={row.score.bias} size="sm" />
-                      <span className={`tabular-nums font-semibold text-sm w-12 text-right ${scoreColorClass(row.score.totalScore)}`}>
-                        {formatSigned(row.score.totalScore)}
-                      </span>
-                    </div>
-                  </Link>
-                ))}
+              <div className="grid sm:grid-cols-2 gap-x-4 gap-y-3">
+                <div>
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wide text-emerald-400 mb-1">Strongest Bullish</h4>
+                  <div className="divide-y divide-(--border)">
+                    {topBullish.map((row) => (
+                      <MarketRowItem key={row.instrument.symbol} row={row} />
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wide text-rose-400 mb-1">Strongest Bearish</h4>
+                  <div className="divide-y divide-(--border)">
+                    {topBearish.map((row) => (
+                      <MarketRowItem key={row.instrument.symbol} row={row} />
+                    ))}
+                  </div>
+                </div>
               </div>
-              <p className="text-[11px] text-(--text-faint) mt-3">Showing the top 6 of {rows.length} ranked markets.</p>
+              <p className="text-[11px] text-(--text-faint) mt-3">
+                Showing the 3 strongest bullish and 3 strongest bearish of {rows.length} ranked markets.
+              </p>
             </div>
 
             <div className="card p-4 sm:p-5 flex flex-col">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold">{featured.instrument.symbol} — Total Score</h3>
-                <DataFreshnessTag freshness={featured.score.factors[0]?.freshness ?? "live"} />
+                <h3 className="text-sm font-semibold">{isGoldStrong ? "Gold — Total Score" : "Example Gold Setup"}</h3>
+                {!isGoldStrong && <span className="text-[10px] uppercase tracking-wide text-amber-400 font-semibold">Illustrative</span>}
               </div>
+              {!isGoldStrong && (
+                <p className="text-[11px] text-(--text-faint) -mt-1 mb-1">
+                  Illustrative high-conviction example — not Gold&apos;s live market score.
+                </p>
+              )}
               <div className="flex justify-center py-2">
-                <ScoreGauge score={featured.score.totalScore} bias={featured.score.bias} size={140} />
+                <ScoreGauge score={goldGauge.totalScore} bias={goldGauge.bias} size={140} />
               </div>
-              <ConfidenceBar value={featured.score.confidence} />
+              <ConfidenceBar value={goldGauge.confidence} />
 
               <div className="mt-4 space-y-2.5">
                 {previewRows.map((row) => (
@@ -299,6 +342,26 @@ export default async function LandingPage() {
 
       <MarketingFooter />
     </div>
+  );
+}
+
+function MarketRowItem({ row }: { row: MarketRow }) {
+  return (
+    <Link
+      href={`/markets/${row.instrument.symbol}`}
+      className="flex items-center justify-between gap-2 py-2.5 hover:bg-white/[.02] -mx-2 px-2 rounded-lg"
+    >
+      <div className="min-w-0">
+        <div className="font-medium text-sm">{row.instrument.symbol}</div>
+        <div className="text-[11px] text-(--text-faint) truncate">{row.instrument.name}</div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <BiasBadge bias={row.score.bias} size="sm" />
+        <span className={`tabular-nums font-semibold text-sm w-12 text-right ${scoreColorClass(row.score.totalScore)}`}>
+          {formatSigned(row.score.totalScore)}
+        </span>
+      </div>
+    </Link>
   );
 }
 
