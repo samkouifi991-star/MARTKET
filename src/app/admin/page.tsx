@@ -41,7 +41,7 @@ export default async function AdminPage() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatTile label="Daily active users" value={USER_ACTIVITY.dailyActiveUsers.toLocaleString()} />
-        <StatTile label="Free / Pro / Professional" value={`${USER_ACTIVITY.freeUsers.toLocaleString()} / ${USER_ACTIVITY.proUsers.toLocaleString()} / ${USER_ACTIVITY.professionalUsers.toLocaleString()}`} />
+        <StatTile label="Trialing / Subscribers" value={`${USER_ACTIVITY.trialUsers.toLocaleString()} / ${USER_ACTIVITY.subscriberUsers.toLocaleString()}`} />
         <StatTile label="API requests today" value={API_USAGE.requestsToday.toLocaleString()} sub={`${API_USAGE.activeApiKeys} active keys`} />
         <StatTile label="Rate limit" value={`${API_USAGE.rateLimitPerMin}/min`} />
       </div>

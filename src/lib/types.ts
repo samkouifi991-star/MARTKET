@@ -350,4 +350,4 @@ export type BacktestBucket = {
   avgMAE: number;
 };
 
-export type SubscriptionPlan = "Free" | "Pro" | "Professional";
+export type SubscriptionPlan = "Pro";

@@ -55,42 +55,21 @@ export function classifyRiskGauge(value: number) {
   return "Strong Risk-On" as const;
 }
 
+// Single paid plan — Pro is the only subscription this product offers.
+// See app/settings/page.tsx for the pricing card that renders this.
 export const SUBSCRIPTION_PLANS = [
-  {
-    name: "Free" as const,
-    price: 0,
-    features: [
-      "10 featured instruments",
-      "Delayed scores (15 min)",
-      "One watchlist",
-      "5 AI Analyst questions / day",
-      "No advanced alerts",
-    ],
-  },
   {
     name: "Pro" as const,
     price: 39,
+    trialDays: 3,
     features: [
-      "All 26 instruments",
+      "All supported instruments",
       "Fastest available updates",
       "Unlimited watchlists",
-      "Advanced alerts (email, in-app)",
+      "Advanced alerts",
       "Full scoring breakdown",
-      "AI Analyst, unlimited",
+      "Unlimited AI Analyst",
       "Economic calendar & news intelligence",
-    ],
-  },
-  {
-    name: "Professional" as const,
-    price: 129,
-    features: [
-      "Everything in Pro",
-      "API access & webhooks",
-      "Advanced backtesting",
-      "Data export tools",
-      "Team accounts",
-      "Custom scoring models",
-      "Priority support",
     ],
   },
 ];

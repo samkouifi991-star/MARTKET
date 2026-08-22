@@ -25,7 +25,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <div className="text-[11px] text-(--text-faint) mb-1">Plan</div>
-            <div className="font-medium">Free</div>
+            <div className="font-medium">Not subscribed — start your free trial below</div>
           </div>
           <div>
             <div className="text-[11px] text-(--text-faint) mb-1">Theme</div>
@@ -38,13 +38,25 @@ export default function SettingsPage() {
         <NotificationPrefs />
       </Card>
 
-      <Card title="Subscription plans" subtitle="Billed via Stripe (test mode in this demo)">
-        <div className="grid sm:grid-cols-3 gap-4">
+      <Card
+        title="Subscription plan"
+        subtitle="No payment processor is connected in this environment — starting the trial won't charge a card."
+      >
+        <div className="flex justify-center">
           {SUBSCRIPTION_PLANS.map((plan) => (
-            <div key={plan.name} className={`rounded-xl border p-4 ${plan.name === "Pro" ? "border-(--accent) bg-(--accent-soft)" : "border-(--border)"}`}>
-              <div className="font-semibold">{plan.name}</div>
-              <div className="text-2xl font-semibold mt-1">${plan.price}<span className="text-sm text-(--text-faint) font-normal">/mo</span></div>
-              <ul className="mt-3 space-y-1.5">
+            <div
+              key={plan.name}
+              className="w-full max-w-sm rounded-2xl border-2 border-(--accent) bg-(--accent-soft) p-6 text-center shadow-lg shadow-(--accent)/10"
+            >
+              <div className="font-semibold text-lg">{plan.name}</div>
+              <div className="mt-2 text-4xl font-semibold tabular-nums">
+                ${plan.price}
+                <span className="text-sm text-(--text-faint) font-normal">/month</span>
+              </div>
+              <div className="mt-1.5 text-sm font-medium text-(--accent)">
+                {plan.trialDays}-day free trial, then ${plan.price}/month
+              </div>
+              <ul className="mt-4 space-y-1.5 text-left">
                 {plan.features.map((f) => (
                   <li key={f} className="flex items-start gap-1.5 text-xs text-(--text-dim)">
                     <Check size={13} className="text-emerald-400 mt-0.5 shrink-0" />
@@ -52,9 +64,16 @@ export default function SettingsPage() {
                   </li>
                 ))}
               </ul>
-              <button className={`mt-4 w-full h-8 rounded-lg text-xs font-medium ${plan.name === "Free" ? "border border-(--border) text-(--text-dim)" : "bg-(--accent) text-white"}`}>
-                {plan.name === "Free" ? "Current plan" : `Upgrade to ${plan.name}`}
+              <button className="mt-5 w-full h-9 rounded-lg text-sm font-semibold bg-(--accent) text-white">
+                Start {plan.trialDays}-Day Free Trial
               </button>
+              <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-(--text-faint)">
+                <span>${plan.price}/month</span>
+                <span>·</span>
+                <span>{plan.trialDays} days free</span>
+                <span>·</span>
+                <span>Cancel anytime</span>
+              </div>
             </div>
           ))}
         </div>
