@@ -83,7 +83,10 @@ describe("saveScoringConfiguration", () => {
       expect(["GBPUSD", "EURUSD", "BTCUSD"]).toContain(symbol);
       expect(options).toMatchObject({ storageOnly: true, updateCurrent: true, awaitPersist: true, scoringConfig: { id: 5 } });
     }
-    expect(result?.success).toMatch(/saved and activated/i);
+    expect(result?.success).toMatch(/configuration saved — v5 active/i);
+    if (!result || "error" in result) throw new Error("expected a success result");
+    expect(result.versionId).toBe(5);
+    expect(result.updatedAt).toBeDefined();
   });
 
   it("skips recomputation entirely in demo mode — there is no live pipeline to touch", async () => {
@@ -92,7 +95,7 @@ describe("saveScoringConfiguration", () => {
 
     expect(createScoringConfiguration).toHaveBeenCalled();
     expect(computeLiveMarketScore).not.toHaveBeenCalled();
-    expect(result?.success).toBeDefined();
+    expect(result?.success).toMatch(/configuration saved — v5 active/i);
   });
 });
 

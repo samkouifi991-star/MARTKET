@@ -4,55 +4,123 @@ import { useActionState, useState } from "react";
 import { saveScoringConfiguration, recomputeAllScores, type AdminActionState } from "@/lib/actions/admin";
 import type { ResolvedScoringConfig } from "@/lib/pipeline/scoring-config";
 import { FACTOR_LABELS, ScoreFactorKey } from "@/lib/types";
+import { BiasThreshold } from "@/lib/config";
 import { Card } from "@/components/ui/Card";
 import { AuditLogEntry } from "@/lib/demo/admin";
-import { formatRelative } from "@/lib/time";
+import { formatDateTime, formatRelative } from "@/lib/time";
 import { RotateCw } from "lucide-react";
+
+const WEIGHT_SUM_EPSILON = 0.005;
+
+function weightSum(weights: Record<ScoreFactorKey, number>): number {
+  return Object.values(weights).reduce((s, v) => s + v, 0);
+}
+
+function weightsSumValid(weights: Record<ScoreFactorKey, number>): boolean {
+  return Math.abs(weightSum(weights) - 1) <= WEIGHT_SUM_EPSILON;
+}
+
+function thresholdsOrderedValid(thresholds: BiasThreshold[]): boolean {
+  for (let i = 0; i < thresholds.length - 2; i++) {
+    if (thresholds[i].min <= thresholds[i + 1].min) return false;
+  }
+  return true;
+}
 
 export function AdminClient({ initialAuditLog, activeScoringConfig }: { initialAuditLog: AuditLogEntry[]; activeScoringConfig: ResolvedScoringConfig }) {
   const [weights, setWeights] = useState<Record<ScoreFactorKey, number>>(activeScoringConfig.weights);
   const [thresholds, setThresholds] = useState(activeScoringConfig.biasThresholds.map((t) => ({ ...t })));
+  // Snapshot of the last saved values — compared against current state to
+  // detect unsaved changes, and refreshed on a successful save so further
+  // edits are measured against the newly-active configuration.
+  const [baseline, setBaseline] = useState({ weights: activeScoringConfig.weights, thresholds: activeScoringConfig.biasThresholds });
+  const [activeVersion, setActiveVersion] = useState<{ id: number | null; updatedAt: string | null }>({
+    id: activeScoringConfig.id,
+    updatedAt: activeScoringConfig.updatedAt ?? null,
+  });
   const [auditLog, setAuditLog] = useState(initialAuditLog);
   const [state, formAction, pending] = useActionState<AdminActionState, FormData>(saveScoringConfiguration, undefined);
   const [recomputeState, recomputeAction, recomputing] = useActionState<AdminActionState, FormData>(recomputeAllScores, undefined);
+  // Tracks which action-state result has already been applied to
+  // baseline/activeVersion/auditLog, so a fresh successful save is handled
+  // exactly once — the render-time "adjust state on change" pattern
+  // (see react.dev/learn/you-might-not-need-an-effect), not an effect,
+  // since this only ever reacts to the action's own result, never an
+  // external system.
+  const [handledState, setHandledState] = useState(state);
 
-  const weightSum = Object.values(weights).reduce((s, v) => s + v, 0);
+  const currentWeightSum = weightSum(weights);
+
+  if (state !== handledState) {
+    setHandledState(state);
+    // Only record the version as active — and log it — once the server
+    // confirms the save actually happened; an optimistic pre-submit log
+    // would misreport success if validation or persistence failed server-side.
+    if (state?.success && state.versionId !== undefined) {
+      setBaseline({ weights, thresholds });
+      setActiveVersion({ id: state.versionId, updatedAt: state.updatedAt ?? new Date().toISOString() });
+      setAuditLog((prev) => [
+        {
+          id: `audit-${Date.now()}`,
+          actor: "admin",
+          action: "Saved scoring configuration",
+          detail: `v${state.versionId} · weights sum to ${(currentWeightSum * 100).toFixed(0)}% · thresholds: ${thresholds
+            .map((t) => `${t.bias} ≥ ${t.min === -Infinity ? "-∞" : t.min}`)
+            .join(", ")}`,
+          at: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+    }
+  }
+
+  const weightsValid = weightsSumValid(weights);
+  const thresholdsValid = thresholdsOrderedValid(thresholds);
+  const isValid = weightsValid && thresholdsValid;
+  const isDirty = JSON.stringify(weights) !== JSON.stringify(baseline.weights) || JSON.stringify(thresholds) !== JSON.stringify(baseline.thresholds);
 
   function updateWeight(key: ScoreFactorKey, value: number) {
     setWeights((prev) => ({ ...prev, [key]: value }));
   }
 
-  function handleSubmit(formData: FormData) {
-    formAction(formData);
-    setAuditLog((prev) => [
-      {
-        id: `audit-${Date.now()}`,
-        actor: "admin",
-        action: "Saved scoring configuration",
-        detail: `Weights sum to ${(weightSum * 100).toFixed(0)}% · thresholds: ${thresholds.map((t) => `${t.bias} ≥ ${t.min === -Infinity ? "-∞" : t.min}`).join(", ")}`,
-        at: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-  }
-
   return (
     <div className="space-y-6">
-      <form action={handleSubmit}>
-        <div className="grid lg:grid-cols-2 gap-4">
-          <Card
-            title="Scoring weights"
-            subtitle={
-              activeScoringConfig.id
-                ? `Active version v${activeScoringConfig.id} · current total: ${(weightSum * 100).toFixed(0)}% (should sum to 100%)`
-                : `Bootstrap defaults — no saved configuration yet · current total: ${(weightSum * 100).toFixed(0)}% (should sum to 100%)`
-            }
-            action={
-              <button type="submit" disabled={pending} className="text-xs rounded-lg bg-(--accent) text-white px-3 py-1.5 font-medium disabled:opacity-60">
-                {pending ? "Saving…" : "Save & version"}
+      <form action={formAction}>
+        <Card
+          title="Scoring configuration"
+          subtitle={
+            activeVersion.id
+              ? `Active version: v${activeVersion.id} · Last updated: ${activeVersion.updatedAt ? formatDateTime(activeVersion.updatedAt) : "—"}`
+              : "Bootstrap defaults — no saved configuration yet"
+          }
+          action={
+            <div className="flex items-center gap-3">
+              {isDirty && <span className="text-xs text-amber-400 font-medium">Unsaved changes</span>}
+              <button
+                type="submit"
+                disabled={pending || !isValid}
+                className="text-sm rounded-lg bg-(--accent) text-white px-4 py-2 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {pending ? "Saving…" : "Save & Version"}
               </button>
-            }
-          >
+            </div>
+          }
+        >
+          <p className="text-xs text-(--text-faint)">
+            One versioned configuration — factor weights and bias thresholds are always saved and activated together.
+          </p>
+          {!weightsValid && (
+            <p className="text-xs text-amber-400 mt-2">Weights currently sum to {(currentWeightSum * 100).toFixed(0)}% — adjust to exactly 100% before saving.</p>
+          )}
+          {!thresholdsValid && (
+            <p className="text-xs text-amber-400 mt-1">Bias thresholds must strictly decrease from Very Bullish down to Very Bearish before saving.</p>
+          )}
+          {state?.error && <p className="text-xs text-rose-400 mt-2">{state.error}</p>}
+          {state?.success && <p className="text-xs text-emerald-400 mt-2">{state.success}</p>}
+        </Card>
+
+        <div className="grid lg:grid-cols-2 gap-4 mt-4">
+          <Card title="Scoring weights" subtitle={`Current total: ${(currentWeightSum * 100).toFixed(0)}% (should sum to 100%)`}>
             <div className="space-y-3">
               {(Object.keys(weights) as ScoreFactorKey[]).map((key) => (
                 <div key={key}>
@@ -73,9 +141,6 @@ export function AdminClient({ initialAuditLog, activeScoringConfig }: { initialA
                 </div>
               ))}
             </div>
-            {Math.abs(weightSum - 1) > 0.005 && (
-              <p className="text-[11px] text-amber-400 mt-2">Weights currently sum to {(weightSum * 100).toFixed(0)}% — adjust to exactly 100% before saving.</p>
-            )}
           </Card>
 
           <Card title="Bias thresholds" subtitle="Minimum total score required for each bias label">
@@ -101,9 +166,6 @@ export function AdminClient({ initialAuditLog, activeScoringConfig }: { initialA
             <p className="text-[11px] text-(--text-faint) mt-2">Saved together with scoring weights as one versioned configuration.</p>
           </Card>
         </div>
-
-        {state?.error && <p className="text-xs text-rose-400 mt-2">{state.error}</p>}
-        {state?.success && <p className="text-xs text-emerald-400 mt-2">{state.success}</p>}
       </form>
 
       <Card

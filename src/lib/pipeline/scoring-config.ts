@@ -14,15 +14,20 @@ export type ResolvedScoringConfig = {
   id: number | null;
   weights: Record<ScoreFactorKey, number>;
   biasThresholds: BiasThreshold[];
+  // ISO timestamp the active row was saved, or null on the bootstrap
+  // defaults (never saved). Optional so existing literals built for
+  // computeLiveMarketScore's scoringConfig option (which only cares about
+  // id/weights/biasThresholds) don't need updating.
+  updatedAt?: string | null;
 };
 
-const BOOTSTRAP_CONFIG: ResolvedScoringConfig = { id: null, weights: DEFAULT_FACTOR_WEIGHTS, biasThresholds: DEFAULT_BIAS_THRESHOLDS };
+const BOOTSTRAP_CONFIG: ResolvedScoringConfig = { id: null, weights: DEFAULT_FACTOR_WEIGHTS, biasThresholds: DEFAULT_BIAS_THRESHOLDS, updatedAt: null };
 
 export async function resolveActiveScoringConfig(): Promise<ResolvedScoringConfig> {
   try {
     const active = await getActiveScoringConfiguration();
     if (!active) return BOOTSTRAP_CONFIG;
-    return { id: active.id, weights: active.weights, biasThresholds: active.biasThresholds };
+    return { id: active.id, weights: active.weights, biasThresholds: active.biasThresholds, updatedAt: active.createdAt.toISOString() };
   } catch {
     return BOOTSTRAP_CONFIG;
   }

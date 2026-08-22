@@ -16,7 +16,10 @@ import { DATA_MODE, isDemoOnly, strictLiveSymbolList } from "@/services/data-mod
 import { SCORE_FACTOR_KEYS, ScoreFactorKey } from "@/lib/types";
 import { BiasThreshold, DEFAULT_BIAS_THRESHOLDS } from "@/lib/config";
 
-export type AdminActionState = { error: string; success?: undefined } | { success: string; error?: undefined } | undefined;
+export type AdminActionState =
+  | { error: string; success?: undefined }
+  | { success: string; error?: undefined; versionId?: number; updatedAt?: string }
+  | undefined;
 
 const WEIGHT_SUM_EPSILON = 0.001; // weights are fractions (0..1) — 100% == 1
 
@@ -106,8 +109,10 @@ export async function saveScoringConfiguration(_prev: AdminActionState, formData
 
   return {
     success: isDemoOnly()
-      ? `Scoring configuration v${configRow.id} saved and activated.`
-      : `Scoring configuration v${configRow.id} saved and activated — recomputed ${recomputed}/${recomputed + failed} strict-live markets.`,
+      ? `Configuration saved — v${configRow.id} active.`
+      : `Configuration saved — v${configRow.id} active — recomputed ${recomputed}/${recomputed + failed} strict-live markets.`,
+    versionId: configRow.id,
+    updatedAt: configRow.createdAt.toISOString(),
   };
 }
 
