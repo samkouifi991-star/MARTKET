@@ -72,24 +72,57 @@ const ILLUSTRATIVE_GOLD_FACTORS: { key: ScoreFactorKey; contribution: number }[]
   { key: "news", contribution: 0.7 },
 ];
 
-// A market needs at least this many real canonical score-history
-// observations before the landing page will chart them — a 1-2 point line
-// doesn't demonstrate anything, and would still be genuine data, just not
-// yet visually useful. Below this, the chart falls back to a fixed,
-// clearly-labeled illustrative example instead (never a stretched/padded
-// version of the real, too-short history).
-const MIN_SCORE_HISTORY_POINTS = 5;
+// The landing page zooms both charts into a recent window — long enough to
+// show a full weak-to-strong reversal story, short enough to stay a
+// compelling "recent move," not a multi-year history dump. Purely a
+// landing-page display window: the underlying canonical price/score-history
+// records (and the logged-in Market Detail charts that read them directly)
+// are untouched.
+const LANDING_CHART_WINDOW_DAYS = 150; // ~5 months
+const landingChartCutoffMs = Date.now() - LANDING_CHART_WINDOW_DAYS * 86_400_000;
 
-// Fixed illustrative example of a bearish-to-bullish score transition —
+// A market needs at least this many points inside the window before the
+// landing page will chart them at all — a 1-2 point line doesn't
+// demonstrate anything, even though it would still be genuine data.
+const MIN_CHART_POINTS = 5;
+
+// Real score history only replaces the illustrative example once it both
+// has enough points AND actually tells the "bearish, then reversal, then
+// bullish" story this section promises — a real-but-flat or real-but-
+// already-bullish-throughout window wouldn't demonstrate the reversal,
+// even though it's genuine data. getCurrentScore's own history window is
+// capped at 30 days (see db/queries/scores.ts — unchanged, not this
+// landing page's concern), so in practice this almost always resolves to
+// the illustrative example until enough real observations accumulate;
+// that's the honest, expected outcome the illustrative fallback exists for.
+const MIN_SCORE_HISTORY_POINTS_FOR_STORY = 10;
+const EARLY_PERIOD_BEARISH_CEILING = -1; // early-period average must be at least this bearish
+const LATE_PERIOD_BULLISH_FLOOR = 1; // late-period average must be at least this bullish
+
+function average(values: number[]): number {
+  return values.reduce((s, v) => s + v, 0) / values.length;
+}
+
+function tellsReversalStory(history: ScoreHistoryPoint[]): boolean {
+  if (history.length < MIN_SCORE_HISTORY_POINTS_FOR_STORY) return false;
+  const sorted = [...history].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const third = Math.max(1, Math.floor(sorted.length / 3));
+  const earlyAvg = average(sorted.slice(0, third).map((p) => p.score));
+  const lateAvg = average(sorted.slice(-third).map((p) => p.score));
+  return earlyAvg <= EARLY_PERIOD_BEARISH_CEILING && lateAvg >= LATE_PERIOD_BULLISH_FLOOR && lateAvg > earlyAvg;
+}
+
+// Fixed illustrative example of a bearish-to-bullish score reversal, spread
+// evenly across the same ~5-month landing-page window as the price chart —
 // never derived from live data, never persisted, never presented as Gold's
-// real history. Only shown when Gold's real canonical history has fewer
-// than MIN_SCORE_HISTORY_POINTS observations, always labeled "Illustrative
-// Score History" wherever it appears.
+// real history. Only shown when Gold's real canonical history doesn't yet
+// clear tellsReversalStory above, always labeled "Illustrative" wherever it
+// appears.
 const ILLUSTRATIVE_SCORE_HISTORY_VALUES = [
-  -1.2, -2.0, -3.1, -4.4, -5.6, -6.2, -6.8, -6.5, -5.9, -5.0, -3.8, -2.4, -1.0, 0.3, 1.6, 2.8, 3.9, 4.8, 5.6, 6.2, 6.7, 7.0, 7.2, 7.4, 7.5, 7.6, 7.7, 7.7, 7.8, 7.8,
+  -3.5, -4.2, -5.0, -5.6, -6.1, -6.5, -6.7, -6.6, -6.3, -5.8, -5.0, -4.0, -2.8, -1.5, -0.2, 1.1, 2.4, 3.6, 4.6, 5.4, 6.0, 6.5, 6.9, 7.2, 7.5, 7.8,
 ];
-const ILLUSTRATIVE_SCORE_HISTORY: ScoreHistoryPoint[] = ILLUSTRATIVE_SCORE_HISTORY_VALUES.map((score, i) => ({
-  date: new Date(Date.now() - (ILLUSTRATIVE_SCORE_HISTORY_VALUES.length - 1 - i) * 86_400_000).toISOString(),
+const ILLUSTRATIVE_SCORE_HISTORY: ScoreHistoryPoint[] = ILLUSTRATIVE_SCORE_HISTORY_VALUES.map((score, i, arr) => ({
+  date: new Date(Date.now() - Math.round(((arr.length - 1 - i) * LANDING_CHART_WINDOW_DAYS) / (arr.length - 1)) * 86_400_000).toISOString(),
   score,
 }));
 
@@ -134,12 +167,15 @@ export default async function LandingPage() {
     : { totalScore: ILLUSTRATIVE_GOLD_TOTAL_SCORE, bias: "Bullish" as const, confidence: ILLUSTRATIVE_GOLD_CONFIDENCE };
 
   // Independent of the featured-score-card decision above: Gold's real
-  // history can be too short to chart even when its current score is
-  // strong, or vice versa — each falls back to illustrative data on its
-  // own honest criterion, never blended together.
-  const hasRealScoreHistory = featured.score.history.length >= MIN_SCORE_HISTORY_POINTS;
-  const scoreHistory = hasRealScoreHistory ? featured.score.history : ILLUSTRATIVE_SCORE_HISTORY;
-  const hasPriceHistory = featured.price.series.length >= MIN_SCORE_HISTORY_POINTS;
+  // history can be too short (or the wrong shape) to chart even when its
+  // current score is strong, or vice versa — each falls back to
+  // illustrative data on its own honest criterion, never blended together.
+  const recentPriceSeries = featured.price.series.filter((p) => new Date(p.date).getTime() >= landingChartCutoffMs);
+  const hasPriceHistory = recentPriceSeries.length >= MIN_CHART_POINTS;
+
+  const recentScoreHistory = featured.score.history.filter((p) => new Date(p.date).getTime() >= landingChartCutoffMs);
+  const hasRealScoreHistory = tellsReversalStory(recentScoreHistory);
+  const scoreHistory = hasRealScoreHistory ? recentScoreHistory : ILLUSTRATIVE_SCORE_HISTORY;
 
   const strictLiveCount = rows.filter((r) => isStrictLiveSymbol(r.instrument.symbol)).length;
   const byAssetClass = {
@@ -247,13 +283,13 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* Historical depth: price + score history */}
+        {/* Historical depth: price + score history, zoomed to the recent reversal */}
         <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-16">
           <div className="text-center mb-6">
-            <h2 className="text-2xl font-semibold">See the Market. See the Score Change.</h2>
+            <h2 className="text-2xl font-semibold">See the Market. See the Reversal. See the Score Flip.</h2>
             <p className="mt-2 text-(--text-dim) max-w-2xl mx-auto text-sm sm:text-base">
-              Track price action and see how the Market Intelligence score evolves as technical, sentiment, positioning and macro
-              conditions change.
+              The score weakens during bearish conditions, then flips positive when the underlying technical, macro, and
+              positioning signals begin to improve.
             </p>
           </div>
 
@@ -261,7 +297,7 @@ export default async function LandingPage() {
             <div className="card p-4 sm:p-5">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-sm font-semibold">Gold Price Chart</h3>
-                <span className="text-[11px] text-(--text-faint)">XAUUSD · real data</span>
+                <span className="text-[11px] text-(--text-faint)">XAUUSD · last 5 months</span>
               </div>
               {hasPriceHistory ? (
                 <>
@@ -270,7 +306,7 @@ export default async function LandingPage() {
                     {formatPrice(featured.price.sma50, featured.instrument.decimals)} · 200 SMA{" "}
                     {formatPrice(featured.price.sma200, featured.instrument.decimals)}
                   </p>
-                  <PriceChart series={featured.price.series} decimals={featured.instrument.decimals} />
+                  <PriceChart series={recentPriceSeries} decimals={featured.instrument.decimals} />
                   <div className="grid grid-cols-3 gap-2 mt-3 text-center">
                     <MiniStat label="RSI(14)" value={featured.price.rsi14.toFixed(0)} />
                     <MiniStat label="ADX(14)" value={featured.price.adx14.toFixed(0)} />
@@ -290,27 +326,18 @@ export default async function LandingPage() {
               </div>
               <p className="text-[11px] text-(--text-faint) mb-2">
                 {hasRealScoreHistory
-                  ? "Real canonical score history for Gold — the same record Market Detail reads."
-                  : "Example showing how score history will appear as observations accumulate."}
+                  ? "Real canonical score history for Gold, last 5 months — the same record Market Detail reads."
+                  : "Illustrative example of a bearish-to-bullish reversal — not Gold's real score history."}
               </p>
               <ScoreHistoryChart history={scoreHistory} />
             </div>
           </div>
 
-          <div className="mt-6 grid sm:grid-cols-2 gap-4 max-w-4xl mx-auto text-center sm:text-left">
-            <div>
-              <h4 className="text-sm font-semibold">See when market conditions change</h4>
-              <p className="text-xs text-(--text-dim) mt-1 leading-relaxed">
-                The score evolves as the underlying factors change — helping you see strengthening, weakening and potential shifts
-                in market conditions.
-              </p>
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold">Not just a signal — see the evidence behind it.</h4>
-              <p className="text-xs text-(--text-dim) mt-1 leading-relaxed">
-                Every score is connected to transparent factors and historical market context.
-              </p>
-            </div>
+          <div className="mt-6 max-w-xl mx-auto text-center">
+            <h4 className="text-sm font-semibold">The score moves with the evidence.</h4>
+            <p className="text-xs text-(--text-dim) mt-1 leading-relaxed">
+              When price action and underlying conditions reverse, the Market Intelligence score reverses too.
+            </p>
           </div>
         </section>
 
