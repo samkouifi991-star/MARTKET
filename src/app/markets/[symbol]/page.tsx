@@ -8,6 +8,7 @@ import { generateSmartMoney } from "@/lib/demo/smartMoney";
 import { currentMonthStat } from "@/lib/demo/seasonality";
 import { computeMarketScore, factorLabel } from "@/lib/scoring";
 import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";
+import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
 import { getCurrentScore } from "@/db/queries/scores";
 import { buildLiveInvalidationPoints, getLiveMarketDetail, LiveMarketDetail } from "@/lib/pipeline/market-detail";
 import { DATA_MODE, isDemoOnly } from "@/services/data-mode";
@@ -25,7 +26,7 @@ import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
 import { factorContributionColorClass, factorSentiment, formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
-import { formatDateTime, formatRelative } from "@/lib/time";
+import { filterToRecentWindow, formatDateTime, formatRelative } from "@/lib/time";
 import { DataFreshness, MarketScore, PriceData } from "@/lib/types";
 import { requireEntitlement } from "@/lib/auth/dal";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
@@ -71,6 +72,26 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
   const price: PriceData | null = demoMode ? generatePriceData(instrument) : live!.price.data;
   const priceFreshness: DataFreshness = demoMode ? "estimated" : live!.price.freshness;
   const priceSource = demoMode ? "Simulated price engine (demo)" : live!.price.source;
+
+  // The Price Chart and Score History chart both display only the most
+  // recent ~5 months so users can visually compare "what the market did"
+  // against "what the score was doing" over the same window — see
+  // lib/time.ts's RECENT_CHART_WINDOW_DAYS, the single shared convention
+  // every chart on the platform (this page, the landing page) uses.
+  // Presentation-only: price.ema20/sma50/sma100/sma200/rsi14/adx14/roc10
+  // above are still computed from the full stored candle history, never
+  // from this windowed slice, and score.history itself already comes back
+  // from Neon capped at the same window (see db/queries/scores.ts's
+  // SCORE_HISTORY_WINDOW_HOURS) — never fabricated or interpolated.
+  const recentPriceSeries = price ? filterToRecentWindow(price.series) : [];
+  const recentScoreHistory = filterToRecentWindow(score.history);
+
+  // Reference lines (and the tooltip's Bias label) on the Score History
+  // chart must reflect whatever Admin currently has configured — never a
+  // hardcoded ±4/±8 — so changing thresholds in Admin immediately re-frames
+  // this same, unchanged historical data. A DB read failure falls back to
+  // the bootstrap defaults, same as every other reader of this config.
+  const scoringConfig = await resolveActiveScoringConfig();
 
   const related = NEWS_ARTICLES.filter((n) => n.affectedMarkets.includes(instrument.symbol));
   const relatedTickers = instrument.currencies ?? [instrument.symbol];
@@ -166,13 +187,13 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
 
       <div className="grid lg:grid-cols-2 gap-4">
         <Card
-          title="Price chart"
+          title="Price chart (5 months)"
           subtitle={price ? `20 EMA ${formatPrice(price.ema20, instrument.decimals)} · 50 SMA ${formatPrice(price.sma50, instrument.decimals)} · 200 SMA ${formatPrice(price.sma200, instrument.decimals)}` : undefined}
           action={!demoMode ? <DataFreshnessTag freshness={priceFreshness} /> : undefined}
         >
           {price ? (
             <>
-              <PriceChart series={price.series} decimals={instrument.decimals} />
+              <PriceChart series={recentPriceSeries} decimals={instrument.decimals} />
               <div className="grid grid-cols-3 gap-2 mt-3 text-center">
                 <MiniStat label="RSI(14)" value={price.rsi14.toFixed(0)} />
                 <MiniStat label="ADX(14)" value={price.adx14.toFixed(0)} />
@@ -186,8 +207,8 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
           )}
         </Card>
 
-        <Card title="Score history (30 days)" subtitle={`24h change ${formatSigned(score.change24h)}`}>
-          <ScoreHistoryChart history={score.history} />
+        <Card title="Score history (5 months)" subtitle={`24h change ${formatSigned(score.change24h)}`}>
+          <ScoreHistoryChart history={recentScoreHistory} thresholds={scoringConfig.biasThresholds} />
         </Card>
       </div>
 

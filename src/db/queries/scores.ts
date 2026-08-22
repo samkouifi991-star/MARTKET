@@ -58,7 +58,14 @@ export function flooredSince(sinceHours: number): Date {
 
 export type ScoreHistoryPoint = { computedAt: string; totalScore: number; bias: string; confidence: number };
 
-export async function getScoreHistory(symbol: string, sinceHours = 24 * 30): Promise<ScoreHistoryPoint[]> {
+// Matches lib/time.ts's RECENT_CHART_WINDOW_DAYS (~5 months) — the read
+// side of the same platform-wide chart-window convention every consumer of
+// getScoreHistory's default (getCurrentScore, computeLiveMarketScore)
+// shares, so Market Detail, the landing page, and any future chart never
+// disagree on how far back "recent" score history goes.
+export const SCORE_HISTORY_WINDOW_HOURS = 24 * 150;
+
+export async function getScoreHistory(symbol: string, sinceHours = SCORE_HISTORY_WINDOW_HOURS): Promise<ScoreHistoryPoint[]> {
   const db = getDb();
   const since = flooredSince(sinceHours);
   const rows = await db
@@ -162,11 +169,12 @@ export async function upsertCurrentScore(score: MarketScore, scoringVersionId: n
 }
 
 // Reconstructs a full MarketScore from the current-score tables, with real
-// history from market_scores (the 30-day chart's source) attached — never
-// used as a stand-in for "the current score" itself, only as the trailing
-// context a MarketScore object needs. Returns null when no current-score
-// row exists yet for this symbol (e.g. before the scores cron's first run
-// or any Market Detail visit) so callers can fall back to a fresh compute.
+// history from market_scores (the ~5-month chart's source — see
+// SCORE_HISTORY_WINDOW_HOURS) attached — never used as a stand-in for "the
+// current score" itself, only as the trailing context a MarketScore object
+// needs. Returns null when no current-score row exists yet for this symbol
+// (e.g. before the scores cron's first run or any Market Detail visit) so
+// callers can fall back to a fresh compute.
 export async function getCurrentScore(symbol: string): Promise<MarketScore | null> {
   const db = getDb();
   const [row] = await db.select().from(currentMarketScores).where(eq(currentMarketScores.symbol, symbol)).limit(1);
@@ -175,7 +183,7 @@ export async function getCurrentScore(symbol: string): Promise<MarketScore | nul
   const factorRows = await db.select().from(currentFactorScores).where(eq(currentFactorScores.symbol, symbol));
   if (factorRows.length === 0) return null;
 
-  const priorHistory = await getScoreHistory(symbol, 24 * 30).catch(() => []);
+  const priorHistory = await getScoreHistory(symbol).catch(() => []);
   const history: MarketScore["history"] = [...priorHistory].reverse().map((r) => ({ date: r.computedAt, score: r.totalScore }));
 
   const factors: ScoreFactor[] = factorRows.map((f) => ({

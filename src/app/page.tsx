@@ -16,6 +16,7 @@ import { factorSentiment, formatPrice, formatSigned, formatSignedPct, scoreColor
 import { isStrictLiveSymbol } from "@/services/data-mode";
 import { SCORE_FACTOR_KEYS, ScoreFactorKey, ScoreHistoryPoint } from "@/lib/types";
 import { MarketRow } from "@/lib/market-data";
+import { filterToRecentWindow, RECENT_CHART_WINDOW_DAYS } from "@/lib/time";
 import {
   Activity,
   BarChart3,
@@ -72,14 +73,13 @@ const ILLUSTRATIVE_GOLD_FACTORS: { key: ScoreFactorKey; contribution: number }[]
   { key: "news", contribution: 0.7 },
 ];
 
-// The landing page zooms both charts into a recent window — long enough to
-// show a full weak-to-strong reversal story, short enough to stay a
-// compelling "recent move," not a multi-year history dump. Purely a
-// landing-page display window: the underlying canonical price/score-history
-// records (and the logged-in Market Detail charts that read them directly)
-// are untouched.
-const LANDING_CHART_WINDOW_DAYS = 150; // ~5 months
-const landingChartCutoffMs = Date.now() - LANDING_CHART_WINDOW_DAYS * 86_400_000;
+// The landing page zooms both charts into the same recent window every
+// other chart on the platform uses (lib/time.ts's RECENT_CHART_WINDOW_DAYS,
+// ~5 months) — long enough to show a full weak-to-strong reversal story,
+// short enough to stay a compelling "recent move," not a multi-year
+// history dump. Purely a display window: the underlying canonical price/
+// score-history records (and the logged-in Market Detail charts that read
+// them directly) are untouched.
 
 // A market needs at least this many points inside the window before the
 // landing page will chart them at all — a 1-2 point line doesn't
@@ -90,11 +90,11 @@ const MIN_CHART_POINTS = 5;
 // has enough points AND actually tells the "bearish, then reversal, then
 // bullish" story this section promises — a real-but-flat or real-but-
 // already-bullish-throughout window wouldn't demonstrate the reversal,
-// even though it's genuine data. getCurrentScore's own history window is
-// capped at 30 days (see db/queries/scores.ts — unchanged, not this
-// landing page's concern), so in practice this almost always resolves to
-// the illustrative example until enough real observations accumulate;
-// that's the honest, expected outcome the illustrative fallback exists for.
+// even though it's genuine data. getCurrentScore's own history window now
+// covers the same ~5 months (see db/queries/scores.ts's
+// SCORE_HISTORY_WINDOW_HOURS), so as more real observations accumulate
+// this increasingly resolves to Gold's real history instead of the
+// illustrative fallback below — the honest, expected evolution.
 const MIN_SCORE_HISTORY_POINTS_FOR_STORY = 10;
 const EARLY_PERIOD_BEARISH_CEILING = -1; // early-period average must be at least this bearish
 const LATE_PERIOD_BULLISH_FLOOR = 1; // late-period average must be at least this bullish
@@ -122,14 +122,14 @@ const ILLUSTRATIVE_SCORE_HISTORY_VALUES = [
   -3.5, -4.2, -5.0, -5.6, -6.1, -6.5, -6.7, -6.6, -6.3, -5.8, -5.0, -4.0, -2.8, -1.5, -0.2, 1.1, 2.4, 3.6, 4.6, 5.4, 6.0, 6.5, 6.9, 7.2, 7.5, 7.8,
 ];
 const ILLUSTRATIVE_SCORE_HISTORY: ScoreHistoryPoint[] = ILLUSTRATIVE_SCORE_HISTORY_VALUES.map((score, i, arr) => ({
-  date: new Date(Date.now() - Math.round(((arr.length - 1 - i) * LANDING_CHART_WINDOW_DAYS) / (arr.length - 1)) * 86_400_000).toISOString(),
+  date: new Date(Date.now() - Math.round(((arr.length - 1 - i) * RECENT_CHART_WINDOW_DAYS) / (arr.length - 1)) * 86_400_000).toISOString(),
   score,
 }));
 
 export default async function LandingPage() {
   const sessionUser = await verifySession();
   const user = sessionUser ? { email: sessionUser.email } : null;
-  const { rows, featured, smartMoney } = await getLandingPreview();
+  const { rows, featured, smartMoney, biasThresholds } = await getLandingPreview();
 
   // Same canonical current scores Top Setups ranks by — 3 strongest
   // bullish and 3 strongest bearish, visually separated, capped at 6 rows
@@ -170,10 +170,10 @@ export default async function LandingPage() {
   // history can be too short (or the wrong shape) to chart even when its
   // current score is strong, or vice versa — each falls back to
   // illustrative data on its own honest criterion, never blended together.
-  const recentPriceSeries = featured.price.series.filter((p) => new Date(p.date).getTime() >= landingChartCutoffMs);
+  const recentPriceSeries = filterToRecentWindow(featured.price.series);
   const hasPriceHistory = recentPriceSeries.length >= MIN_CHART_POINTS;
 
-  const recentScoreHistory = featured.score.history.filter((p) => new Date(p.date).getTime() >= landingChartCutoffMs);
+  const recentScoreHistory = filterToRecentWindow(featured.score.history);
   const hasRealScoreHistory = tellsReversalStory(recentScoreHistory);
   const scoreHistory = hasRealScoreHistory ? recentScoreHistory : ILLUSTRATIVE_SCORE_HISTORY;
 
@@ -329,7 +329,7 @@ export default async function LandingPage() {
                   ? "Real canonical score history for Gold, last 5 months — the same record Market Detail reads."
                   : "Illustrative example of a bearish-to-bullish reversal — not Gold's real score history."}
               </p>
-              <ScoreHistoryChart history={scoreHistory} />
+              <ScoreHistoryChart history={scoreHistory} thresholds={biasThresholds} />
             </div>
           </div>
 

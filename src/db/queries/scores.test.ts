@@ -18,7 +18,7 @@ vi.mock("../client", () => ({
   }),
 }));
 
-import { recordScoreHistory, flooredSince, VALID_SCORE_HISTORY_FROM } from "./scores";
+import { recordScoreHistory, flooredSince, VALID_SCORE_HISTORY_FROM, SCORE_HISTORY_WINDOW_HOURS } from "./scores";
 import { MarketScore } from "@/lib/types";
 
 describe("recordScoreHistory", () => {
@@ -86,6 +86,12 @@ describe("recordScoreHistory", () => {
 
     const factorScoresValues = insertedValues[1] as { provider: string }[];
     expect(factorScoresValues[0].provider).toBe("unknown");
+  });
+});
+
+describe("SCORE_HISTORY_WINDOW_HOURS — platform-wide ~5 month chart window", () => {
+  it("matches lib/time.ts's RECENT_CHART_WINDOW_DAYS (150 days) so every chart consumer of getScoreHistory's default shares one window", () => {
+    expect(SCORE_HISTORY_WINDOW_HOURS).toBe(24 * 150);
   });
 });
 

@@ -18,7 +18,7 @@ import { resolveRetailSentimentFactor } from "./sentiment";
 import { resolveEconomicGrowthFactor, resolveInflationFactor, resolveLaborFactor, resolveInterestRatesFactor } from "./macro";
 import { resolveNewsFactor } from "./news";
 import { computeConfidence } from "./confidence";
-import { recordScoreHistory, getScoreHistory, upsertCurrentScore } from "@/db/queries/scores";
+import { recordScoreHistory, getScoreHistory, upsertCurrentScore, SCORE_HISTORY_WINDOW_HOURS } from "@/db/queries/scores";
 import { resolveActiveScoringConfig, ResolvedScoringConfig } from "./scoring-config";
 
 const RESOLVERS: Record<ScoreFactorKey, (symbol: string, mode: DataMode, storageOnly?: boolean) => Promise<ResolvedFactor>> = {
@@ -108,7 +108,7 @@ export async function computeLiveMarketScore(
   // (which happens below, fire-and-forget) so there's no race with it —
   // the just-computed point is appended directly rather than re-read back.
   // Best-effort: a DB outage must never break score computation or serving.
-  const priorHistory = await getScoreHistory(symbol, 24 * 30).catch(() => []);
+  const priorHistory = await getScoreHistory(symbol, SCORE_HISTORY_WINDOW_HOURS).catch(() => []);
   const history: MarketScore["history"] = [...priorHistory].reverse().map((r) => ({ date: r.computedAt, score: r.totalScore }));
   history.push({ date: now, score: totalScore });
 

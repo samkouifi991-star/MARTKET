@@ -6,7 +6,9 @@
 // live provider call.
 import { getCanonicalMarketRows } from "./top-setups";
 import { resolveSmartMoney, SmartMoneyResolution } from "./positioning";
+import { resolveActiveScoringConfig } from "./scoring-config";
 import { MarketRow } from "@/lib/market-data";
+import { BiasThreshold } from "@/lib/config";
 
 // Gold (XAUUSD) is the featured symbol: it has full CFTC, retail-sentiment,
 // and Smart Money coverage (see symbol-map.ts), so the landing page's
@@ -14,7 +16,7 @@ import { MarketRow } from "@/lib/market-data";
 // still the real, current canonical score, never a fabricated one.
 const FEATURED_SYMBOL = "XAUUSD";
 
-export type LandingPreview = { rows: MarketRow[]; featured: MarketRow; smartMoney: SmartMoneyResolution };
+export type LandingPreview = { rows: MarketRow[]; featured: MarketRow; smartMoney: SmartMoneyResolution; biasThresholds: BiasThreshold[] };
 
 // Unlike ETHUSD (which short-circuits on "no CFTC contract" before ever
 // touching the database), Gold has full CFTC coverage, so resolveSmartMoney
@@ -37,6 +39,6 @@ async function resolveSmartMoneySafely(symbol: string): Promise<SmartMoneyResolu
 export async function getLandingPreview(): Promise<LandingPreview> {
   const rows = await getCanonicalMarketRows();
   const featured = rows.find((r) => r.instrument.symbol === FEATURED_SYMBOL) ?? rows[0];
-  const smartMoney = await resolveSmartMoneySafely(featured.instrument.symbol);
-  return { rows, featured, smartMoney };
+  const [smartMoney, scoringConfig] = await Promise.all([resolveSmartMoneySafely(featured.instrument.symbol), resolveActiveScoringConfig()]);
+  return { rows, featured, smartMoney, biasThresholds: scoringConfig.biasThresholds };
 }

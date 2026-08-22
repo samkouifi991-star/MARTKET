@@ -54,3 +54,17 @@ export function formatDateTime(iso: string): string {
     timeZoneName: "short",
   });
 }
+
+// The single, shared "recent window" convention for every price/score-
+// history chart across the platform (Market Detail, the landing page, and
+// any future consumer) — presentation-only: it trims which already-fetched
+// points are DISPLAYED, never how much history is stored or computed
+// upstream. Matches db/queries/scores.ts's SCORE_HISTORY_WINDOW_HOURS on
+// the read side; Technical Trend/Seasonality/backtesting keep reading full
+// candle history regardless of this.
+export const RECENT_CHART_WINDOW_DAYS = 150; // ~5 months
+
+export function filterToRecentWindow<T extends { date: string }>(points: T[], days: number = RECENT_CHART_WINDOW_DAYS): T[] {
+  const cutoffMs = Date.now() - days * 86_400_000;
+  return points.filter((p) => new Date(p.date).getTime() >= cutoffMs);
+}
