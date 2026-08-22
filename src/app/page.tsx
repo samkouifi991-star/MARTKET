@@ -9,10 +9,12 @@ import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { BiasBadge } from "@/components/ui/BiasBadge";
 import { AutoRefresh } from "@/components/ui/AutoRefresh";
+import { PriceChart } from "@/components/charts/PriceChart";
+import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
 import { factorLabel } from "@/lib/scoring";
-import { factorSentiment, formatSigned, scoreColorClass, FactorSentiment } from "@/lib/format";
+import { factorSentiment, formatPrice, formatSigned, formatSignedPct, scoreColorClass, FactorSentiment } from "@/lib/format";
 import { isStrictLiveSymbol } from "@/services/data-mode";
-import { SCORE_FACTOR_KEYS, ScoreFactorKey } from "@/lib/types";
+import { SCORE_FACTOR_KEYS, ScoreFactorKey, ScoreHistoryPoint } from "@/lib/types";
 import { MarketRow } from "@/lib/market-data";
 import {
   Activity,
@@ -70,6 +72,27 @@ const ILLUSTRATIVE_GOLD_FACTORS: { key: ScoreFactorKey; contribution: number }[]
   { key: "news", contribution: 0.7 },
 ];
 
+// A market needs at least this many real canonical score-history
+// observations before the landing page will chart them — a 1-2 point line
+// doesn't demonstrate anything, and would still be genuine data, just not
+// yet visually useful. Below this, the chart falls back to a fixed,
+// clearly-labeled illustrative example instead (never a stretched/padded
+// version of the real, too-short history).
+const MIN_SCORE_HISTORY_POINTS = 5;
+
+// Fixed illustrative example of a bearish-to-bullish score transition —
+// never derived from live data, never persisted, never presented as Gold's
+// real history. Only shown when Gold's real canonical history has fewer
+// than MIN_SCORE_HISTORY_POINTS observations, always labeled "Illustrative
+// Score History" wherever it appears.
+const ILLUSTRATIVE_SCORE_HISTORY_VALUES = [
+  -1.2, -2.0, -3.1, -4.4, -5.6, -6.2, -6.8, -6.5, -5.9, -5.0, -3.8, -2.4, -1.0, 0.3, 1.6, 2.8, 3.9, 4.8, 5.6, 6.2, 6.7, 7.0, 7.2, 7.4, 7.5, 7.6, 7.7, 7.7, 7.8, 7.8,
+];
+const ILLUSTRATIVE_SCORE_HISTORY: ScoreHistoryPoint[] = ILLUSTRATIVE_SCORE_HISTORY_VALUES.map((score, i) => ({
+  date: new Date(Date.now() - (ILLUSTRATIVE_SCORE_HISTORY_VALUES.length - 1 - i) * 86_400_000).toISOString(),
+  score,
+}));
+
 export default async function LandingPage() {
   const sessionUser = await verifySession();
   const user = sessionUser ? { email: sessionUser.email } : null;
@@ -109,6 +132,14 @@ export default async function LandingPage() {
   const goldGauge = isGoldStrong
     ? { totalScore: featured.score.totalScore, bias: featured.score.bias, confidence: featured.score.confidence }
     : { totalScore: ILLUSTRATIVE_GOLD_TOTAL_SCORE, bias: "Bullish" as const, confidence: ILLUSTRATIVE_GOLD_CONFIDENCE };
+
+  // Independent of the featured-score-card decision above: Gold's real
+  // history can be too short to chart even when its current score is
+  // strong, or vice versa — each falls back to illustrative data on its
+  // own honest criterion, never blended together.
+  const hasRealScoreHistory = featured.score.history.length >= MIN_SCORE_HISTORY_POINTS;
+  const scoreHistory = hasRealScoreHistory ? featured.score.history : ILLUSTRATIVE_SCORE_HISTORY;
+  const hasPriceHistory = featured.price.series.length >= MIN_SCORE_HISTORY_POINTS;
 
   const strictLiveCount = rows.filter((r) => isStrictLiveSymbol(r.instrument.symbol)).length;
   const byAssetClass = {
@@ -212,6 +243,73 @@ export default async function LandingPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Historical depth: price + score history */}
+        <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-16">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-semibold">See the Market. See the Score Change.</h2>
+            <p className="mt-2 text-(--text-dim) max-w-2xl mx-auto text-sm sm:text-base">
+              Track price action and see how the Market Intelligence score evolves as technical, sentiment, positioning and macro
+              conditions change.
+            </p>
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4 items-start">
+            <div className="card p-4 sm:p-5">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-semibold">Gold Price Chart</h3>
+                <span className="text-[11px] text-(--text-faint)">XAUUSD · real data</span>
+              </div>
+              {hasPriceHistory ? (
+                <>
+                  <p className="text-[11px] text-(--text-faint) mb-2">
+                    20 EMA {formatPrice(featured.price.ema20, featured.instrument.decimals)} · 50 SMA{" "}
+                    {formatPrice(featured.price.sma50, featured.instrument.decimals)} · 200 SMA{" "}
+                    {formatPrice(featured.price.sma200, featured.instrument.decimals)}
+                  </p>
+                  <PriceChart series={featured.price.series} decimals={featured.instrument.decimals} />
+                  <div className="grid grid-cols-3 gap-2 mt-3 text-center">
+                    <MiniStat label="RSI(14)" value={featured.price.rsi14.toFixed(0)} />
+                    <MiniStat label="ADX(14)" value={featured.price.adx14.toFixed(0)} />
+                    <MiniStat label="10d ROC" value={formatSignedPct(featured.price.roc10)} />
+                  </div>
+                  <p className="text-xs text-(--text-faint) mt-2">Structure: {featured.price.structure}</p>
+                </>
+              ) : (
+                <p className="text-sm text-(--text-faint) py-16 text-center">Price history will appear once ingestion completes.</p>
+              )}
+            </div>
+
+            <div className="card p-4 sm:p-5">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-semibold">{hasRealScoreHistory ? "Gold Score History" : "Illustrative Score History"}</h3>
+                {!hasRealScoreHistory && <span className="text-[10px] uppercase tracking-wide text-amber-400 font-semibold">Illustrative</span>}
+              </div>
+              <p className="text-[11px] text-(--text-faint) mb-2">
+                {hasRealScoreHistory
+                  ? "Real canonical score history for Gold — the same record Market Detail reads."
+                  : "Example showing how score history will appear as observations accumulate."}
+              </p>
+              <ScoreHistoryChart history={scoreHistory} />
+            </div>
+          </div>
+
+          <div className="mt-6 grid sm:grid-cols-2 gap-4 max-w-4xl mx-auto text-center sm:text-left">
+            <div>
+              <h4 className="text-sm font-semibold">See when market conditions change</h4>
+              <p className="text-xs text-(--text-dim) mt-1 leading-relaxed">
+                The score evolves as the underlying factors change — helping you see strengthening, weakening and potential shifts
+                in market conditions.
+              </p>
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold">Not just a signal — see the evidence behind it.</h4>
+              <p className="text-xs text-(--text-dim) mt-1 leading-relaxed">
+                Every score is connected to transparent factors and historical market context.
+              </p>
             </div>
           </div>
         </section>
@@ -343,6 +441,15 @@ export default async function LandingPage() {
       </main>
 
       <MarketingFooter />
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-white/[.03] py-2">
+      <div className="text-[10px] text-(--text-faint) uppercase tracking-wide">{label}</div>
+      <div className="text-sm font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
