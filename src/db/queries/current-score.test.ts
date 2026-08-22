@@ -64,7 +64,7 @@ vi.mock("../client", () => ({
   }),
 }));
 
-import { upsertCurrentScore, getCurrentScore } from "./scores";
+import { upsertCurrentScore, getCurrentScore, getAllCurrentScores } from "./scores";
 
 const SAMPLE_SCORE: MarketScore = {
   symbol: "USDCHF",
@@ -138,5 +138,50 @@ describe("current_market_scores / current_factor_scores round trip", () => {
   it("returns null for a symbol with no current-score row yet", async () => {
     const read = await getCurrentScore("NOROWYET");
     expect(read).toBeNull();
+  });
+});
+
+describe("getAllCurrentScores — bulk read for the Dashboard", () => {
+  beforeEach(() => {
+    currentMarketRows = [];
+    currentFactorRows = [];
+  });
+
+  it("returns every symbol with a current-score row in one bulk read, keyed by symbol", async () => {
+    await upsertCurrentScore(SAMPLE_SCORE);
+    await upsertCurrentScore({ ...SAMPLE_SCORE, symbol: "GBPUSD", totalScore: 4.5, bias: "Bullish" });
+
+    const all = await getAllCurrentScores();
+
+    expect(all.size).toBe(2);
+    expect(all.get("USDCHF")!.totalScore).toBe(SAMPLE_SCORE.totalScore);
+    expect(all.get("USDCHF")!.bias).toBe(SAMPLE_SCORE.bias);
+    expect(all.get("GBPUSD")!.totalScore).toBe(4.5);
+    expect(all.get("GBPUSD")!.bias).toBe("Bullish");
+  });
+
+  it("carries every factor's contribution/rawScore/freshness through the bulk read, not just the top-level fields", async () => {
+    await upsertCurrentScore(SAMPLE_SCORE);
+    const all = await getAllCurrentScores();
+    const read = all.get("USDCHF")!;
+
+    for (const written of SAMPLE_SCORE.factors) {
+      const got = read.factors.find((f) => f.key === written.key)!;
+      expect(got.contribution, `${written.key} contribution`).toBe(written.contribution);
+      expect(got.rawScore, `${written.key} rawScore`).toBe(written.rawScore);
+      expect(got.freshness, `${written.key} freshness`).toBe(written.freshness);
+    }
+  });
+
+  it("omits a symbol with no current-score row — never a stand-in demo value", async () => {
+    await upsertCurrentScore(SAMPLE_SCORE);
+    const all = await getAllCurrentScores();
+    expect(all.has("NOROWYET")).toBe(false);
+    expect(all.size).toBe(1);
+  });
+
+  it("returns an empty map when nothing has been computed yet", async () => {
+    const all = await getAllCurrentScores();
+    expect(all.size).toBe(0);
   });
 });

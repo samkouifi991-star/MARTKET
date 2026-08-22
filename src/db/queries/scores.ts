@@ -197,3 +197,52 @@ export async function getCurrentScore(symbol: string): Promise<MarketScore | nul
     lastUpdated: row.computedAt.toISOString(),
   };
 }
+
+// Bulk read of every symbol's current-score record in two queries (not one
+// per symbol) — for consumers like the Dashboard that need every market's
+// canonical score at once. Deliberately skips history (getScoreHistory)
+// since none of those consumers render the 30-day chart; callers that need
+// history should use getCurrentScore(symbol) for that one symbol instead.
+// A symbol with no current-score row yet (or no factor rows for it) is
+// simply absent from the returned map — callers must treat that as
+// "unavailable", never silently substitute a demo/estimated value.
+export async function getAllCurrentScores(): Promise<Map<string, MarketScore>> {
+  const db = getDb();
+  const [marketRows, factorRows] = await Promise.all([db.select().from(currentMarketScores), db.select().from(currentFactorScores)]);
+
+  const factorsBySymbol = new Map<string, ScoreFactor[]>();
+  for (const f of factorRows) {
+    const factor: ScoreFactor = {
+      key: f.factorKey as ScoreFactorKey,
+      contribution: f.weightedScore,
+      rawScore: f.rawScore,
+      weight: f.weight,
+      explanation: f.explanation,
+      source: f.source,
+      provider: f.provider,
+      freshness: f.status as DataFreshness,
+      lastUpdated: (f.sourceUpdatedAt ?? f.computedAt).toISOString(),
+      nextUpdate: (f.nextExpectedUpdate ?? f.computedAt).toISOString(),
+    };
+    const list = factorsBySymbol.get(f.symbol);
+    if (list) list.push(factor);
+    else factorsBySymbol.set(f.symbol, [factor]);
+  }
+
+  const result = new Map<string, MarketScore>();
+  for (const row of marketRows) {
+    const factors = factorsBySymbol.get(row.symbol);
+    if (!factors || factors.length === 0) continue;
+    result.set(row.symbol, {
+      symbol: row.symbol,
+      totalScore: row.totalScore,
+      bias: row.bias as Bias,
+      confidence: row.confidence,
+      change24h: row.change24h,
+      factors,
+      history: [],
+      lastUpdated: row.computedAt.toISOString(),
+    });
+  }
+  return result;
+}

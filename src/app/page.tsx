@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { allMarketRows } from "@/lib/market-data";
+import { getDashboardMarketRows } from "@/lib/pipeline/dashboard";
 import { StatTile } from "@/components/ui/StatTile";
 import { Card } from "@/components/ui/Card";
+import { AutoRefresh } from "@/components/ui/AutoRefresh";
 import { formatSigned, scoreColorClass } from "@/lib/format";
 import { generateRiskGauge } from "@/lib/demo/riskGauge";
 import { NEWS_ARTICLES } from "@/lib/demo/news";
@@ -11,14 +12,26 @@ import { INSTRUMENTS } from "@/lib/instruments";
 import { generateSmartMoney } from "@/lib/demo/smartMoney";
 import { ArrowRight, Gauge } from "lucide-react";
 
-export default function DashboardPage() {
-  const rows = allMarketRows();
-  const sorted = [...rows].sort((a, b) => b.score.totalScore - a.score.totalScore);
+// Without this, the Dashboard would be prerendered once at build time and
+// serve that frozen HTML forever — defeating the canonical current-score
+// read below, which must reflect Neon's latest state on every visit. See
+// /top-setups and /markets/[symbol] for the same rule already applied.
+export const dynamic = "force-dynamic";
+
+export default async function DashboardPage() {
+  const rows = await getDashboardMarketRows();
+  // Only markets with a genuine canonical score AND no demo-fallback
+  // exposure (strict-live symbols) feed the rankings/counts below — see
+  // pipeline/dashboard.ts's DashboardMarketRow.eligible for why a
+  // non-strict-live symbol's current score can't be trusted for this.
+  const eligible = rows.filter((r) => r.eligible && r.score);
+  const blockedCount = rows.length - eligible.length;
+  const sorted = [...eligible].sort((a, b) => b.score!.totalScore - a.score!.totalScore);
   const topBullish = sorted.slice(0, 5);
   const topBearish = sorted.slice(-5).reverse();
-  const avgConfidence = Math.round(rows.reduce((s, r) => s + r.score.confidence, 0) / rows.length);
-  const veryBullish = rows.filter((r) => r.score.bias === "Very Bullish").length;
-  const veryBearish = rows.filter((r) => r.score.bias === "Very Bearish").length;
+  const avgConfidence = eligible.length > 0 ? Math.round(eligible.reduce((s, r) => s + r.score!.confidence, 0) / eligible.length) : 0;
+  const veryBullish = eligible.filter((r) => r.score!.bias === "Very Bullish").length;
+  const veryBearish = eligible.filter((r) => r.score!.bias === "Very Bearish").length;
 
   const risk = generateRiskGauge();
   const topNews = [...NEWS_ARTICLES].sort((a, b) => b.importance - a.importance).slice(0, 4);
@@ -27,6 +40,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      <AutoRefresh intervalSeconds={45} />
       <div>
         <h1 className="text-xl font-semibold">Dashboard</h1>
         <p className="text-sm text-(--text-faint) mt-1">
@@ -35,7 +49,11 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatTile label="Markets tracked" value={String(rows.length)} sub="Across 4 asset classes" />
+        <StatTile
+          label="Markets tracked"
+          value={String(rows.length)}
+          sub={blockedCount > 0 ? `${eligible.length} live · ${blockedCount} pending coverage` : "Across 4 asset classes"}
+        />
         <StatTile label="Very Bullish" value={String(veryBullish)} valueClassName="text-emerald-400" sub="Score ≥ +8" />
         <StatTile label="Very Bearish" value={String(veryBearish)} valueClassName="text-rose-400" sub="Score ≤ -8" />
         <StatTile label="Avg. confidence" value={`${avgConfidence}%`} sub="Across all markets" />
@@ -51,10 +69,11 @@ export default function DashboardPage() {
                     <span className="font-medium">{r.instrument.symbol}</span>
                     <span className="text-(--text-faint) text-xs truncate hidden sm:inline">{r.instrument.name}</span>
                   </div>
-                  <span className={`tabular-nums font-semibold ${scoreColorClass(r.score.totalScore)}`}>{formatSigned(r.score.totalScore)}</span>
+                  <span className={`tabular-nums font-semibold ${scoreColorClass(r.score!.totalScore)}`}>{formatSigned(r.score!.totalScore)}</span>
                 </Link>
               </li>
             ))}
+            {topBullish.length === 0 && <p className="text-xs text-(--text-faint)">No live-scored markets available yet.</p>}
           </ul>
         </Card>
 
@@ -67,10 +86,11 @@ export default function DashboardPage() {
                     <span className="font-medium">{r.instrument.symbol}</span>
                     <span className="text-(--text-faint) text-xs truncate hidden sm:inline">{r.instrument.name}</span>
                   </div>
-                  <span className={`tabular-nums font-semibold ${scoreColorClass(r.score.totalScore)}`}>{formatSigned(r.score.totalScore)}</span>
+                  <span className={`tabular-nums font-semibold ${scoreColorClass(r.score!.totalScore)}`}>{formatSigned(r.score!.totalScore)}</span>
                 </Link>
               </li>
             ))}
+            {topBearish.length === 0 && <p className="text-xs text-(--text-faint)">No live-scored markets available yet.</p>}
           </ul>
         </Card>
 
