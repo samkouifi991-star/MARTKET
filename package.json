@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "tsx scripts/migrate.ts && next build",
+    "vercel-build": "tsx scripts/migrate.ts && tsx scripts/stripe-full-setup.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -43,6 +43,7 @@
     "test:dashboard-sync-verify": "tsx scripts/dashboard-sync-verify.ts",
     "stripe:setup": "tsx scripts/stripe-setup.ts",
     "stripe:webhook-setup": "tsx scripts/stripe-webhook-setup.ts",
+    "stripe:full-setup": "tsx scripts/stripe-full-setup.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

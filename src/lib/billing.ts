@@ -5,10 +5,18 @@ import { createPendingSubscription, getSubscriptionByUserId, upsertSubscriptionB
 import type { User } from "@/db/queries/users";
 
 function absoluteUrl(path: string): string {
+  // VERCEL_PROJECT_PRODUCTION_URL is present on every deployment (preview
+  // included) but always names the PRODUCTION domain — preferring it here
+  // would send a preview deployment's Stripe redirects to production. Only
+  // trust it when this build's own target actually is production;
+  // otherwise fall back to this deployment's own URL.
   const base =
     process.env.NEXT_PUBLIC_APP_URL ??
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : undefined) ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+    (process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : "http://localhost:3000");
   return `${base}${path}`;
 }
 
