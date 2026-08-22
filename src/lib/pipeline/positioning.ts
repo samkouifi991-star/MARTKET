@@ -22,7 +22,7 @@ function hasCftcCoverage(symbol: string): boolean {
   return getSymbolMapping(symbol)?.cftc != null;
 }
 
-export async function resolveInstitutionalFactor(symbol: string, mode: DataMode): Promise<ResolvedFactor> {
+export async function resolveInstitutionalFactor(symbol: string, mode: DataMode, storageOnly = false): Promise<ResolvedFactor> {
   const instrument = getInstrument(symbol);
   if (!instrument) return unavailableFactor("institutional", SOURCE, `Unknown instrument ${symbol}`);
   if (!hasCftcCoverage(symbol)) return notApplicableFactor("institutional", SOURCE, `no CFTC-reportable futures contract exists for ${symbol}`);
@@ -30,7 +30,7 @@ export async function resolveInstitutionalFactor(symbol: string, mode: DataMode)
   // Storage-first: tries the live CFTC call first, falls back to the last
   // stored report (DELAYED/STALE) on a genuine failure, and never presents
   // a report beyond CFTC's own freshness limit — see last-known-good.ts.
-  const positioning = await getPositioningWithFallback(symbol);
+  const positioning = await getPositioningWithFallback(symbol, storageOnly);
   if (!positioning.value) {
     if (allowsDemoFallback(mode, symbol)) {
       const fallback = demoInstitutionalFactor(instrument);
@@ -55,7 +55,7 @@ export async function resolveInstitutionalFactor(symbol: string, mode: DataMode)
   const fromStorage = positioning.source.includes("last known good");
   let explanation = `${pos.classification}s are ${pos.pctLong.toFixed(0)}% long / ${pos.pctShort.toFixed(0)}% short with a net weekly change of ${pos.netWeeklyChange > 0 ? "+" : ""}${pos.netWeeklyChange.toLocaleString()} contracts${pct !== null ? ` (${pct}th percentile vs. ${pos.percentile3y !== null ? "3-year" : "1-year"} history)` : ""}.`;
   if (extreme) explanation += " Positioning is historically crowded, so the score is dampened for overcrowding / reversal risk rather than treated as automatically directional.";
-  if (fromStorage) explanation += ` Live CFTC refresh failed (${positioning.error ?? "unavailable"}); showing the last successfully stored report instead, not a live re-fetch.`;
+  if (fromStorage && positioning.error) explanation += ` ${positioning.error}`;
 
   return {
     key: "institutional",

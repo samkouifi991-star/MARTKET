@@ -5,6 +5,13 @@
 // score history rows, so the score history chart reflects genuine periodic
 // market observations rather than one row per page view or build (see
 // scoring-engine.ts's computeLiveMarketScore for the full rationale).
+//
+// persist:true also upserts current_market_scores/current_factor_scores —
+// this cron is the steady-state sole writer of that canonical "current
+// score" row too, which both Market Detail and Top Setups read (see
+// db/queries/scores.ts's getCurrentScore). Market Detail and Top Setups
+// only ever write that row themselves as a one-off bootstrap fallback for a
+// symbol this cron hasn't scored yet — never on an ordinary render/refresh.
 import { NextRequest, NextResponse } from "next/server";
 import { INSTRUMENTS } from "@/lib/instruments";
 import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";

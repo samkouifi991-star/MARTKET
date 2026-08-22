@@ -21,9 +21,22 @@ function articleMentionsInstrument(article: NormalizedNewsArticle, symbol: strin
   return engineArticleMentionsInstrument(article.headline, article.symbols, symbol, currencies);
 }
 
-export async function resolveNewsFactor(symbol: string, mode: DataMode): Promise<ResolvedFactor> {
+export async function resolveNewsFactor(symbol: string, mode: DataMode, storageOnly = false): Promise<ResolvedFactor> {
   const instrument = getInstrument(symbol);
   if (!instrument) return unavailableFactor("news", SOURCE, `Unknown instrument ${symbol}`);
+
+  // News has no stored/last-known-good table of its own (see file header —
+  // it's a live-classified feed, not something the ingestion cron persists
+  // per symbol), so a storage-only caller (Top Setups) simply can't get a
+  // real value here without a live FMP call — correctly unavailable rather
+  // than pretending to have read something from storage.
+  if (storageOnly) {
+    if (allowsDemoFallback(mode, symbol)) {
+      const fallback = demoNewsFactor(instrument);
+      return demoFallbackFactor({ key: "news", rawScore: fallback.raw, explanation: fallback.explanation, source: "News Intelligence engine (demo)", lastUpdated: new Date().toISOString(), nextUpdate: new Date().toISOString() });
+    }
+    return unavailableFactor("news", SOURCE, "News has no stored last-known-good source — storage-only read, no live provider call attempted.");
+  }
 
   const news = await fmp.getForexAndMarketNews(100);
   if (news.status !== "live" || !news.value) {

@@ -3,10 +3,10 @@
 // snapshot. Every call here is a no-op-on-failure by design at the call
 // site (see scoring-engine.ts): a database outage must never break score
 // computation or serving.
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../client";
-import { factorScores, marketScores } from "../schema";
-import { MarketScore } from "@/lib/types";
+import { currentFactorScores, currentMarketScores, factorScores, marketScores } from "../schema";
+import { Bias, DataFreshness, MarketScore, ScoreFactor, ScoreFactorKey } from "@/lib/types";
 
 export async function recordScoreHistory(score: MarketScore): Promise<void> {
   const db = getDb();
@@ -96,4 +96,104 @@ export async function getFactorChangesSince(symbol: string, sinceHours: number):
       return { factorKey, then, now, delta: Number((now - then).toFixed(2)) };
     })
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+}
+
+// ---- Current score — the single canonical "current_market_score" record
+// (see schema.ts's currentMarketScores/currentFactorScores). Upserted by
+// whichever caller just computed a real live score (the scores cron, and
+// Market Detail's render as a bootstrap fallback — see scoring-engine.ts),
+// and read by BOTH Market Detail and Top Setups so they can never show two
+// different numbers for the same market: they're reading the same row.
+export async function upsertCurrentScore(score: MarketScore): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(currentMarketScores)
+    .values({
+      symbol: score.symbol,
+      totalScore: score.totalScore,
+      bias: score.bias,
+      confidence: score.confidence,
+      change24h: score.change24h,
+      computedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: currentMarketScores.symbol,
+      set: { totalScore: score.totalScore, bias: score.bias, confidence: score.confidence, change24h: score.change24h, computedAt: new Date() },
+    });
+
+  await db
+    .insert(currentFactorScores)
+    .values(
+      score.factors.map((f) => ({
+        symbol: score.symbol,
+        factorKey: f.key,
+        rawScore: f.rawScore,
+        weight: f.weight,
+        weightedScore: f.contribution,
+        explanation: f.explanation,
+        provider: f.provider ?? "unknown",
+        source: f.source,
+        status: f.freshness,
+        sourceUpdatedAt: f.lastUpdated ? new Date(f.lastUpdated) : null,
+        nextExpectedUpdate: f.nextUpdate ? new Date(f.nextUpdate) : null,
+        computedAt: new Date(),
+      }))
+    )
+    .onConflictDoUpdate({
+      target: [currentFactorScores.symbol, currentFactorScores.factorKey],
+      set: {
+        rawScore: sql`excluded.raw_score`,
+        weight: sql`excluded.weight`,
+        weightedScore: sql`excluded.weighted_score`,
+        explanation: sql`excluded.explanation`,
+        provider: sql`excluded.provider`,
+        source: sql`excluded.source`,
+        status: sql`excluded.status`,
+        sourceUpdatedAt: sql`excluded.source_updated_at`,
+        nextExpectedUpdate: sql`excluded.next_expected_update`,
+        computedAt: sql`excluded.computed_at`,
+      },
+    });
+}
+
+// Reconstructs a full MarketScore from the current-score tables, with real
+// history from market_scores (the 30-day chart's source) attached — never
+// used as a stand-in for "the current score" itself, only as the trailing
+// context a MarketScore object needs. Returns null when no current-score
+// row exists yet for this symbol (e.g. before the scores cron's first run
+// or any Market Detail visit) so callers can fall back to a fresh compute.
+export async function getCurrentScore(symbol: string): Promise<MarketScore | null> {
+  const db = getDb();
+  const [row] = await db.select().from(currentMarketScores).where(eq(currentMarketScores.symbol, symbol)).limit(1);
+  if (!row) return null;
+
+  const factorRows = await db.select().from(currentFactorScores).where(eq(currentFactorScores.symbol, symbol));
+  if (factorRows.length === 0) return null;
+
+  const priorHistory = await getScoreHistory(symbol, 24 * 30).catch(() => []);
+  const history: MarketScore["history"] = [...priorHistory].reverse().map((r) => ({ date: r.computedAt, score: r.totalScore }));
+
+  const factors: ScoreFactor[] = factorRows.map((f) => ({
+    key: f.factorKey as ScoreFactorKey,
+    contribution: f.weightedScore,
+    rawScore: f.rawScore,
+    weight: f.weight,
+    explanation: f.explanation,
+    source: f.source,
+    provider: f.provider,
+    freshness: f.status as DataFreshness,
+    lastUpdated: (f.sourceUpdatedAt ?? f.computedAt).toISOString(),
+    nextUpdate: (f.nextExpectedUpdate ?? f.computedAt).toISOString(),
+  }));
+
+  return {
+    symbol: row.symbol,
+    totalScore: row.totalScore,
+    bias: row.bias as Bias,
+    confidence: row.confidence,
+    change24h: row.change24h,
+    factors,
+    history,
+    lastUpdated: row.computedAt.toISOString(),
+  };
 }

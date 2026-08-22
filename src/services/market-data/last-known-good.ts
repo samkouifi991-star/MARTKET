@@ -56,6 +56,8 @@ import {
   getLatestStoredPositioning,
   getLatestStoredRetailSentiment,
   getLatestStoredEconomicSeries,
+  StoredPrice,
+  StoredDailyCandles,
 } from "@/db/queries/market-data";
 import { FredSeriesPoint, NormalizedCandle, NormalizedQuote, Provenance, ProviderName, unavailable } from "../types";
 
@@ -80,13 +82,7 @@ function classifyStoredAge(fetchedAt: Date): "delayed" | "stale" {
   return Date.now() - fetchedAt.getTime() <= RECENT_STORAGE_WINDOW_MS ? "delayed" : "stale";
 }
 
-export async function getQuoteWithFallback(symbol: string): Promise<Provenance<NormalizedQuote>> {
-  const live = await marketData.getQuote(symbol);
-  if (live.status === "live") return live;
-
-  const stored = await getLatestStoredPrice(symbol);
-  if (!stored) return live; // never had data -> surface the live unavailable/error/rate-limited result unchanged
-
+function quoteFromStored(symbol: string, stored: StoredPrice, note: string): Provenance<NormalizedQuote> {
   const freshness = classifyStoredAge(stored.fetchedAt);
   const sourceTimestamp = (stored.sourceUpdatedAt ?? stored.fetchedAt).toISOString();
   return {
@@ -97,54 +93,83 @@ export async function getQuoteWithFallback(symbol: string): Promise<Provenance<N
     sourceUpdatedAt: sourceTimestamp,
     nextExpectedUpdate: null,
     value: { symbol, price: stored.price, changePct24h: stored.changePct24h, timestamp: sourceTimestamp },
-    error: `Live refresh unavailable (${live.error ?? live.status}) — showing last stored value from ${stored.fetchedAt.toISOString()}`,
+    error: note,
   };
 }
 
-export async function getDailyCandlesWithFallback(symbol: string, days = 260): Promise<Provenance<NormalizedCandle[]>> {
+/** `storageOnly` (default false) skips the live provider call entirely and
+ * reads Neon directly — for callers (Top Setups) that must never trigger a
+ * live provider fetch, only read whatever the scheduled ingestion cron has
+ * already stored. Every existing call site keeps its current live-first
+ * behavior unchanged since this defaults to false. */
+export async function getQuoteWithFallback(symbol: string, storageOnly = false): Promise<Provenance<NormalizedQuote>> {
+  if (storageOnly) {
+    const stored = await getLatestStoredPrice(symbol);
+    if (!stored) return unavailable("fmp", "Financial Modeling Prep", `No stored price exists yet for ${symbol} (storage-only read — no live provider call attempted).`);
+    return quoteFromStored(symbol, stored, `Storage-only read — showing last stored value from ${stored.fetchedAt.toISOString()}.`);
+  }
+
+  const live = await marketData.getQuote(symbol);
+  if (live.status === "live") return live;
+
+  const stored = await getLatestStoredPrice(symbol);
+  if (!stored) return live; // never had data -> surface the live unavailable/error/rate-limited result unchanged
+
+  return quoteFromStored(symbol, stored, `Live refresh unavailable (${live.error ?? live.status}) — showing last stored value from ${stored.fetchedAt.toISOString()}`);
+}
+
+function candlesFromStored(stored: StoredDailyCandles, note: string): Provenance<NormalizedCandle[]> {
+  const freshness = classifyStoredAge(stored.fetchedAt);
+  return {
+    provider: stored.provider as ProviderName,
+    source: `${providerLabel(stored.provider)} (last known good — stored)`,
+    status: freshness,
+    fetchedAt: stored.fetchedAt.toISOString(),
+    sourceUpdatedAt: stored.candles[stored.candles.length - 1].date,
+    nextExpectedUpdate: null,
+    value: stored.candles,
+    error: note,
+  };
+}
+
+export async function getDailyCandlesWithFallback(symbol: string, days = 260, storageOnly = false): Promise<Provenance<NormalizedCandle[]>> {
+  if (storageOnly) {
+    const stored = await getLatestStoredDailyCandles(symbol);
+    if (!stored || stored.candles.length === 0) return unavailable("fmp", "Financial Modeling Prep", `No stored daily candles exist yet for ${symbol} (storage-only read — no live provider call attempted).`);
+    return candlesFromStored(stored, `Storage-only read — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}.`);
+  }
+
   const live = await marketData.getDailyCandles(symbol, days);
   if (live.status === "live") return live;
 
   const stored = await getLatestStoredDailyCandles(symbol);
   if (!stored || stored.candles.length === 0) return live;
 
-  const freshness = classifyStoredAge(stored.fetchedAt);
-  return {
-    provider: stored.provider as ProviderName,
-    source: `${providerLabel(stored.provider)} (last known good — stored)`,
-    status: freshness,
-    fetchedAt: stored.fetchedAt.toISOString(),
-    sourceUpdatedAt: stored.candles[stored.candles.length - 1].date,
-    nextExpectedUpdate: null,
-    value: stored.candles,
-    error: `Live refresh unavailable (${live.error ?? live.status}) — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}`,
-  };
+  return candlesFromStored(stored, `Live refresh unavailable (${live.error ?? live.status}) — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}`);
 }
 
 /** Same live-then-storage pattern as getDailyCandlesWithFallback, for 4H/1H
  * candles — the candles cron now writes these to Neon too (see
  * cron/candles/route.ts), so intraday confirmation gets the same
  * last-known-good protection daily candles already had, instead of going
- * unavailable outright whenever a live 4H/1H request fails. */
-export async function getIntradayCandlesWithFallback(symbol: string, interval: "1hour" | "4hour"): Promise<Provenance<NormalizedCandle[]>> {
+ * unavailable outright whenever a live 4H/1H request fails. `storageOnly`
+ * follows the same rule as getQuoteWithFallback above. */
+export async function getIntradayCandlesWithFallback(symbol: string, interval: "1hour" | "4hour", storageOnly = false): Promise<Provenance<NormalizedCandle[]>> {
+  const timeframe = interval === "1hour" ? "1h" : "4h";
+
+  if (storageOnly) {
+    const stored = await getLatestStoredCandles(symbol, timeframe);
+    if (!stored || stored.candles.length === 0) return unavailable("fmp", "Financial Modeling Prep", `No stored ${interval} candles exist yet for ${symbol} (storage-only read — no live provider call attempted).`);
+    return candlesFromStored(stored, `Storage-only read — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}.`);
+  }
+
   const live = await marketData.getIntradayCandles(symbol, interval);
   if (live.status === "live") return live;
 
-  const timeframe = interval === "1hour" ? "1h" : "4h";
   const stored = await getLatestStoredCandles(symbol, timeframe);
   if (!stored || stored.candles.length === 0) return live;
 
-  const freshness = classifyStoredAge(stored.fetchedAt);
-  return {
-    provider: stored.provider as ProviderName,
-    source: `${providerLabel(stored.provider)} (last known good — stored)`,
-    status: freshness,
-    fetchedAt: stored.fetchedAt.toISOString(),
-    sourceUpdatedAt: stored.candles[stored.candles.length - 1].date,
-    nextExpectedUpdate: null,
-    value: stored.candles,
-    error: `Live refresh unavailable (${live.error ?? live.status}) — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}`,
-  };
+  return candlesFromStored(stored, `Live refresh unavailable (${live.error ?? live.status}) — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}`);
 }
 
 // CFTC/FRED/retail-sentiment update far less often than a price tick (a
@@ -159,7 +184,27 @@ function liveFetchFailed<T>(live: Provenance<T>): boolean {
   return live.status === "unavailable" || live.status === "error";
 }
 
-export async function getPositioningWithFallback(symbol: string): Promise<Provenance<CftcPositioningResult>> {
+const CFTC_SOURCE = "CFTC Commitments of Traders";
+
+export async function getPositioningWithFallback(symbol: string, storageOnly = false): Promise<Provenance<CftcPositioningResult>> {
+  if (storageOnly) {
+    const stored = await getLatestStoredPositioning(symbol);
+    if (!stored || !isCftcReportWithinFreshnessLimit(stored.positioning.reportDate)) {
+      return unavailable("cftc", CFTC_SOURCE, `No usable stored CFTC report exists for ${symbol} (storage-only read — no live provider call attempted).`);
+    }
+    const freshness = classifyStoredAge(stored.fetchedAt);
+    return {
+      provider: "cftc",
+      source: `${CFTC_SOURCE} (last known good — stored)`,
+      status: freshness,
+      fetchedAt: stored.fetchedAt.toISOString(),
+      sourceUpdatedAt: stored.positioning.reportDate,
+      nextExpectedUpdate: null,
+      value: stored.positioning,
+      error: `Storage-only read — showing last stored CFTC report (${stored.positioning.reportDate}), stored ${stored.fetchedAt.toISOString()}.`,
+    };
+  }
+
   const live = await cftc.getInstitutionalPositioning(symbol);
   if (!liveFetchFailed(live)) return live;
 
@@ -186,7 +231,28 @@ export async function getPositioningWithFallback(symbol: string): Promise<Proven
   };
 }
 
-export async function getFredSeriesWithFallback(country: string, indicator: FredIndicatorKey, limit = 24): Promise<Provenance<FredSeriesPoint[]>> {
+const FRED_SOURCE = "FRED (Federal Reserve Economic Data)";
+
+export async function getFredSeriesWithFallback(country: string, indicator: FredIndicatorKey, limit = 24, storageOnly = false): Promise<Provenance<FredSeriesPoint[]>> {
+  if (storageOnly) {
+    const stored = await getLatestStoredEconomicSeries(country, indicator, limit);
+    if (!stored || stored.points.length === 0) {
+      return unavailable("fred", FRED_SOURCE, `No stored ${country}/${indicator} series exists yet (storage-only read — no live provider call attempted).`);
+    }
+    const latestObservationDate = stored.points[stored.points.length - 1].date;
+    const { freshness, ageDays, cadence } = classifyFredFreshness(indicator, latestObservationDate);
+    return {
+      provider: "fred",
+      source: `${FRED_SOURCE} (last known good — stored)`,
+      status: freshness,
+      fetchedAt: stored.fetchedAt.toISOString(),
+      sourceUpdatedAt: latestObservationDate,
+      nextExpectedUpdate: null,
+      value: stored.points,
+      error: `Storage-only read — showing stored observations, latest dated ${latestObservationDate} (~${ageDays}d old, ${cadence} cadence).`,
+    };
+  }
+
   const live = await fred.getSeries(country, indicator, limit);
   if (!liveFetchFailed(live)) return live;
 

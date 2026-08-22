@@ -39,6 +39,8 @@ const EXPECTED_TABLES = [
   "news_articles",
   "factor_scores",
   "market_scores",
+  "current_market_scores",
+  "current_factor_scores",
   "provider_health",
   "data_mode_audit",
 ];

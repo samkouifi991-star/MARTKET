@@ -169,11 +169,13 @@ beforeEach(async () => {
   vi.mocked(getLatestStoredPrice).mockResolvedValue(null);
   vi.mocked(getLatestStoredDailyCandles).mockResolvedValue(null);
   // computeLiveMarketScore always calls recordScoreHistory(score).catch(...)
-  // — an auto-mocked fn returns undefined, and undefined has no .catch(),
-  // so this needs an explicit resolved-promise mock or every test throws.
+  // and upsertCurrentScore(score).catch(...) — an auto-mocked fn returns
+  // undefined, and undefined has no .catch(), so these need explicit
+  // resolved-promise mocks or every test throws.
   const scores = await import("@/db/queries/scores");
   vi.mocked(scores.recordScoreHistory).mockResolvedValue(undefined);
   vi.mocked(scores.getScoreHistory).mockResolvedValue([]);
+  vi.mocked(scores.upsertCurrentScore).mockResolvedValue(undefined);
 });
 
 describe("GBPUSD end-to-end live pipeline", () => {

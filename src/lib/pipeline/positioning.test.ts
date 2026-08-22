@@ -40,7 +40,7 @@ describe("resolveInstitutionalFactor / resolveSmartMoney — structural not_appl
 
     const factor = await resolveInstitutionalFactor("EURUSD", "live");
 
-    expect(getPositioningWithFallback).toHaveBeenCalledWith("EURUSD");
+    expect(getPositioningWithFallback).toHaveBeenCalledWith("EURUSD", false);
     expect(factor.freshness).toBe("unavailable");
     expect(factor.explanation).not.toMatch(/not applicable/i);
   });
@@ -78,6 +78,6 @@ describe("resolveInstitutionalFactor / resolveSmartMoney — structural not_appl
 
     expect(factor.freshness).toBe("delayed");
     expect(factor.rawScore).not.toBe(0);
-    expect(factor.explanation).toMatch(/last successfully stored/i);
+    expect(factor.explanation).toMatch(/last stored CFTC report/i);
   });
 });

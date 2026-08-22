@@ -8,6 +8,7 @@ import { generateSmartMoney } from "@/lib/demo/smartMoney";
 import { currentMonthStat } from "@/lib/demo/seasonality";
 import { computeMarketScore, factorLabel } from "@/lib/scoring";
 import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";
+import { getCurrentScore } from "@/db/queries/scores";
 import { buildLiveInvalidationPoints, getLiveMarketDetail, LiveMarketDetail } from "@/lib/pipeline/market-detail";
 import { DATA_MODE, isDemoOnly } from "@/services/data-mode";
 import { NEWS_ARTICLES } from "@/lib/demo/news";
@@ -52,7 +53,16 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
 
   const demoMode = isDemoOnly();
 
-  const score: MarketScore = demoMode ? computeMarketScore(instrument) : await computeLiveMarketScore(instrument.symbol, DATA_MODE);
+  // Reads the same canonical current_market_score row Top Setups reads
+  // (see db/queries/scores.ts's getCurrentScore) so the two pages can never
+  // show two different numbers for the same market — they're reading the
+  // same record. Falls back to a fresh live compute only when no row
+  // exists yet for this symbol (e.g. before the scores cron's first run),
+  // and persists that fallback as the bootstrap current row via
+  // updateCurrent so Top Setups isn't left with nothing to read.
+  const score: MarketScore = demoMode
+    ? computeMarketScore(instrument)
+    : (await getCurrentScore(instrument.symbol).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { updateCurrent: true }));
   const live: LiveMarketDetail | null = demoMode ? null : await getLiveMarketDetail(instrument.symbol, DATA_MODE);
 
   const price: PriceData | null = demoMode ? generatePriceData(instrument) : live!.price.data;

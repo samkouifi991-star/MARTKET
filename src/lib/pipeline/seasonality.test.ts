@@ -25,7 +25,7 @@ describe("resolveSeasonalityFactor — last-known-good fallback during an FMP ou
     const factor = await resolveSeasonalityFactor("GBPUSD", "live");
 
     expect(factor.freshness).toBe("delayed");
-    expect(factor.explanation).toMatch(/last successfully stored|stored daily candles/i);
+    expect(factor.explanation).toMatch(/stored candles/i);
     expect(factor.source).toMatch(/last known good/i);
   });
 

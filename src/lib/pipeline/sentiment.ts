@@ -14,8 +14,13 @@ function clamp(v: number, min = -10, max = 10): number {
 // estimate sentiment" rule, unlike the other factors' general hybrid
 // fallback. `mode` is accepted only so this resolver matches the shared
 // RESOLVERS signature used by the scoring engine.
-export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMode): Promise<ResolvedFactor> {
+// storageOnly is accepted only to match the shared RESOLVERS signature —
+// this factor already never calls a live provider from the render/scoring
+// path (see getRetailSentimentFromStorage's file-header note), so there's
+// nothing for the flag to change here.
+export async function resolveRetailSentimentFactor(symbol: string, _mode: DataMode, _storageOnly = false): Promise<ResolvedFactor> {
   void _mode;
+  void _storageOnly;
   const instrument = getInstrument(symbol);
   if (!instrument) return unavailableFactor("retailSentiment", "Retail Sentiment", `Unknown instrument ${symbol}`);
 

@@ -8,7 +8,7 @@ import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 const SOURCE = "Historical daily closes (FMP)";
 const MIN_YEARS_FOR_LIVE = 3; // below this, the sample is too thin to be more than noise (see seasonalityDepthFreshness for the full tiering)
 
-export async function resolveSeasonalityFactor(symbol: string, mode: DataMode): Promise<ResolvedFactor> {
+export async function resolveSeasonalityFactor(symbol: string, mode: DataMode, storageOnly = false): Promise<ResolvedFactor> {
   const instrument = getInstrument(symbol);
   if (!instrument) return unavailableFactor("seasonality", SOURCE, `Unknown instrument ${symbol}`);
 
@@ -17,7 +17,7 @@ export async function resolveSeasonalityFactor(symbol: string, mode: DataMode): 
   // Falls back to the last successfully stored daily candles (Neon) when
   // the live call fails — a real FMP outage must not blank this factor out
   // while genuine stored history exists.
-  const history = await getDailyCandlesWithFallback(symbol, 20 * 365);
+  const history = await getDailyCandlesWithFallback(symbol, 20 * 365, storageOnly);
   const usable = (history.status === "live" || history.status === "delayed" || history.status === "stale") && history.value;
   if (!usable) {
     if (allowsDemoFallback(mode, symbol)) return demoFallback(instrument);
@@ -42,7 +42,7 @@ export async function resolveSeasonalityFactor(symbol: string, mode: DataMode): 
 
   const rawScore = Math.max(-10, Math.min(10, stat.avgReturn * 3));
   const fromStorage = history.source.includes("last known good");
-  const storageNote = fromStorage ? ` Live FMP refresh failed (${history.error ?? "rate-limited"}); calculated from the last successfully stored daily candles instead (as of ${history.fetchedAt}), not a live re-fetch.` : "";
+  const storageNote = fromStorage && history.error ? ` ${history.error}` : "";
   const depthNote =
     depth.yearsSpanned < 10
       ? ` Sample covers ${depth.yearsSpanned} years of real history (${depth.observations} candles, ${depth.earliestDate} to ${depth.latestDate}) — reduced confidence versus a 10+ year sample.`

@@ -34,8 +34,8 @@ function clamp(v: number, min = -10, max = 10): number {
 
 type CountryMacroScoresWithFreshness = CountryMacroScores & { freshness: DataFreshness | null };
 
-async function fetchCountryScores(country: string, indicators: FredIndicatorKey[]): Promise<CountryMacroScoresWithFreshness> {
-  const results = await Promise.all(indicators.map((key) => getFredSeriesWithFallback(country, key)));
+async function fetchCountryScores(country: string, indicators: FredIndicatorKey[], storageOnly: boolean): Promise<CountryMacroScoresWithFreshness> {
+  const results = await Promise.all(indicators.map((key) => getFredSeriesWithFallback(country, key, 24, storageOnly)));
   const seriesByIndicator: Partial<Record<FredIndicatorKey, FredSeriesPoint[]>> = {};
   let freshness: DataFreshness | null = null;
   results.forEach((r, i) => {
@@ -71,7 +71,7 @@ function demoFallbackFor(category: MacroCategory, instrument: Instrument): Resol
   return demoFallbackFactor({ key: meta.key, rawScore: result.raw, explanation: result.explanation, source: meta.fallbackSource, lastUpdated: new Date().toISOString(), nextUpdate: new Date().toISOString() });
 }
 
-async function resolveMacroCategory(symbol: string, mode: DataMode, category: MacroCategory): Promise<ResolvedFactor> {
+async function resolveMacroCategory(symbol: string, mode: DataMode, category: MacroCategory, storageOnly = false): Promise<ResolvedFactor> {
   const meta = CATEGORY_META[category];
   const instrument = getInstrument(symbol);
   if (!instrument) return unavailableFactor(meta.key, "FRED", `Unknown instrument ${symbol}`);
@@ -83,8 +83,8 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
   if (instrument.currencies) {
     const [base, quote] = instrument.currencies;
     const [baseScores, quoteScores] = await Promise.all([
-      fetchCountryScores(CCY_TO_COUNTRY[base], meta.indicators),
-      fetchCountryScores(CCY_TO_COUNTRY[quote], meta.indicators),
+      fetchCountryScores(CCY_TO_COUNTRY[base], meta.indicators, storageOnly),
+      fetchCountryScores(CCY_TO_COUNTRY[quote], meta.indicators, storageOnly),
     ]);
     const baseVal = category === "growth" ? baseScores.growthScore : category === "labor" ? baseScores.laborScore : baseScores.inflationScore;
     const quoteVal = category === "growth" ? quoteScores.growthScore : category === "labor" ? quoteScores.laborScore : quoteScores.inflationScore;
@@ -117,7 +117,7 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
   // never presented as a country-specific model for the asset.
   const country = instrument.macroCountry ?? "US";
   const weight = instrument.assetClass === "Indices" ? 0.8 : instrument.assetClass === "Crypto" ? 0.35 : 0.45;
-  const scores = await fetchCountryScores(country, meta.indicators);
+  const scores = await fetchCountryScores(country, meta.indicators, storageOnly);
   const val = category === "growth" ? scores.growthScore : category === "labor" ? scores.laborScore : scores.inflationScore;
   if (val === null) return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor(meta.key, source, `Insufficient verified FRED coverage for ${country} indicators`);
 
@@ -143,12 +143,12 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
   };
 }
 
-export const resolveEconomicGrowthFactor = (symbol: string, mode: DataMode) => resolveMacroCategory(symbol, mode, "growth");
-export const resolveLaborFactor = (symbol: string, mode: DataMode) => resolveMacroCategory(symbol, mode, "labor");
+export const resolveEconomicGrowthFactor = (symbol: string, mode: DataMode, storageOnly = false) => resolveMacroCategory(symbol, mode, "growth", storageOnly);
+export const resolveLaborFactor = (symbol: string, mode: DataMode, storageOnly = false) => resolveMacroCategory(symbol, mode, "labor", storageOnly);
 
-export const resolveInflationFactor = (symbol: string, mode: DataMode) => resolveMacroCategory(symbol, mode, "inflation");
+export const resolveInflationFactor = (symbol: string, mode: DataMode, storageOnly = false) => resolveMacroCategory(symbol, mode, "inflation", storageOnly);
 
-export async function resolveInterestRatesFactor(symbol: string, mode: DataMode): Promise<ResolvedFactor> {
+export async function resolveInterestRatesFactor(symbol: string, mode: DataMode, storageOnly = false): Promise<ResolvedFactor> {
   const instrument = getInstrument(symbol) as Instrument | undefined;
   if (!instrument) return unavailableFactor("interestRates", "FRED", `Unknown instrument ${symbol}`);
   const source = "FRED (central bank policy & yield curves)";
@@ -160,7 +160,7 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode)
 
   if (instrument.currencies) {
     const [base, quote] = instrument.currencies;
-    const [baseRates, quoteRates] = await Promise.all([fetchLatestRates(CCY_TO_COUNTRY[base]), fetchLatestRates(CCY_TO_COUNTRY[quote])]);
+    const [baseRates, quoteRates] = await Promise.all([fetchLatestRates(CCY_TO_COUNTRY[base], storageOnly), fetchLatestRates(CCY_TO_COUNTRY[quote], storageOnly)]);
     if (baseRates.policyRate === null || quoteRates.policyRate === null) {
       return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor("interestRates", source, `Missing verified policy-rate series for ${base} and/or ${quote}`);
     }
@@ -180,7 +180,7 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode)
 
   // Same primary-local-model-vs-proxy split as resolveMacroCategory above.
   const country = instrument.macroCountry ?? "US";
-  const rates = await fetchLatestRates(country);
+  const rates = await fetchLatestRates(country, storageOnly);
   if (rates.policyRate === null) return allowsDemoFallback(mode, symbol) ? fallback() : unavailableFactor("interestRates", source, `Missing verified ${country} policy-rate series`);
   const scale = instrument.assetClass === "Crypto" ? 0.7 : instrument.assetClass === "Indices" ? 0.8 : 0.9;
   // Without a stance classifier from FRED alone, use the rate's own recent
@@ -207,8 +207,8 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode)
   };
 }
 
-async function fetchLatestRates(country: string): Promise<{ policyRate: number | null; trend: number; freshness: DataFreshness }> {
-  const result = await getFredSeriesWithFallback(country, "policyRate", 6);
+async function fetchLatestRates(country: string, storageOnly: boolean): Promise<{ policyRate: number | null; trend: number; freshness: DataFreshness }> {
+  const result = await getFredSeriesWithFallback(country, "policyRate", 6, storageOnly);
   if ((result.status !== "live" && result.status !== "delayed" && result.status !== "stale") || !result.value || result.value.length === 0) {
     return { policyRate: null, trend: 0, freshness: "unavailable" };
   }

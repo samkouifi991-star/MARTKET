@@ -30,8 +30,8 @@ function hasUsableValue<T>(p: Provenance<T>): boolean {
  * multi-timeframe technical result. Shared by resolveTechnicalFactor (the
  * scoring factor) and the market-detail price chart card, so both read the
  * exact same real indicators rather than each computing its own. */
-export async function fetchTechnicalTrend(symbol: string): Promise<TechnicalTrendFetch> {
-  const daily = await getDailyCandlesWithFallback(symbol);
+export async function fetchTechnicalTrend(symbol: string, storageOnly = false): Promise<TechnicalTrendFetch> {
+  const daily = await getDailyCandlesWithFallback(symbol, 260, storageOnly);
   if (!hasUsableValue(daily)) {
     return { daily, h4: daily as Provenance<NormalizedCandle[]>, h1: daily as Provenance<NormalizedCandle[]>, result: null };
   }
@@ -40,7 +40,7 @@ export async function fetchTechnicalTrend(symbol: string): Promise<TechnicalTren
   // cron writes 4h/1h to Neon — see cron/candles/route.ts) — a live 4H/1H
   // failure degrades to the last stored value instead of dropping straight
   // to daily-only, same principle daily candles already followed.
-  const [h4, h1] = await Promise.all([getIntradayCandlesWithFallback(symbol, "4hour"), getIntradayCandlesWithFallback(symbol, "1hour")]);
+  const [h4, h1] = await Promise.all([getIntradayCandlesWithFallback(symbol, "4hour", storageOnly), getIntradayCandlesWithFallback(symbol, "1hour", storageOnly)]);
   const result = computeTechnicalTrend({
     daily: daily.value!,
     h4: hasUsableValue(h4) ? h4.value! : undefined,
@@ -75,11 +75,11 @@ function buildSourceLabel(entries: { label: string; p: Provenance<unknown>; usab
   return `Price & indicator engine — ${groups.join(", ")}${missingNote}`;
 }
 
-export async function resolveTechnicalFactor(symbol: string, mode: DataMode): Promise<ResolvedFactor> {
+export async function resolveTechnicalFactor(symbol: string, mode: DataMode, storageOnly = false): Promise<ResolvedFactor> {
   const instrument = getInstrument(symbol);
   if (!instrument) return unavailableFactor("technical", "Price & indicator engine", `Unknown instrument ${symbol}`);
 
-  const { daily, h4, h1, result } = await fetchTechnicalTrend(symbol);
+  const { daily, h4, h1, result } = await fetchTechnicalTrend(symbol, storageOnly);
 
   if (!hasUsableValue(daily)) {
     if (allowsDemoFallback(mode, symbol)) {
@@ -144,9 +144,7 @@ export async function resolveTechnicalFactor(symbol: string, mode: DataMode): Pr
   if (!h4Usable) missing.push(h4.status === "unavailable" ? `H4 (${h4.error ?? "unavailable"})` : "H4");
   if (!h1Usable) missing.push(h1.status === "unavailable" ? `H1 (${h1.error ?? "unavailable"})` : "H1");
 
-  const storageNote = fromStorage
-    ? ` Live refresh failed (${daily.error ?? "rate-limited"}); calculated from the last successfully stored daily candles instead (as of ${daily.fetchedAt}), not a live re-fetch.`
-    : "";
+  const storageNote = fromStorage && daily.error ? ` ${daily.error}` : "";
 
   return {
     key: "technical",

@@ -18,9 +18,9 @@ import { resolveRetailSentimentFactor } from "./sentiment";
 import { resolveEconomicGrowthFactor, resolveInflationFactor, resolveLaborFactor, resolveInterestRatesFactor } from "./macro";
 import { resolveNewsFactor } from "./news";
 import { computeConfidence } from "./confidence";
-import { recordScoreHistory, getScoreHistory } from "@/db/queries/scores";
+import { recordScoreHistory, getScoreHistory, upsertCurrentScore } from "@/db/queries/scores";
 
-const RESOLVERS: Record<ScoreFactorKey, (symbol: string, mode: DataMode) => Promise<ResolvedFactor>> = {
+const RESOLVERS: Record<ScoreFactorKey, (symbol: string, mode: DataMode, storageOnly?: boolean) => Promise<ResolvedFactor>> = {
   institutional: resolveInstitutionalFactor,
   retailSentiment: resolveRetailSentimentFactor,
   technical: resolveTechnicalFactor,
@@ -49,13 +49,26 @@ export function contributionFor(factor: ResolvedFactor, weight: number): number 
   return Number(contribution.toFixed(2));
 }
 
-export async function computeLiveMarketScore(symbol: string, mode: DataMode, options: { persist?: boolean } = {}): Promise<MarketScore> {
+// options.storageOnly (default false): when true, every factor resolver
+// reads Neon directly and skips its live-provider call entirely, instead of
+// the normal live-first-then-storage-fallback path. This is for callers
+// (Top Setups) that must never trigger a live provider fetch just because a
+// page rendered — the exact same factor engine, weights, and math run
+// either way, only the data-sourcing step changes, so a storage-only call
+// and a live-first call reading the same underlying stored state produce
+// identical totalScore/bias/confidence/contributions. External providers
+// stay the scheduled ingestion cron's job, never the render path's.
+export async function computeLiveMarketScore(
+  symbol: string,
+  mode: DataMode,
+  options: { persist?: boolean; storageOnly?: boolean; updateCurrent?: boolean } = {}
+): Promise<MarketScore> {
   const instrument = getInstrument(symbol);
   if (!instrument) throw new Error(`Unknown instrument ${symbol}`);
   if (mode === "demo") throw new Error("computeLiveMarketScore should only be called for hybrid/live — use computeMarketScore from lib/scoring.ts for demo mode");
 
   const keys = Object.keys(RESOLVERS) as ScoreFactorKey[];
-  const resolved = await Promise.all(keys.map((key) => RESOLVERS[key](symbol, mode)));
+  const resolved = await Promise.all(keys.map((key) => RESOLVERS[key](symbol, mode, options.storageOnly ?? false)));
 
   const factors: ScoreFactor[] = resolved.map((factor) => {
     const weight = DEFAULT_FACTOR_WEIGHTS[factor.key];
@@ -119,6 +132,15 @@ export async function computeLiveMarketScore(symbol: string, mode: DataMode, opt
   // Best-effort either way: never let a DB outage break score computation
   // or serving.
   if (options.persist) recordScoreHistory(score).catch(() => {});
+
+  // current_market_scores/current_factor_scores (see db/queries/scores.ts)
+  // is the single canonical "current score" row that both Market Detail and
+  // Top Setups read — persist:true (the scores cron) always updates it, and
+  // Market Detail additionally passes updateCurrent:true on its own as a
+  // bootstrap fallback for a symbol the cron hasn't scored yet, so Top
+  // Setups isn't left with no row to read until the next cron run.
+  // Best-effort: never let a DB outage break score computation or serving.
+  if (options.persist || options.updateCurrent) upsertCurrentScore(score).catch(() => {});
 
   return score;
 }

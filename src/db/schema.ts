@@ -180,6 +180,46 @@ export const marketScores = pgTable(
   (t) => [index("market_scores_symbol_computed").on(t.symbol, t.computedAt)]
 );
 
+// ---- Current market score — one row per symbol, upserted on every real
+// computation (a Market Detail render or the scores cron), never
+// append-only. This is the single canonical "current score" record: Top
+// Setups reads it directly instead of recomputing independently, so the
+// two pages can never show two different numbers for the same market —
+// they're reading the same row. Distinct from market_scores/factor_scores
+// above, which stay a genuine append-only history (the 30-day chart's
+// source), never used as a stand-in for "the current score". ----
+export const currentMarketScores = pgTable("current_market_scores", {
+  symbol: varchar("symbol", { length: 16 }).primaryKey(),
+  totalScore: doublePrecision("total_score").notNull(),
+  bias: varchar("bias", { length: 16 }).notNull(),
+  confidence: integer("confidence").notNull(),
+  change24h: doublePrecision("change_24h").notNull(),
+  computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---- Current per-factor score — one row per symbol/factor, upserted alongside
+// current_market_scores above; the factor-level half of the same "current"
+// record (parallels factor_scores/market_scores' history-vs-total split) ----
+export const currentFactorScores = pgTable(
+  "current_factor_scores",
+  {
+    id: serial("id").primaryKey(),
+    symbol: varchar("symbol", { length: 16 }).notNull(),
+    factorKey: varchar("factor_key", { length: 32 }).notNull(), // matches ScoreFactorKey
+    rawScore: doublePrecision("raw_score").notNull(),
+    weight: doublePrecision("weight").notNull(),
+    weightedScore: doublePrecision("weighted_score").notNull(), // = contribution
+    explanation: text("explanation").notNull(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    source: text("source").notNull(),
+    status: varchar("status", { length: 16 }).notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }),
+    nextExpectedUpdate: timestamp("next_expected_update", { withTimezone: true }),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("current_factor_scores_symbol_factor").on(t.symbol, t.factorKey)]
+);
+
 // ---- Provider health — current state per provider, upserted on every check ----
 export const providerHealth = pgTable("provider_health", {
   id: serial("id").primaryKey(),

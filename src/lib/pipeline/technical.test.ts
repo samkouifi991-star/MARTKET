@@ -102,7 +102,7 @@ describe("resolveTechnicalFactor — last-known-good fallback during a provider 
 
     expect(factor.freshness).toBe("delayed");
     expect(factor.rawScore).not.toBe(0); // real computed value, not zeroed out
-    expect(factor.explanation).toMatch(/last successfully stored|stored daily candles/i);
+    expect(factor.explanation).toMatch(/stored candles/i);
     expect(factor.source).toMatch(/last known good/i);
   });
 
