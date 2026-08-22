@@ -9,25 +9,35 @@
 // The fix: both pages now read the exact same canonical
 // current_market_score row (see db/queries/scores.ts's getCurrentScore) —
 // /markets/[symbol] reads it directly (see app/markets/[symbol]/page.tsx),
-// and Top Setups reads it via getTopSetupsRows() below. This test proves
-// getTopSetupsRows() returns THAT SAME OBJECT, untouched, for every
-// STRICT_LIVE_SYMBOLS market whenever a current-score row exists — not a
-// separate calculation that can drift — and that it only ever falls back
-// to computing its own (storage-only, never live-provider-calling) score
-// for a symbol that has no current-score row yet.
+// and Top Setups (and Markets/Heatmap/Watchlists/the landing page) reads it
+// via getCanonicalMarketRows() below. This test proves getCanonicalMarketRows()
+// returns THAT SAME OBJECT, untouched, for every STRICT_LIVE_SYMBOLS market
+// whenever a current-score row exists — not a separate calculation that can
+// drift — and that it only ever falls back to computing its own
+// (storage-only, never live-provider-calling) score for a symbol that has
+// no current-score row yet.
+//
+// The equivalent PRICE-consistency property (getCanonicalMarketRows' price
+// field vs. Market Detail's) is covered separately in
+// price-consistency.test.ts — the price-fetching path is mocked to
+// "unavailable" here purely so this score-focused test doesn't need real
+// Neon access, not because price behavior is out of scope for the app.
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MarketScore } from "@/lib/types";
+import { unavailable } from "@/services/types";
 
 vi.mock("@/db/queries/scores");
 vi.mock("./scoring-engine");
+vi.mock("@/services/market-data/last-known-good");
 // top-setups.ts's isDemoOnly() branch is out of scope here (demo mode never
 // calls getCurrentScore/computeLiveMarketScore at all) — pin live mode so
 // this test exercises the real-data path being fixed.
-vi.mock("@/services/data-mode", () => ({ DATA_MODE: "live", isDemoOnly: () => false }));
+vi.mock("@/services/data-mode", () => ({ DATA_MODE: "live", isDemoOnly: () => false, allowsDemoFallback: () => false }));
 
 import { getCurrentScore } from "@/db/queries/scores";
 import { computeLiveMarketScore } from "./scoring-engine";
-import { getTopSetupsRows } from "./top-setups";
+import { getQuoteWithFallback, getDailyCandlesWithFallback, getIntradayCandlesWithFallback } from "@/services/market-data/last-known-good";
+import { getCanonicalMarketRows } from "./top-setups";
 
 // Every currently-promoted STRICT_LIVE symbol — mirrors data-mode.ts. Kept
 // as a literal list (not imported) so this test independently proves the
@@ -61,18 +71,24 @@ function scoreFor(symbol: string): MarketScore {
   };
 }
 
-describe("Top Setups reads the same canonical current-score record as Market Detail", () => {
+describe("getCanonicalMarketRows reads the same canonical current-score record as Market Detail", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // Price isn't this test's concern — force it to the harmless
+    // "nothing stored" path so getCanonicalMarketRows never needs real Neon
+    // access here (see price-consistency.test.ts for the price property).
+    vi.mocked(getQuoteWithFallback).mockResolvedValue(unavailable("fmp", "Financial Modeling Prep"));
+    vi.mocked(getDailyCandlesWithFallback).mockResolvedValue(unavailable("fmp", "Financial Modeling Prep"));
+    vi.mocked(getIntradayCandlesWithFallback).mockResolvedValue(unavailable("fmp", "Financial Modeling Prep"));
   });
 
-  it.each(STRICT_LIVE_SYMBOLS)("%s: getTopSetupsRows returns getCurrentScore's row untouched, without recomputing", async (symbol) => {
+  it.each(STRICT_LIVE_SYMBOLS)("%s: getCanonicalMarketRows returns getCurrentScore's row untouched, without recomputing", async (symbol) => {
     const canonical = scoreFor(symbol);
     // A distinct canned score per symbol so getCurrentScore is genuinely
     // being read per-instrument, not a single shared fixture object.
     vi.mocked(getCurrentScore).mockImplementation(async (s: string) => (s === symbol ? canonical : { ...canonical, symbol: s, totalScore: 0 }));
 
-    const rows = await getTopSetupsRows();
+    const rows = await getCanonicalMarketRows();
     const row = rows.find((r) => r.instrument.symbol === symbol)!;
 
     expect(row.score).toEqual(canonical);
@@ -98,7 +114,7 @@ describe("Top Setups reads the same canonical current-score record as Market Det
     const fallback = scoreFor("GBPUSD");
     vi.mocked(computeLiveMarketScore).mockResolvedValue(fallback);
 
-    const rows = await getTopSetupsRows();
+    const rows = await getCanonicalMarketRows();
     const gbpRow = rows.find((r) => r.instrument.symbol === "GBPUSD")!;
 
     expect(gbpRow.score).toEqual(fallback);

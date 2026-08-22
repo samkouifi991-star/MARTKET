@@ -19,6 +19,7 @@ import { invalidationFactors } from "@/lib/invalidation";
 import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { Card } from "@/components/ui/Card";
+import { AutoRefresh } from "@/components/ui/AutoRefresh";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { PriceChart } from "@/components/charts/PriceChart";
@@ -91,6 +92,7 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
 
   return (
     <div className="space-y-6">
+      <AutoRefresh intervalSeconds={45} />
       <Link href="/markets" className="inline-flex items-center gap-1 text-xs text-(--text-faint) hover:text-(--text-dim)">
         <ArrowLeft size={13} /> Back to Markets
       </Link>

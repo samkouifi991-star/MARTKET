@@ -100,6 +100,27 @@ export function worseOf(a: DataFreshness, b: DataFreshness): DataFreshness {
   return FRESHNESS_RANK[b] > FRESHNESS_RANK[a] ? b : a;
 }
 
+// Shared shape for every "card" of live-aware display data (price,
+// institutional positioning, retail sentiment, seasonality, ...) — used by
+// both market-detail.ts and price.ts so the two never need to duplicate or
+// diverge on it.
+export type CardResult<T> = {
+  data: T | null;
+  freshness: DataFreshness;
+  source: string;
+  lastUpdated: string | null;
+  reason?: string;
+};
+
+/** Real data the caller can compute from: live, or last-known-good stored
+ * data — never a synthetic/demo value. Distinct from "unavailable"/"error",
+ * which mean there is genuinely nothing usable (including no stored
+ * fallback), the only case that should render as unavailable. Shared by
+ * market-detail.ts's other cards and price.ts's canonical price resolver. */
+export function isUsable<T>(status: DataFreshness, value: T | null): boolean {
+  return (status === "live" || status === "delayed" || status === "stale") && value !== null;
+}
+
 /** Classifies seasonality's historical sample depth into the same freshness
  * vocabulary the rest of the app already uses for recency, so a thin sample
  * degrades the badge exactly like stale data would — reduced confidence,

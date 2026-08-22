@@ -21,6 +21,29 @@ const dailyCandles: NormalizedCandle[] = buildTrendingCandles({ bars: 260, start
 const multiYearCandles: NormalizedCandle[] = buildMultiYearDailyCandles({ years: 12, startYear: 2013, startPrice: 1.24, monthBiasPctPerDay: () => 0.02, seed: 55 });
 
 function mockAllLive() {
+  // Price/daily-candles are now a storage-only read (see price.ts's
+  // getCanonicalPriceCard — Market Detail never calls the live provider for
+  // price, matching Top Setups/Markets/Heatmap/Watchlists), so "all
+  // providers succeed" for price means "a recent row exists in Neon," not
+  // "the live router returns live" — mocking marketData.getQuote/
+  // getDailyCandles here would never even be reached.
+  vi.mocked(getLatestStoredPrice).mockResolvedValue({
+    price: dailyCandles[dailyCandles.length - 1].close,
+    changePct24h: 0.3,
+    provider: "fmp",
+    sourceUpdatedAt: new Date(),
+    fetchedAt: new Date(),
+  });
+  vi.mocked(getLatestStoredDailyCandles).mockResolvedValue({
+    candles: dailyCandles,
+    fetchedAt: new Date(),
+    provider: "fmp",
+  });
+  // Smart Money (resolveSmartMoney, in positioning.ts) is a separate
+  // consumer of getQuoteWithFallback that still calls it live-first
+  // (storageOnly defaults to false there) — unrelated to, and out of scope
+  // for, the price-card fix above, but still needs the router mocked so it
+  // doesn't hit a real network call in this test.
   vi.mocked(marketData.getQuote).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
@@ -30,15 +53,6 @@ function mockAllLive() {
     nextExpectedUpdate: null,
     value: { symbol: "GBPUSD", price: dailyCandles[dailyCandles.length - 1].close, changePct24h: 0.3, timestamp: new Date().toISOString() },
   });
-  vi.mocked(marketData.getDailyCandles).mockImplementation(async (_symbol, days = 260) => ({
-    provider: "fmp",
-    source: "Financial Modeling Prep",
-    status: "live",
-    fetchedAt: new Date().toISOString(),
-    sourceUpdatedAt: dailyCandles[dailyCandles.length - 1].date,
-    nextExpectedUpdate: null,
-    value: days > 1000 ? multiYearCandles : dailyCandles,
-  }));
   vi.mocked(marketData.getIntradayCandles).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
@@ -48,6 +62,18 @@ function mockAllLive() {
     nextExpectedUpdate: null,
     value: buildTrendingCandles({ bars: 200, startPrice: 1.24, trendPerBar: 0.0003, noise: 0.0005, seed: 56 }),
   });
+  // Seasonality's daily-candle read is unaffected by the price fix (still
+  // live-first, out of scope here) — it needs its own multi-year fixture
+  // when the live router is asked for more than the technical default.
+  vi.mocked(marketData.getDailyCandles).mockImplementation(async (_symbol, days = 260) => ({
+    provider: "fmp",
+    source: "Financial Modeling Prep",
+    status: "live",
+    fetchedAt: new Date().toISOString(),
+    sourceUpdatedAt: dailyCandles[dailyCandles.length - 1].date,
+    nextExpectedUpdate: null,
+    value: days > 1000 ? multiYearCandles : dailyCandles,
+  }));
 
   const netHistory = [46000, 39000, 31000, 24000, 16000, 9000, 2000].map((net, i) => ({
     reportDate: new Date(Date.now() - i * 7 * 86_400_000).toISOString(),
@@ -111,7 +137,12 @@ describe("getLiveMarketDetail", () => {
 
     const detail = await getLiveMarketDetail("GBPUSD", "live");
 
-    expect(detail.price.freshness).toBe("live");
+    // A storage-only read of a just-written row is honestly "delayed," not
+    // "live" — "live" is reserved for a real-time provider call that just
+    // succeeded, which Market Detail's price card no longer makes (see
+    // price.ts's getCanonicalPriceCard) — matching the same convention
+    // already used for CFTC/FRED/retail sentiment's storage-first reads.
+    expect(detail.price.freshness).toBe("delayed");
     expect(detail.price.data?.current).toBeGreaterThan(0);
     expect(detail.institutional.freshness).toBe("live");
     expect(detail.institutional.data?.classification).toBe("Asset Manager");

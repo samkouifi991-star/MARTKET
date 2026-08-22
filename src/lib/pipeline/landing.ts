@@ -1,9 +1,10 @@
 // Real data for the public landing page's product preview — deliberately
-// reuses getTopSetupsRows() (the exact same canonical source /top-setups
-// reads) rather than a separate demo/mock dataset, so the landing page can
-// never show a fabricated score. See top-setups.ts's own header for why
-// this never triggers a live provider call.
-import { getTopSetupsRows } from "./top-setups";
+// reuses getCanonicalMarketRows() (the exact same canonical source Top
+// Setups, Markets, Heatmap, and Watchlists all read) rather than a separate
+// demo/mock dataset, so the landing page can never show a fabricated score
+// or price. See top-setups.ts's own header for why this never triggers a
+// live provider call.
+import { getCanonicalMarketRows } from "./top-setups";
 import { resolveSmartMoney, SmartMoneyResolution } from "./positioning";
 import { MarketRow } from "@/lib/market-data";
 
@@ -34,7 +35,7 @@ async function resolveSmartMoneySafely(symbol: string): Promise<SmartMoneyResolu
 }
 
 export async function getLandingPreview(): Promise<LandingPreview> {
-  const rows = await getTopSetupsRows();
+  const rows = await getCanonicalMarketRows();
   const featured = rows.find((r) => r.instrument.symbol === FEATURED_SYMBOL) ?? rows[0];
   const smartMoney = await resolveSmartMoneySafely(featured.instrument.symbol);
   return { rows, featured, smartMoney };

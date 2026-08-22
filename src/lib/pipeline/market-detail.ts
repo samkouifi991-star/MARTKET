@@ -13,29 +13,25 @@
 // allowsDemoFallback, which already withholds that for strict-live symbols
 // like GBPUSD), these cards do the same — except Retail Sentiment, which
 // per spec never estimates a percentage in any mode.
+//
+// The price card itself now lives in price.ts, not here — it's the same
+// canonical, storage-only resolver Top Setups/Dashboard/Markets/Heatmap/
+// Watchlists/the landing page all call too, so this page can never show a
+// different current price for a symbol than any other surface does.
 import { getInstrument } from "@/lib/instruments";
 import { generatePositioning } from "@/lib/demo/positioning";
-import { generatePriceData } from "@/lib/demo/price";
 import { currentMonthStat as demoCurrentMonthStat } from "@/lib/demo/seasonality";
 import { upcomingHighImpact } from "@/lib/demo/calendar";
 import { computeCurrentMonthStat, computeHistoricalSampleDepth } from "@/lib/engines/seasonality";
 import { formatPrice } from "@/lib/format";
-import { DataFreshness, Instrument, MarketScore, PriceData, SeasonalityStat } from "@/lib/types";
+import { Instrument, MarketScore, PriceData, SeasonalityStat } from "@/lib/types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
-import { getQuoteWithFallback, getDailyCandlesWithFallback, getPositioningWithFallback, getRetailSentimentFromStorage } from "@/services/market-data/last-known-good";
+import { getDailyCandlesWithFallback, getPositioningWithFallback, getRetailSentimentFromStorage } from "@/services/market-data/last-known-good";
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
-import { seasonalityDepthFreshness, worseOf } from "./types";
+import { CardResult, isUsable, seasonalityDepthFreshness, worseOf } from "./types";
 import { resolveSmartMoney } from "./positioning";
-import { fetchTechnicalTrend } from "./technical";
-
-export type CardResult<T> = {
-  data: T | null;
-  freshness: DataFreshness;
-  source: string;
-  lastUpdated: string | null;
-  reason?: string;
-};
+import { getCanonicalPriceCard } from "./price";
 
 export type InstitutionalCardData = {
   classification: string;
@@ -135,15 +131,6 @@ async function smartMoneyCard(symbol: string): Promise<CardResult<SmartMoneyCard
   };
 }
 
-// Live, or last-known-good stored data — real either way, distinct from
-// "nothing usable at all" (unavailable/error), which is the only case that
-// should render as unavailable per the last-known-good rule: never blank
-// the page just because the newest refresh failed while real stored data
-// still exists.
-function isUsable<T>(status: DataFreshness, value: T | null): boolean {
-  return (status === "live" || status === "delayed" || status === "stale") && value !== null;
-}
-
 async function seasonalityCard(symbol: string, mode: DataMode): Promise<CardResult<SeasonalityStat>> {
   const history = await getDailyCandlesWithFallback(symbol, 20 * 365);
   if (isUsable(history.status, history.value)) {
@@ -182,42 +169,6 @@ async function seasonalityCard(symbol: string, mode: DataMode): Promise<CardResu
   return { data: null, freshness: history.status === "error" ? "error" : "unavailable", source: "Historical daily closes (FMP)", lastUpdated: null, reason: history.error };
 }
 
-async function priceCard(symbol: string, mode: DataMode): Promise<CardResult<PriceData>> {
-  const [quote, technical] = await Promise.all([getQuoteWithFallback(symbol), fetchTechnicalTrend(symbol)]);
-
-  if (isUsable(quote.status, quote.value) && isUsable(technical.daily.status, technical.daily.value) && technical.result) {
-    const t = technical.result;
-    const series = technical.daily.value!.map((c) => ({ date: c.date, price: c.close }));
-    const freshness = worseOf(quote.status, technical.daily.status);
-    const fromStorage = quote.source.includes("last known good") || technical.daily.source.includes("last known good");
-    return {
-      data: {
-        symbol,
-        current: quote.value!.price,
-        changePct24h: quote.value!.changePct24h,
-        series,
-        ema20: t.sma20 ?? quote.value!.price,
-        sma50: t.sma50 ?? quote.value!.price,
-        sma100: t.sma100 ?? quote.value!.price,
-        sma200: t.sma200 ?? quote.value!.price,
-        rsi14: t.rsi14 ?? 50,
-        adx14: t.adx14 ?? 0,
-        roc10: t.roc10 ?? 0,
-        structure: t.structure,
-      },
-      freshness,
-      source: fromStorage ? "Financial Modeling Prep — last known good" : "Financial Modeling Prep",
-      lastUpdated: quote.sourceUpdatedAt,
-    };
-  }
-  if (allowsDemoFallback(mode, symbol)) {
-    const instrument = getInstrument(symbol)!;
-    return { data: generatePriceData(instrument), freshness: "estimated", source: "Simulated price engine (demo)", lastUpdated: new Date().toISOString() };
-  }
-  const failure = !isUsable(quote.status, quote.value) ? quote : technical.daily;
-  return { data: null, freshness: failure.status === "error" ? "error" : "unavailable", source: "Financial Modeling Prep", lastUpdated: null, reason: failure.error ?? "Insufficient candle history to compute indicators" };
-}
-
 export type LiveMarketDetail = {
   price: CardResult<PriceData>;
   institutional: CardResult<InstitutionalCardData>;
@@ -228,7 +179,7 @@ export type LiveMarketDetail = {
 
 export async function getLiveMarketDetail(symbol: string, mode: DataMode): Promise<LiveMarketDetail> {
   const [price, institutional, retail, smartMoney, seasonality] = await Promise.all([
-    priceCard(symbol, mode),
+    getCanonicalPriceCard(symbol, mode),
     institutionalCard(symbol, mode),
     retailCard(symbol),
     smartMoneyCard(symbol),

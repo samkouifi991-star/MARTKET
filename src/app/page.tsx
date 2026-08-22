@@ -8,6 +8,7 @@ import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { BiasBadge } from "@/components/ui/BiasBadge";
+import { AutoRefresh } from "@/components/ui/AutoRefresh";
 import { factorLabel } from "@/lib/scoring";
 import { factorSentiment, formatSigned, scoreColorClass, FactorSentiment } from "@/lib/format";
 import { isStrictLiveSymbol } from "@/services/data-mode";
@@ -119,6 +120,7 @@ export default async function LandingPage() {
 
   return (
     <div className="min-h-dvh flex flex-col">
+      <AutoRefresh intervalSeconds={60} />
       <MarketingNav user={user} />
 
       <main className="flex-1">

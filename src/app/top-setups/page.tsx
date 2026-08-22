@@ -1,4 +1,4 @@
-import { getTopSetupsRows } from "@/lib/pipeline/top-setups";
+import { getCanonicalMarketRows } from "@/lib/pipeline/top-setups";
 import { TopSetupsTable } from "@/components/tables/TopSetupsTable";
 import { InfoTooltip } from "@/components/ui/InfoTooltip";
 import { AutoRefresh } from "@/components/ui/AutoRefresh";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 export default async function TopSetupsPage() {
   await requireEntitlement();
-  const rows = await getTopSetupsRows();
+  const rows = await getCanonicalMarketRows();
 
   return (
     <div>
