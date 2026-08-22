@@ -72,6 +72,26 @@ describe("saveScoringConfiguration", () => {
     expect(createScoringConfiguration).not.toHaveBeenCalled();
   });
 
+  it("accepts an edited Very Bearish threshold, saving it like any other editable threshold", async () => {
+    const fd = weightsFormData();
+    fd.set("threshold:4", "-8.5"); // Very Bearish: -10 -> -8.5, still below Bearish's -7.9
+    const result = await saveScoringConfiguration(undefined, fd);
+
+    expect(createScoringConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({ biasThresholds: expect.arrayContaining([{ bias: "Very Bearish", min: -8.5 }]) })
+    );
+    expect(result?.success).toMatch(/configuration saved — v5 active/i);
+  });
+
+  it("rejects a Very Bearish threshold that isn't strictly below Bearish", async () => {
+    const fd = weightsFormData();
+    fd.set("threshold:4", "-7.9"); // equal to Bearish's -7.9 — not strictly less
+    const result = await saveScoringConfiguration(undefined, fd);
+
+    expect(result?.error).toMatch(/strictly decrease/i);
+    expect(createScoringConfiguration).not.toHaveBeenCalled();
+  });
+
   it("persists a new active configuration and recomputes every strict-live market with storageOnly:true — never a live provider call", async () => {
     const result = await saveScoringConfiguration(undefined, weightsFormData());
 

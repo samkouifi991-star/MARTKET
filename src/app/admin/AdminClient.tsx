@@ -21,19 +21,28 @@ function weightsSumValid(weights: Record<ScoreFactorKey, number>): boolean {
 }
 
 function thresholdsOrderedValid(thresholds: BiasThreshold[]): boolean {
-  for (let i = 0; i < thresholds.length - 2; i++) {
+  for (let i = 0; i < thresholds.length - 1; i++) {
     if (thresholds[i].min <= thresholds[i + 1].min) return false;
   }
   return true;
 }
 
+// A configuration saved before Very Bearish became editable stored it as
+// -Infinity (the old catch-all-floor convention) — normalize that to a
+// real number as soon as it enters component state so every threshold row
+// is a plain editable number from here on, with nothing else needing to
+// special-case -Infinity.
+function normalizeThresholds(thresholds: BiasThreshold[]): BiasThreshold[] {
+  return thresholds.map((t) => ({ ...t, min: t.min === -Infinity ? -10 : t.min }));
+}
+
 export function AdminClient({ initialAuditLog, activeScoringConfig }: { initialAuditLog: AuditLogEntry[]; activeScoringConfig: ResolvedScoringConfig }) {
   const [weights, setWeights] = useState<Record<ScoreFactorKey, number>>(activeScoringConfig.weights);
-  const [thresholds, setThresholds] = useState(activeScoringConfig.biasThresholds.map((t) => ({ ...t })));
+  const [thresholds, setThresholds] = useState(normalizeThresholds(activeScoringConfig.biasThresholds));
   // Snapshot of the last saved values — compared against current state to
   // detect unsaved changes, and refreshed on a successful save so further
   // edits are measured against the newly-active configuration.
-  const [baseline, setBaseline] = useState({ weights: activeScoringConfig.weights, thresholds: activeScoringConfig.biasThresholds });
+  const [baseline, setBaseline] = useState({ weights: activeScoringConfig.weights, thresholds: normalizeThresholds(activeScoringConfig.biasThresholds) });
   const [activeVersion, setActiveVersion] = useState<{ id: number | null; updatedAt: string | null }>({
     id: activeScoringConfig.id,
     updatedAt: activeScoringConfig.updatedAt ?? null,
@@ -65,7 +74,7 @@ export function AdminClient({ initialAuditLog, activeScoringConfig }: { initialA
           actor: "admin",
           action: "Saved scoring configuration",
           detail: `v${state.versionId} · weights sum to ${(currentWeightSum * 100).toFixed(0)}% · thresholds: ${thresholds
-            .map((t) => `${t.bias} ≥ ${t.min === -Infinity ? "-∞" : t.min}`)
+            .map((t) => `${t.bias} ≥ ${t.min}`)
             .join(", ")}`,
           at: new Date().toISOString(),
         },
@@ -151,15 +160,14 @@ export function AdminClient({ initialAuditLog, activeScoringConfig }: { initialA
                   <input
                     type="number"
                     step={0.1}
-                    value={t.min === -Infinity ? -10 : t.min}
+                    value={t.min}
                     onChange={(e) => {
                       const value = Number(e.target.value);
                       setThresholds((prev) => prev.map((p, idx) => (idx === i ? { ...p, min: value } : p)));
                     }}
-                    disabled={t.min === -Infinity}
-                    className="h-8 flex-1 rounded-lg border border-(--border) bg-(--bg-card) px-2 text-sm tabular-nums outline-none disabled:opacity-40"
+                    className="h-8 flex-1 rounded-lg border border-(--border) bg-(--bg-card) px-2 text-sm tabular-nums outline-none"
                   />
-                  {t.min !== -Infinity && <input type="hidden" name={`threshold:${i}`} value={t.min} />}
+                  <input type="hidden" name={`threshold:${i}`} value={t.min} />
                 </div>
               ))}
             </div>

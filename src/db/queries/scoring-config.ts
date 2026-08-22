@@ -16,12 +16,11 @@ export type ScoringConfigRow = {
   createdAt: Date;
 };
 
-// jsonb can't hold -Infinity (JSON.stringify coerces it to null) — the
-// "Very Bearish" floor threshold uses -Infinity by convention throughout
-// this app (see lib/config.ts's DEFAULT_BIAS_THRESHOLDS and AdminClient.tsx,
-// which disables that row's input specifically because it's -Infinity).
-// These two helpers are the only place that translates across that
-// boundary, so every other consumer keeps working with real -Infinity.
+// jsonb can't hold -Infinity (JSON.stringify coerces it to null). Very
+// Bearish's threshold used to be stored as -Infinity by convention before
+// it became a real editable number (see lib/config.ts); deserializeThresholds
+// still translates the marker back for configurations saved under that old
+// convention, but every save from here on writes a plain finite number.
 const NEG_INFINITY_MARKER = "-Infinity";
 
 function serializeThresholds(thresholds: BiasThreshold[]): { bias: string; min: number | string }[] {

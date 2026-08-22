@@ -38,26 +38,21 @@ function parseWeights(formData: FormData): { weights: Record<ScoreFactorKey, num
   return { weights };
 }
 
-/** Same 5 bias labels, same order, as DEFAULT_BIAS_THRESHOLDS — the last
- * ("Very Bearish") stays -Infinity by convention (the catch-all floor, not
- * a user-editable number; see AdminClient.tsx, which disables that row's
- * input for the same reason). Requires the 4 editable thresholds to stay
- * in strictly descending order — a scrambled ladder would make
- * classifyBias's first-match-wins scan silently pick the wrong label. */
+/** Same 5 bias labels, same order, as DEFAULT_BIAS_THRESHOLDS — all five,
+ * including "Very Bearish", are user-editable numbers read straight from
+ * the form. Requires all five to stay in strictly descending order — a
+ * scrambled ladder would make classifyBias's first-match-wins scan
+ * silently pick the wrong label. */
 function parseBiasThresholds(formData: FormData): { biasThresholds: BiasThreshold[] } | { error: string } {
   const biasThresholds: BiasThreshold[] = [];
   for (let i = 0; i < DEFAULT_BIAS_THRESHOLDS.length; i++) {
     const bias = DEFAULT_BIAS_THRESHOLDS[i].bias;
-    if (DEFAULT_BIAS_THRESHOLDS[i].min === -Infinity) {
-      biasThresholds.push({ bias, min: -Infinity });
-      continue;
-    }
     const raw = formData.get(`threshold:${i}`);
     const value = Number(raw);
     if (raw === null || !Number.isFinite(value)) return { error: `Invalid bias threshold for ${bias}.` };
     biasThresholds.push({ bias, min: value });
   }
-  for (let i = 0; i < biasThresholds.length - 2; i++) {
+  for (let i = 0; i < biasThresholds.length - 1; i++) {
     if (biasThresholds[i].min <= biasThresholds[i + 1].min) {
       return { error: `Bias thresholds must strictly decrease from ${biasThresholds[i].bias} to ${biasThresholds[i + 1].bias}.` };
     }

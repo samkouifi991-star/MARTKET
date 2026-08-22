@@ -4,15 +4,15 @@ import { verifySession } from "@/lib/auth/dal";
 import { MarketingNav } from "@/components/marketing/MarketingNav";
 import { MarketingFooter } from "@/components/marketing/MarketingFooter";
 import { PricingCard } from "@/components/marketing/PricingCard";
-import { TopSetupsTable } from "@/components/tables/TopSetupsTable";
 import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
+import { BiasBadge } from "@/components/ui/BiasBadge";
 import { factorLabel } from "@/lib/scoring";
-import { factorSentiment, formatSigned, FactorSentiment } from "@/lib/format";
+import { factorSentiment, formatSigned, formatPrice, scoreColorClass, FactorSentiment } from "@/lib/format";
 import { isStrictLiveSymbol } from "@/services/data-mode";
-import { SCORE_FACTOR_KEYS, DataFreshness } from "@/lib/types";
+import { SCORE_FACTOR_KEYS } from "@/lib/types";
 import {
   Activity,
   BarChart3,
@@ -38,7 +38,7 @@ export const metadata = {
 };
 export const dynamic = "force-dynamic";
 
-type PreviewRow = { key: string; label: string; sentiment: FactorSentiment; freshness: DataFreshness; contribution: number | null };
+type PreviewRow = { key: string; label: string; sentiment: FactorSentiment; contribution: number | null };
 
 function smartMoneySentiment(signal: string): FactorSentiment {
   if (signal === "Bullish Smart Money Divergence") return "Bullish";
@@ -50,17 +50,20 @@ export default async function LandingPage() {
   const sessionUser = await verifySession();
   const user = sessionUser ? { email: sessionUser.email } : null;
   const { rows, featured, smartMoney } = await getLandingPreview();
+  // Same canonical ranking Top Setups defaults to (strongest bullish
+  // totalScore first) — capped to 6 rows so the marketing preview stays
+  // compact; the full ranked list still lives on /top-setups.
+  const topSetups = [...rows].sort((a, b) => b.score.totalScore - a.score.totalScore).slice(0, 6);
 
   const previewRows: PreviewRow[] = [
     ...SCORE_FACTOR_KEYS.map((key) => {
       const f = featured.score.factors.find((x) => x.key === key)!;
-      return { key, label: factorLabel(key), sentiment: factorSentiment(f.contribution), freshness: f.freshness, contribution: f.contribution };
+      return { key, label: factorLabel(key), sentiment: factorSentiment(f.contribution), contribution: f.contribution };
     }),
     {
       key: "smartMoney",
       label: "Smart Money",
       sentiment: smartMoneySentiment(smartMoney.signal),
-      freshness: smartMoney.freshness,
       contribution: null,
     },
   ];
@@ -110,12 +113,35 @@ export default async function LandingPage() {
             </p>
           </div>
           <div className="grid lg:grid-cols-3 gap-4 items-start">
-            <div className="lg:col-span-2 card p-4 sm:p-5">
+            <div className="lg:col-span-2 card p-4 sm:p-5 flex flex-col">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold">Top Market Setups</h3>
+                <h3 className="text-sm font-semibold">Top 6 Market Setups</h3>
                 <span className="text-[11px] text-(--text-faint)">Live product preview — real data, not a mockup</span>
               </div>
-              <TopSetupsTable rows={rows} />
+              <div className="divide-y divide-(--border)">
+                {topSetups.map((row) => (
+                  <Link
+                    key={row.instrument.symbol}
+                    href={`/markets/${row.instrument.symbol}`}
+                    className="flex items-center justify-between gap-3 py-3 hover:bg-white/[.02] -mx-2 px-2 rounded-lg"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm">{row.instrument.symbol}</div>
+                      <div className="text-[11px] text-(--text-faint) truncate">{row.instrument.name}</div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-xs text-(--text-faint) tabular-nums hidden sm:inline">
+                        {formatPrice(row.price.current, row.instrument.decimals)}
+                      </span>
+                      <BiasBadge bias={row.score.bias} size="sm" />
+                      <span className={`tabular-nums font-semibold text-sm w-12 text-right ${scoreColorClass(row.score.totalScore)}`}>
+                        {formatSigned(row.score.totalScore)}
+                      </span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+              <p className="text-[11px] text-(--text-faint) mt-3">Showing the top 6 of {rows.length} ranked markets.</p>
             </div>
 
             <div className="card p-4 sm:p-5 flex flex-col">
@@ -135,11 +161,8 @@ export default async function LandingPage() {
                       <span className="truncate">{row.label}</span>
                       <FactorSentimentBadge sentiment={row.sentiment} />
                     </span>
-                    <span className="flex items-center gap-2 shrink-0">
-                      <DataFreshnessTag freshness={row.freshness} />
-                      <span className="tabular-nums font-semibold w-12 text-right">
-                        {row.contribution === null ? "—" : formatSigned(row.contribution)}
-                      </span>
+                    <span className="tabular-nums font-semibold shrink-0">
+                      {row.contribution === null ? "—" : formatSigned(row.contribution)}
                     </span>
                   </div>
                 ))}

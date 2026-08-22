@@ -1,10 +1,12 @@
 // Round-trip test for the scoring_configurations table — the persisted
 // single source of truth for Admin's factor weights and bias thresholds
-// (see schema.ts). Proves: (1) -Infinity survives the jsonb boundary via
+// (see schema.ts). Proves: (1) a normal finite-number configuration
+// (including "Very Bearish", now a real editable threshold rather than a
+// -Infinity floor) round-trips exactly; (2) a configuration saved under
+// the old -Infinity-floor convention still survives the jsonb boundary via
 // the string marker, since JSON.stringify would otherwise silently coerce
-// it to null and corrupt the "Very Bearish" floor threshold; (2) saving a
-// new configuration deactivates every previous one, so exactly one row is
-// ever active.
+// it to null; (3) saving a new configuration deactivates every previous
+// one, so exactly one row is ever active.
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
 let rows: Record<string, unknown>[] = [];
@@ -47,7 +49,7 @@ vi.mock("../client", () => ({
 }));
 
 import { createScoringConfiguration, getActiveScoringConfiguration } from "./scoring-config";
-import { DEFAULT_FACTOR_WEIGHTS, DEFAULT_BIAS_THRESHOLDS } from "@/lib/config";
+import { DEFAULT_FACTOR_WEIGHTS, DEFAULT_BIAS_THRESHOLDS, BiasThreshold } from "@/lib/config";
 
 describe("scoring_configurations round trip", () => {
   beforeEach(() => {
@@ -55,7 +57,7 @@ describe("scoring_configurations round trip", () => {
     nextId = 1;
   });
 
-  it("round-trips weights and bias thresholds, preserving -Infinity", async () => {
+  it("round-trips weights and bias thresholds, including a finite Very Bearish threshold", async () => {
     await createScoringConfiguration({ weights: DEFAULT_FACTOR_WEIGHTS, biasThresholds: DEFAULT_BIAS_THRESHOLDS, createdBy: "admin@test.com" });
     const active = await getActiveScoringConfiguration();
 
@@ -63,8 +65,23 @@ describe("scoring_configurations round trip", () => {
     expect(active!.weights).toEqual(DEFAULT_FACTOR_WEIGHTS);
     expect(active!.createdBy).toBe("admin@test.com");
     const veryBearish = active!.biasThresholds.find((t) => t.bias === "Very Bearish")!;
-    expect(veryBearish.min).toBe(-Infinity);
+    expect(veryBearish.min).toBe(-10);
     expect(active!.biasThresholds).toEqual(DEFAULT_BIAS_THRESHOLDS);
+  });
+
+  it("still deserializes a legacy configuration saved with the old -Infinity Very Bearish floor", async () => {
+    const legacyThresholds: BiasThreshold[] = [
+      { bias: "Very Bullish", min: 8 },
+      { bias: "Bullish", min: 4 },
+      { bias: "Neutral", min: -3.9 },
+      { bias: "Bearish", min: -7.9 },
+      { bias: "Very Bearish", min: -Infinity },
+    ];
+    await createScoringConfiguration({ weights: DEFAULT_FACTOR_WEIGHTS, biasThresholds: legacyThresholds, createdBy: "admin@test.com" });
+    const active = await getActiveScoringConfiguration();
+
+    const veryBearish = active!.biasThresholds.find((t) => t.bias === "Very Bearish")!;
+    expect(veryBearish.min).toBe(-Infinity);
   });
 
   it("deactivates every prior version when a new one is saved — only one active at a time", async () => {
