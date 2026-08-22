@@ -44,6 +44,7 @@
     "stripe:setup": "tsx scripts/stripe-setup.ts",
     "stripe:webhook-setup": "tsx scripts/stripe-webhook-setup.ts",
     "stripe:full-setup": "tsx scripts/stripe-full-setup.ts",
+    "test:scoring-config-verify": "tsx scripts/scoring-config-verify.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

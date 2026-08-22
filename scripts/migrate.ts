@@ -46,6 +46,7 @@ const EXPECTED_TABLES = [
   "users",
   "sessions",
   "subscriptions",
+  "scoring_configurations",
 ];
 
 function describeError(err: unknown): string {

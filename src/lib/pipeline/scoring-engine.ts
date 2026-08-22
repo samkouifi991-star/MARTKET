@@ -7,7 +7,7 @@
 // React components must call computeLiveMarketScore (or the demo
 // computeMarketScore in lib/scoring.ts) — never a provider/engine directly.
 import { getInstrument } from "@/lib/instruments";
-import { DEFAULT_FACTOR_WEIGHTS, classifyBias } from "@/lib/config";
+import { classifyBias } from "@/lib/config";
 import { MarketScore, ScoreFactor, ScoreFactorKey } from "@/lib/types";
 import { DataMode } from "@/services/data-mode";
 import { ResolvedFactor } from "./types";
@@ -19,6 +19,7 @@ import { resolveEconomicGrowthFactor, resolveInflationFactor, resolveLaborFactor
 import { resolveNewsFactor } from "./news";
 import { computeConfidence } from "./confidence";
 import { recordScoreHistory, getScoreHistory, upsertCurrentScore } from "@/db/queries/scores";
+import { resolveActiveScoringConfig, ResolvedScoringConfig } from "./scoring-config";
 
 const RESOLVERS: Record<ScoreFactorKey, (symbol: string, mode: DataMode, storageOnly?: boolean) => Promise<ResolvedFactor>> = {
   institutional: resolveInstitutionalFactor,
@@ -61,17 +62,26 @@ export function contributionFor(factor: ResolvedFactor, weight: number): number 
 export async function computeLiveMarketScore(
   symbol: string,
   mode: DataMode,
-  options: { persist?: boolean; storageOnly?: boolean; updateCurrent?: boolean } = {}
+  options: { persist?: boolean; storageOnly?: boolean; updateCurrent?: boolean; scoringConfig?: ResolvedScoringConfig } = {}
 ): Promise<MarketScore> {
   const instrument = getInstrument(symbol);
   if (!instrument) throw new Error(`Unknown instrument ${symbol}`);
   if (mode === "demo") throw new Error("computeLiveMarketScore should only be called for hybrid/live — use computeMarketScore from lib/scoring.ts for demo mode");
 
+  // The admin-configured weights/bias-thresholds (see lib/pipeline/
+  // scoring-config.ts) — not the hardcoded DEFAULT_FACTOR_WEIGHTS/
+  // DEFAULT_BIAS_THRESHOLDS, which now serve only as the bootstrap
+  // fallback for before any configuration has ever been saved. Bulk
+  // callers (the admin reweight recompute, the scores cron) resolve this
+  // once and pass it in, so all 19 markets share one consistent snapshot
+  // instead of racing 19 independent reads.
+  const scoringConfig = options.scoringConfig ?? (await resolveActiveScoringConfig());
+
   const keys = Object.keys(RESOLVERS) as ScoreFactorKey[];
   const resolved = await Promise.all(keys.map((key) => RESOLVERS[key](symbol, mode, options.storageOnly ?? false)));
 
   const factors: ScoreFactor[] = resolved.map((factor) => {
-    const weight = DEFAULT_FACTOR_WEIGHTS[factor.key];
+    const weight = scoringConfig.weights[factor.key];
     return {
       key: factor.key,
       contribution: contributionFor(factor, weight),
@@ -87,7 +97,7 @@ export async function computeLiveMarketScore(
   });
 
   const totalScore = Number(factors.reduce((s, f) => s + f.contribution, 0).toFixed(2));
-  const bias = classifyBias(totalScore);
+  const bias = classifyBias(totalScore, scoringConfig.biasThresholds);
   const confidence = computeConfidence(resolved);
   const now = new Date().toISOString();
 
@@ -131,7 +141,7 @@ export async function computeLiveMarketScore(
   // persist:true — it's the sole source of truth for score history.
   // Best-effort either way: never let a DB outage break score computation
   // or serving.
-  if (options.persist) recordScoreHistory(score).catch(() => {});
+  if (options.persist) recordScoreHistory(score, scoringConfig.id).catch(() => {});
 
   // current_market_scores/current_factor_scores (see db/queries/scores.ts)
   // is the single canonical "current score" row that both Market Detail and
@@ -140,7 +150,7 @@ export async function computeLiveMarketScore(
   // bootstrap fallback for a symbol the cron hasn't scored yet, so Top
   // Setups isn't left with no row to read until the next cron run.
   // Best-effort: never let a DB outage break score computation or serving.
-  if (options.persist || options.updateCurrent) upsertCurrentScore(score).catch(() => {});
+  if (options.persist || options.updateCurrent) upsertCurrentScore(score, scoringConfig.id).catch(() => {});
 
   return score;
 }

@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { INSTRUMENTS } from "@/lib/instruments";
 import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";
+import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
 import { DATA_MODE } from "@/services/data-mode";
 import { demoModeSkip, isDemoMode, unauthorized, verifyCronAuth } from "../_shared";
 
@@ -22,13 +23,19 @@ export async function GET(req: NextRequest) {
   if (!verifyCronAuth(req)) return unauthorized();
   if (isDemoMode()) return demoModeSkip();
 
+  // Resolved once for the whole run — every instrument this cron scores
+  // shares one consistent snapshot of the active Admin-configured weights/
+  // bias thresholds, instead of 25 redundant reads (and a real, if
+  // unlikely, chance of straddling an Admin save mid-run).
+  const scoringConfig = await resolveActiveScoringConfig();
+
   let okCount = 0;
   let failCount = 0;
   const failures: { symbol: string; error: string }[] = [];
 
   for (const instrument of INSTRUMENTS) {
     try {
-      await computeLiveMarketScore(instrument.symbol, DATA_MODE, { persist: true });
+      await computeLiveMarketScore(instrument.symbol, DATA_MODE, { persist: true, scoringConfig });
       okCount++;
     } catch (err) {
       failCount++;

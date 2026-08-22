@@ -10,6 +10,7 @@ import { formatDate, formatRelative } from "@/lib/time";
 import { DATA_MODE } from "@/services/data-mode";
 import { getProviderHealth, ProviderHealthRow } from "@/db/queries/provider-health";
 import { requireAdmin } from "@/lib/auth/dal";
+import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
 import Link from "next/link";
 
 export const metadata = { title: "Admin — Market Intelligence AI" };
@@ -33,6 +34,7 @@ export default async function AdminPage() {
       .map((f) => ({ symbol: r.instrument.symbol, factor: f }))
   );
   const { rows: providerHealthRows, error: providerHealthError } = await loadProviderHealth();
+  const activeScoringConfig = await resolveActiveScoringConfig();
 
   return (
     <div className="space-y-6">
@@ -48,7 +50,7 @@ export default async function AdminPage() {
         <StatTile label="Rate limit" value={`${API_USAGE.rateLimitPerMin}/min`} />
       </div>
 
-      <AdminClient initialAuditLog={AUDIT_LOGS} />
+      <AdminClient initialAuditLog={AUDIT_LOGS} activeScoringConfig={activeScoringConfig} />
 
       <Card
         title="GBPUSD dependency-chain validation"

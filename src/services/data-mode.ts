@@ -185,6 +185,14 @@ export function isStrictLiveSymbol(symbol: string): boolean {
   return STRICT_LIVE_SYMBOLS.has(symbol);
 }
 
+// The single source of truth for "every currently-promoted strict-live
+// symbol" as an iterable list — derived from the same Set above rather than
+// duplicated, for callers (the admin reweight recompute) that need to loop
+// over all of them rather than test one.
+export function strictLiveSymbolList(): string[] {
+  return Array.from(STRICT_LIVE_SYMBOLS);
+}
+
 /** In live mode — or hybrid mode for a strict-live symbol — a missing
  * provider must surface as unavailable, never fall back to demo data.
  * Takes `mode` explicitly (the same per-call value resolvers already

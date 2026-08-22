@@ -8,13 +8,14 @@ import { getDb } from "../client";
 import { currentFactorScores, currentMarketScores, factorScores, marketScores } from "../schema";
 import { Bias, DataFreshness, MarketScore, ScoreFactor, ScoreFactorKey } from "@/lib/types";
 
-export async function recordScoreHistory(score: MarketScore): Promise<void> {
+export async function recordScoreHistory(score: MarketScore, scoringVersionId: number | null = null): Promise<void> {
   const db = getDb();
   await db.insert(marketScores).values({
     symbol: score.symbol,
     totalScore: score.totalScore,
     bias: score.bias,
     confidence: score.confidence,
+    scoringVersionId,
   });
   await db.insert(factorScores).values(
     score.factors.map((f) => ({
@@ -33,6 +34,7 @@ export async function recordScoreHistory(score: MarketScore): Promise<void> {
       status: f.freshness,
       sourceUpdatedAt: f.lastUpdated ? new Date(f.lastUpdated) : null,
       nextExpectedUpdate: f.nextUpdate ? new Date(f.nextUpdate) : null,
+      scoringVersionId,
     }))
   );
 }
@@ -104,7 +106,7 @@ export async function getFactorChangesSince(symbol: string, sinceHours: number):
 // Market Detail's render as a bootstrap fallback — see scoring-engine.ts),
 // and read by BOTH Market Detail and Top Setups so they can never show two
 // different numbers for the same market: they're reading the same row.
-export async function upsertCurrentScore(score: MarketScore): Promise<void> {
+export async function upsertCurrentScore(score: MarketScore, scoringVersionId: number | null = null): Promise<void> {
   const db = getDb();
   await db
     .insert(currentMarketScores)
@@ -114,11 +116,12 @@ export async function upsertCurrentScore(score: MarketScore): Promise<void> {
       bias: score.bias,
       confidence: score.confidence,
       change24h: score.change24h,
+      scoringVersionId,
       computedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: currentMarketScores.symbol,
-      set: { totalScore: score.totalScore, bias: score.bias, confidence: score.confidence, change24h: score.change24h, computedAt: new Date() },
+      set: { totalScore: score.totalScore, bias: score.bias, confidence: score.confidence, change24h: score.change24h, scoringVersionId, computedAt: new Date() },
     });
 
   await db
@@ -136,6 +139,7 @@ export async function upsertCurrentScore(score: MarketScore): Promise<void> {
         status: f.freshness,
         sourceUpdatedAt: f.lastUpdated ? new Date(f.lastUpdated) : null,
         nextExpectedUpdate: f.nextUpdate ? new Date(f.nextUpdate) : null,
+        scoringVersionId,
         computedAt: new Date(),
       }))
     )
@@ -151,6 +155,7 @@ export async function upsertCurrentScore(score: MarketScore): Promise<void> {
         status: sql`excluded.status`,
         sourceUpdatedAt: sql`excluded.source_updated_at`,
         nextExpectedUpdate: sql`excluded.next_expected_update`,
+        scoringVersionId: sql`excluded.scoring_version_id`,
         computedAt: sql`excluded.computed_at`,
       },
     });

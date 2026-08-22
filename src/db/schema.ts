@@ -145,6 +145,28 @@ export const newsArticles = pgTable(
   (t) => [index("news_articles_published_at").on(t.publishedAt)]
 );
 
+// ---- Scoring configuration versions — the single source of truth for
+// factor weights and bias thresholds. Admin's "Save & version" inserts a
+// new row and flips it active; every other row's `active` is set false in
+// the same request (app-level, not a DB constraint — matches this
+// project's existing convention of no explicit transactions for simple
+// sequential writes). The scoring engine reads the active row instead of
+// the hardcoded DEFAULT_FACTOR_WEIGHTS/DEFAULT_BIAS_THRESHOLDS in
+// lib/config.ts, which now serve only as the bootstrap fallback for before
+// any configuration has ever been saved. ----
+export const scoringConfigurations = pgTable("scoring_configurations", {
+  id: serial("id").primaryKey(),
+  active: boolean("active").notNull().default(false),
+  weights: jsonb("weights").notNull().$type<Record<string, number>>(),
+  // min is `number | "-Infinity"` on disk — jsonb can't hold a real
+  // -Infinity (JSON.stringify coerces it to null), so the "Very Bearish"
+  // floor threshold is stored as the literal string marker instead; see
+  // db/queries/scoring-config.ts's (de)serializeThresholds.
+  biasThresholds: jsonb("bias_thresholds").notNull().$type<{ bias: string; min: number | string }[]>(),
+  createdBy: varchar("created_by", { length: 255 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ---- Per-factor score history, append-only — the "what changed" record ----
 export const factorScores = pgTable(
   "factor_scores",
@@ -161,6 +183,9 @@ export const factorScores = pgTable(
     status: varchar("status", { length: 16 }).notNull(),
     sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }),
     nextExpectedUpdate: timestamp("next_expected_update", { withTimezone: true }),
+    // Nullable — rows written before this column existed have no recorded
+    // version. Which scoring-configuration version produced this row.
+    scoringVersionId: integer("scoring_version_id").references(() => scoringConfigurations.id),
     computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("factor_scores_symbol_factor_computed").on(t.symbol, t.factorKey, t.computedAt)]
@@ -175,6 +200,7 @@ export const marketScores = pgTable(
     totalScore: doublePrecision("total_score").notNull(),
     bias: varchar("bias", { length: 16 }).notNull(),
     confidence: integer("confidence").notNull(),
+    scoringVersionId: integer("scoring_version_id").references(() => scoringConfigurations.id),
     computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("market_scores_symbol_computed").on(t.symbol, t.computedAt)]
@@ -194,6 +220,7 @@ export const currentMarketScores = pgTable("current_market_scores", {
   bias: varchar("bias", { length: 16 }).notNull(),
   confidence: integer("confidence").notNull(),
   change24h: doublePrecision("change_24h").notNull(),
+  scoringVersionId: integer("scoring_version_id").references(() => scoringConfigurations.id),
   computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -215,6 +242,7 @@ export const currentFactorScores = pgTable(
     status: varchar("status", { length: 16 }).notNull(),
     sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }),
     nextExpectedUpdate: timestamp("next_expected_update", { withTimezone: true }),
+    scoringVersionId: integer("scoring_version_id").references(() => scoringConfigurations.id),
     computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("current_factor_scores_symbol_factor").on(t.symbol, t.factorKey)]
