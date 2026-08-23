@@ -110,6 +110,18 @@ export async function upsertEconomicEvent(event: NormalizedEconomicEvent, affect
     });
 }
 
+/** Backfills the V2-only classification columns (indicatorKey,
+ * importanceTier, revisedPrevious) onto an already-upserted economic_events
+ * row — kept as its own function, separate from upsertEconomicEvent above,
+ * so the V1 calendar cron's existing call site needs zero changes. Only
+ * app/api/cron/economic-releases/route.ts (V2's release-detection cron)
+ * calls this. A no-op if the externalId doesn't exist yet (upsertEconomicEvent
+ * must run first). */
+export async function updateEconomicEventClassification(externalId: string, fields: { indicatorKey: string | null; importanceTier: string | null; revisedPrevious: number | null }): Promise<void> {
+  const db = getDb();
+  await db.update(economicEvents).set(fields).where(eq(economicEvents.externalId, externalId));
+}
+
 export async function insertNewsArticle(article: NormalizedNewsArticle, analysis: { interpretation: string; importance: number; confidence: number; reason: string }): Promise<void> {
   const db = getDb();
   await db
