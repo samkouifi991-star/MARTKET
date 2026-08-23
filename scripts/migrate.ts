@@ -47,6 +47,15 @@ const EXPECTED_TABLES = [
   "sessions",
   "subscriptions",
   "scoring_configurations",
+  // Scoring Engine V2 (shadow mode) — see src/db/schema.ts's V2 section.
+  "economic_release_surprises",
+  "event_shocks",
+  "current_market_scores_v2",
+  "current_factor_scores_v2",
+  "market_scores_v2",
+  "factor_scores_v2",
+  "scoring_shadow_comparisons",
+  "scoring_integrity_errors",
 ];
 
 function describeError(err: unknown): string {

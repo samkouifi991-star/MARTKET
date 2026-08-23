@@ -36,6 +36,13 @@
       "when": 1787404802169,
       "tag": "0004_wooden_toxin",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787449811441,
+      "tag": "0005_scoring_v2_shadow_mode",
+      "breakpoints": true
     }
   ]
 }
