@@ -41,6 +41,10 @@ const INDICATOR_CADENCE: Record<FredIndicatorKey, FredCadence> = {
   policyRate: "daily",
   yield2y: "daily",
   yield10y: "daily",
+  realYield10y: "daily",
+  breakevenInflation10y: "daily",
+  usdIndexBroad: "daily",
+  vix: "daily",
 };
 
 // Generous windows (real-world publication lag, not the raw cadence

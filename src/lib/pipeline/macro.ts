@@ -7,6 +7,8 @@ import { FredSeriesPoint } from "@/services/types";
 import { demoFallbackFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 import { DataFreshness, Instrument, ScoreFactorKey } from "@/lib/types";
+import { growthLaborPolarity } from "./asset-polarity";
+import { GOLD_SYMBOL, resolveGoldInflationFactor, resolveGoldInterestRatesFactor } from "./gold-macro";
 
 // API availability and data freshness are separate concepts (see fred.ts):
 // a series can resolve successfully while being materially out of date
@@ -76,6 +78,14 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
   const instrument = getInstrument(symbol);
   if (!instrument) return unavailableFactor(meta.key, "FRED", `Unknown instrument ${symbol}`);
 
+  // Gold's inflation read is not a country-CPI differential — it's driven by
+  // breakeven inflation expectations net of real yields (see gold-macro.ts's
+  // header for why). Bypass the generic model entirely for XAUUSD rather
+  // than trying to bend it with a sign flip; growth/labor below still use
+  // this function; they're generically shaped (a polarity flip is enough),
+  // inflation is not.
+  if (category === "inflation" && symbol === GOLD_SYMBOL) return resolveGoldInflationFactor(mode, storageOnly);
+
   const fallback = () => demoFallbackFor(category, instrument);
 
   const source = "FRED (Federal Reserve Economic Data)";
@@ -124,16 +134,26 @@ async function resolveMacroCategory(symbol: string, mode: DataMode, category: Ma
   const freshness = scores.freshness ?? "live";
   const staleNote = freshness !== "live" ? ` Includes a ${freshness} series — confidence reflects this.` : "";
   const signed = `${val > 0 ? "+" : ""}${val.toFixed(1)}`;
+
+  // Growth/labor strength isn't universally bullish — see asset-polarity.ts.
+  // For precious metals (Gold, Silver, Platinum) a stronger economy raises
+  // real yields and reduces safe-haven demand, both a headwind for a
+  // non-yielding metal, so the sign is flipped here rather than assumed +1
+  // the way every other non-FX asset class treats it. Inflation is excluded
+  // from this (category !== "inflation" guard) since Gold's inflation read
+  // never reaches this branch at all (see the bypass above).
+  const polarity = category === "inflation" ? 1 : growthLaborPolarity(instrument);
+  const polarityNote = polarity < 0 ? ` Treated as a headwind, not a tailwind, for ${instrument.name} — a stronger economy raises real yields and reduces safe-haven demand.` : "";
   const explanation =
-    instrument.assetClass === "Indices"
+    (instrument.assetClass === "Indices"
       ? `${country} ${meta.label} score is ${signed} (real FRED data) — ${instrument.name}'s primary local macro profile.${staleNote}`
       : instrument.assetClass === "Crypto"
         ? `US ${meta.label} score is ${signed} (real FRED data), used as a US / Global Liquidity Macro Proxy — crypto has no two-country FX differential or single home-market economy to model directly.${staleNote}`
-        : `US ${meta.label} score is ${signed} (real FRED data), applied as a global risk-appetite proxy scaled for ${instrument.assetClass.toLowerCase()}.${staleNote}`;
+        : `US ${meta.label} score is ${signed} (real FRED data), applied as a global risk-appetite proxy scaled for ${instrument.assetClass.toLowerCase()}.${staleNote}`) + polarityNote;
 
   return {
     key: meta.key,
-    rawScore: clamp(val * weight),
+    rawScore: clamp(val * weight * polarity),
     explanation,
     source,
     provider: "fred",
@@ -151,6 +171,14 @@ export const resolveInflationFactor = (symbol: string, mode: DataMode, storageOn
 export async function resolveInterestRatesFactor(symbol: string, mode: DataMode, storageOnly = false): Promise<ResolvedFactor> {
   const instrument = getInstrument(symbol) as Instrument | undefined;
   if (!instrument) return unavailableFactor("interestRates", "FRED", `Unknown instrument ${symbol}`);
+
+  // Gold's "interest rate conditions" are the real-yield/USD-dominant
+  // composite (see gold-macro.ts), not a policy-rate trend proxy — the
+  // generic model below assumes a rate-sensitive-but-still-generic asset,
+  // which is the same "just flip a sign" mistake the spec explicitly warns
+  // against for Gold. Bypass entirely for XAUUSD.
+  if (symbol === GOLD_SYMBOL) return resolveGoldInterestRatesFactor(mode, storageOnly);
+
   const source = "FRED (central bank policy & yield curves)";
 
   const fallback = () => {

@@ -125,6 +125,18 @@ describe("resolveEconomicGrowthFactor — primary local macro model vs. proxy, p
     expect(factor.explanation).toMatch(/risk-appetite proxy/i);
     expect(factor.explanation).not.toMatch(/primary local macro profile|Global Liquidity/);
   });
+
+  it("flips Gold's growth polarity negative for the same positive growth data that scores WTI (a generic commodity) positive", async () => {
+    mockCountryLive("US", 3.0);
+
+    const gold = await resolveEconomicGrowthFactor("XAUUSD", "live");
+    const oil = await resolveEconomicGrowthFactor("WTIUSD", "live");
+
+    expect(gold.rawScore).toBeLessThan(0);
+    expect(oil.rawScore).toBeGreaterThan(0);
+    expect(gold.explanation).toMatch(/headwind, not a tailwind/);
+    expect(oil.explanation).not.toMatch(/headwind, not a tailwind/);
+  });
 });
 
 describe("resolveInterestRatesFactor — same primary-local-model-vs-proxy split for policy rates", () => {
@@ -143,5 +155,36 @@ describe("resolveInterestRatesFactor — same primary-local-model-vs-proxy split
 
     expect(factor.explanation).toMatch(/GB policy rate/);
     expect(factor.explanation).toMatch(/primary local rate environment/);
+  });
+});
+
+describe("XAUUSD delegates inflation and interest-rates to the dedicated gold-macro composite", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue(null);
+  });
+
+  it("resolveInflationFactor('XAUUSD') reads T10YIE (breakeven inflation), not a country CPI differential", async () => {
+    vi.mocked(fred.getSeries).mockImplementation(async (country: string, indicator: string) => {
+      if (country === "US" && indicator === "breakevenInflation10y") return liveSeries(2.5);
+      return { provider: "fred", source: "FRED", status: "unavailable", fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
+    });
+
+    const factor = await resolveInflationFactor("XAUUSD", "live");
+
+    expect(factor.explanation).toMatch(/Gold inflation-hedge read/);
+    expect(factor.explanation).toMatch(/breakeven inflation/i);
+  });
+
+  it("resolveInterestRatesFactor('XAUUSD') reads DFII10/DTWEXBGS/DGS2/VIXCLS, not a policy-rate trend", async () => {
+    vi.mocked(fred.getSeries).mockImplementation(async (country: string, indicator: string) => {
+      if (country === "US" && indicator === "realYield10y") return liveSeries(1.0);
+      return { provider: "fred", source: "FRED", status: "unavailable", fetchedAt: "", sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
+    });
+
+    const factor = await resolveInterestRatesFactor("XAUUSD", "live");
+
+    expect(factor.explanation).toMatch(/Gold-specific macro regime/);
+    expect(factor.explanation).toMatch(/real yields & USD dominant/);
   });
 });

@@ -25,7 +25,14 @@ export type FredIndicatorKey =
   | "laborParticipation"
   | "policyRate"
   | "yield2y"
-  | "yield10y";
+  | "yield10y"
+  // Gold-macro-regime series (see pipeline/gold-macro.ts) — global/US-market
+  // series, not per-country indicators, but modeled the same way (country
+  // "US") since FRED itself publishes them as single US-market series.
+  | "realYield10y"
+  | "breakevenInflation10y"
+  | "usdIndexBroad"
+  | "vix";
 
 export type FredCountrySeries = Partial<Record<FredIndicatorKey, { id: string; verified: boolean }>>;
 
@@ -48,6 +55,21 @@ export const FRED_SERIES: Record<string, FredCountrySeries> = {
     policyRate: { id: "FEDFUNDS", verified: true },
     yield2y: { id: "DGS2", verified: true },
     yield10y: { id: "DGS10", verified: true },
+    // Standard, long-established FRED codes for these exact concepts (same
+    // confidence tier as GDPC1/CPIAUCSL/UNRATE/FEDFUNDS above — well-known,
+    // unchanged IDs, not a guessed OECD-mirror pattern) — used by the
+    // gold-specific macro composite (pipeline/gold-macro.ts):
+    //   DFII10: "Market Yield on U.S. Treasury Securities at 10-Year
+    //     Constant Maturity, Quoted on an Investment Basis, Inflation-
+    //     Indexed" — the real (TIPS) 10-year yield.
+    //   T10YIE: "10-Year Breakeven Inflation Rate" (DGS10 minus DFII10,
+    //     published directly by FRED as its own series).
+    //   DTWEXBGS: "Nominal Broad U.S. Dollar Index".
+    //   VIXCLS: "CBOE Volatility Index: VIX".
+    realYield10y: { id: "DFII10", verified: true },
+    breakevenInflation10y: { id: "T10YIE", verified: true },
+    usdIndexBroad: { id: "DTWEXBGS", verified: true },
+    vix: { id: "VIXCLS", verified: true },
   },
   // Non-US series are lower-confidence OECD-sourced FRED mirrors — every ID
   // below needs confirmation via FRED's series search before use in scoring.
