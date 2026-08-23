@@ -7,11 +7,17 @@ import { getDb } from "../client";
 import { scoringConfigurations } from "../schema";
 import { BiasThreshold } from "@/lib/config";
 import { ScoreFactorKey } from "@/lib/types";
+import { ScoringV2Settings } from "@/lib/scoring-v2/config";
 
 export type ScoringConfigRow = {
   id: number;
   weights: Record<ScoreFactorKey, number>;
   biasThresholds: BiasThreshold[];
+  // Scoring V2's full behavior-tuning config, versioned in this same row
+  // (requirement #24's "one Save & Version" for the complete model) — null
+  // on every row saved before V2 existed; engine.ts falls back to
+  // DEFAULT_SCORING_V2_SETTINGS exactly like v1 already does for weights.
+  v2Settings: ScoringV2Settings | null;
   createdBy: string;
   createdAt: Date;
 };
@@ -36,6 +42,7 @@ function toRow(r: typeof scoringConfigurations.$inferSelect): ScoringConfigRow {
     id: r.id,
     weights: r.weights as Record<ScoreFactorKey, number>,
     biasThresholds: deserializeThresholds(r.biasThresholds as { bias: string; min: number | string }[]),
+    v2Settings: (r.v2Settings as ScoringV2Settings | null) ?? null,
     createdBy: r.createdBy,
     createdAt: r.createdAt,
   };
@@ -62,6 +69,7 @@ export async function getScoringConfigurationById(id: number): Promise<ScoringCo
 export async function createScoringConfiguration(input: {
   weights: Record<ScoreFactorKey, number>;
   biasThresholds: BiasThreshold[];
+  v2Settings?: ScoringV2Settings | null;
   createdBy: string;
 }): Promise<ScoringConfigRow> {
   const db = getDb();
@@ -72,6 +80,7 @@ export async function createScoringConfiguration(input: {
       active: true,
       weights: input.weights,
       biasThresholds: serializeThresholds(input.biasThresholds),
+      v2Settings: input.v2Settings ?? null,
       createdBy: input.createdBy,
     })
     .returning();

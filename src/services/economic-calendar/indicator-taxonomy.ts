@@ -174,3 +174,57 @@ export function matchIndicator(rawEventName: string): EconomicIndicatorKey | nul
 export function importanceTierFor(key: EconomicIndicatorKey): ImportanceTier {
   return IMPORTANCE_TIER[key];
 }
+
+export type IndicatorCategory = "inflation" | "growthLabor" | "rateDecision" | "other";
+
+// Shared by gold.ts (surprise-shock scaling) and engine.ts (dispatching a
+// detected surprise to the right asset-interpretation function and factor
+// slot) — one categorization, not duplicated per consumer.
+const CATEGORY: Record<EconomicIndicatorKey, IndicatorCategory> = {
+  cpi: "inflation",
+  coreCpi: "inflation",
+  ppi: "inflation",
+  corePpi: "inflation",
+  pce: "inflation",
+  corePce: "inflation",
+  inflationExpectations: "inflation",
+  michiganInflationExpectations: "inflation",
+  nfp: "growthLabor",
+  unemploymentRate: "growthLabor",
+  avgHourlyEarnings: "growthLabor",
+  joblessClaims: "growthLabor",
+  continuingClaims: "growthLabor",
+  jolts: "growthLabor",
+  adpEmployment: "growthLabor",
+  gdp: "growthLabor",
+  gdpRevision: "growthLabor",
+  retailSales: "growthLabor",
+  industrialProduction: "growthLabor",
+  durableGoods: "growthLabor",
+  ismManufacturing: "growthLabor",
+  ismServices: "growthLabor",
+  spGlobalManufacturingPmi: "growthLabor",
+  spGlobalServicesPmi: "growthLabor",
+  fedRateDecision: "rateDecision",
+  fomcStatement: "other",
+  dotPlot: "other",
+  powellPressConference: "other",
+  fomcMinutes: "other",
+  ecbRateDecision: "rateDecision",
+  boeRateDecision: "rateDecision",
+  bojRateDecision: "rateDecision",
+  snbRateDecision: "rateDecision",
+  bocRateDecision: "rateDecision",
+  rbaRateDecision: "rateDecision",
+  rbnzRateDecision: "rateDecision",
+  consumerConfidence: "other",
+  michiganSentiment: "other",
+  housingData: "other",
+  tradeBalance: "other",
+  productivity: "other",
+  unitLaborCosts: "other",
+};
+
+export function indicatorCategory(key: EconomicIndicatorKey): IndicatorCategory {
+  return CATEGORY[key];
+}

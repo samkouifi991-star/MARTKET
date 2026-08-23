@@ -29,7 +29,7 @@ function makeQuery<T>(data: T[]): FakeQuery<T> {
   return promise;
 }
 
-import { getHistoricalEffectiveSurprises, getRecentEventShocks, recordEventShock, recordReleaseSurprise } from "./economic-releases";
+import { getHistoricalEffectiveSurprises, getRecentEventShocks, getRecentSurprisesForCountries, hasEventShockForRelease, recordEventShock, recordReleaseSurprise } from "./economic-releases";
 
 describe("recordReleaseSurprise", () => {
   beforeEach(() => {
@@ -100,5 +100,34 @@ describe("event shocks", () => {
     const shocks = await getRecentEventShocks("XAUUSD");
     expect(shocks).toHaveLength(1);
     expect(shocks[0].initialContribution).toBe(1.5);
+  });
+
+  it("reports true once a shock row exists for a symbol, and false when none has been created yet", async () => {
+    selectResults["event_shocks"] = [];
+    expect(await hasEventShockForRelease("XAUUSD", 5)).toBe(false);
+
+    selectResults["event_shocks"] = [{ symbol: "XAUUSD", factorKey: "inflation", sourceReleaseId: 5, initialContribution: 1.2, importanceTier: "HIGH", occurredAt: new Date() }];
+    expect(await hasEventShockForRelease("XAUUSD", 5)).toBe(true);
+  });
+});
+
+describe("getRecentSurprisesForCountries", () => {
+  beforeEach(() => {
+    selectResults = {};
+  });
+
+  it("returns only surprises for the requested countries", async () => {
+    selectResults["economic_release_surprises"] = [
+      { id: 1, indicatorKey: "cpi", country: "US", actual: 0.3, forecast: 0.2, surpriseZ: 1.2, importanceTier: "HIGH", releaseDateTime: new Date() },
+      { id: 2, indicatorKey: "cpi", country: "GB", actual: 0.1, forecast: 0.2, surpriseZ: -0.5, importanceTier: "HIGH", releaseDateTime: new Date() },
+    ];
+    const rows = await getRecentSurprisesForCountries(["US"]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].country).toBe("US");
+  });
+
+  it("returns an empty array immediately when given no countries, without querying", async () => {
+    selectResults["economic_release_surprises"] = [{ id: 1, indicatorKey: "cpi", country: "US", actual: 0.3, forecast: 0.2, surpriseZ: 1.2, importanceTier: "HIGH", releaseDateTime: new Date() }];
+    expect(await getRecentSurprisesForCountries([])).toEqual([]);
   });
 });

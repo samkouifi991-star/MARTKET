@@ -18,27 +18,11 @@
 //     central-bank-event.ts convention, which is currency-generic); a
 //     dovish/bullish-for-markets guidance read stays bullish for gold too,
 //     since dovish guidance is bullish for both risk assets and gold alike.
-import { EconomicIndicatorKey } from "@/services/economic-calendar/indicator-taxonomy";
+import { EconomicIndicatorKey, indicatorCategory } from "@/services/economic-calendar/indicator-taxonomy";
 
 function clamp(v: number, min = -10, max = 10): number {
   return Math.max(min, Math.min(max, v));
 }
-
-const INFLATION_INDICATORS: Set<EconomicIndicatorKey> = new Set(["cpi", "coreCpi", "ppi", "corePpi", "pce", "corePce", "inflationExpectations", "michiganInflationExpectations"]);
-const GROWTH_LABOR_INDICATORS: Set<EconomicIndicatorKey> = new Set([
-  "gdp",
-  "gdpRevision",
-  "nfp",
-  "unemploymentRate",
-  "avgHourlyEarnings",
-  "adpEmployment",
-  "retailSales",
-  "industrialProduction",
-  "ismManufacturing",
-  "ismServices",
-  "spGlobalManufacturingPmi",
-  "spGlobalServicesPmi",
-]);
 
 // Inflation surprises get a larger initial shock than growth/labor ones —
 // "usually mild bearish" for growth/labor per the spec, vs. inflation being
@@ -49,15 +33,17 @@ const GROWTH_LABOR_SHOCK_SCALE = 0.4;
 /** Returns the SIGNED initial shock contribution (before importance-tier
  * scaling — see event-shock.ts) for a detected surprise on `indicatorKey`,
  * or null when this indicator isn't one gold's surprise-shock model reacts
- * to directly (e.g. a housing release) — a null result should never create
- * a shock, not default to zero-and-still-record-one. */
+ * to directly (e.g. a housing release, or a rate decision — handled
+ * separately via goldRateDecisionShock) — a null result should never
+ * create a shock, not default to zero-and-still-record-one. */
 export function computeGoldSurpriseShock(indicatorKey: EconomicIndicatorKey, surpriseZ: number): number | null {
-  if (INFLATION_INDICATORS.has(indicatorKey)) {
+  const category = indicatorCategory(indicatorKey);
+  if (category === "inflation") {
     // Hot inflation (positive surprise) -> initially bullish for gold's
     // inflation-hedge motive. Cold inflation -> initially bearish.
     return clamp(surpriseZ * INFLATION_SHOCK_SCALE);
   }
-  if (GROWTH_LABOR_INDICATORS.has(indicatorKey)) {
+  if (category === "growthLabor") {
     // Strong growth/labor (positive surprise) -> mild bearish for gold
     // (higher real yields, reduced safe-haven demand) — the same polarity
     // flip pipeline/asset-polarity.ts already applies to the slow-moving

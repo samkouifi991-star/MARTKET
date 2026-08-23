@@ -14,6 +14,7 @@ describe("resolveActiveScoringConfig — bootstrap fallback", () => {
       id: 7,
       weights: { ...DEFAULT_FACTOR_WEIGHTS, technical: 0.3 },
       biasThresholds: DEFAULT_BIAS_THRESHOLDS,
+      v2Settings: null,
       createdBy: "admin@test.com",
       createdAt: new Date(),
     });

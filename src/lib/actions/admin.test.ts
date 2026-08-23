@@ -46,6 +46,7 @@ describe("saveScoringConfiguration", () => {
       id: 5,
       weights: DEFAULT_FACTOR_WEIGHTS,
       biasThresholds: DEFAULT_BIAS_THRESHOLDS,
+      v2Settings: null,
       createdBy: ADMIN_USER.email,
       createdAt: new Date(),
     });

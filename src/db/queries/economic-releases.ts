@@ -86,6 +86,51 @@ export async function recordEventShock(input: EventShockInput): Promise<void> {
   });
 }
 
+export type RecentSurpriseRow = {
+  id: number;
+  indicatorKey: EconomicIndicatorKey;
+  country: string;
+  actual: number;
+  forecast: number | null;
+  surpriseZ: number | null;
+  importanceTier: ImportanceTier;
+  releaseDateTime: string;
+};
+
+/** Real recent surprises for any of the given countries — engine.ts uses
+ * this to find releases relevant to a symbol (e.g. both sides of an FX
+ * pair, or a single country for Gold/indices/crypto) that might still need
+ * a shock created for this symbol. sinceHours should comfortably exceed
+ * every configured decay half-life (a much-older release would decay to 0
+ * anyway) but stay bounded so this never scans the entire table. */
+export async function getRecentSurprisesForCountries(countries: string[], sinceHours = 24 * 14): Promise<RecentSurpriseRow[]> {
+  if (countries.length === 0) return [];
+  const db = getDb();
+  const since = new Date(Date.now() - sinceHours * 3_600_000);
+  const rows = await db
+    .select()
+    .from(economicReleaseSurprises)
+    .where(gte(economicReleaseSurprises.releaseDateTime, since))
+    .orderBy(desc(economicReleaseSurprises.releaseDateTime));
+  return rows
+    .filter((r) => countries.includes(r.country))
+    .map((r) => ({ id: r.id, indicatorKey: r.indicatorKey as EconomicIndicatorKey, country: r.country, actual: r.actual, forecast: r.forecast, surpriseZ: r.surpriseZ, importanceTier: r.importanceTier as ImportanceTier, releaseDateTime: r.releaseDateTime.toISOString() }));
+}
+
+/** Idempotency guard for shock CREATION (distinct from
+ * hasRecordedSurprise, which guards surprise DETECTION): a given
+ * symbol+release pair only ever produces one shock, no matter how many
+ * times engine.ts computes that symbol's score afterward. */
+export async function hasEventShockForRelease(symbol: string, sourceReleaseId: number): Promise<boolean> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(eventShocks)
+    .where(and(eq(eventShocks.symbol, symbol), eq(eventShocks.sourceReleaseId, sourceReleaseId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export type StoredEventShockRow = { symbol: string; factorKey: string | null; initialContribution: number; importanceTier: ImportanceTier; occurredAt: string };
 
 /** All shocks for a symbol still within a generous lookback window (30
