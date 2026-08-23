@@ -27,6 +27,7 @@
     "test:fred-verify": "tsx scripts/fred-verify.ts",
     "test:fred-metadata": "tsx scripts/fred-metadata-check.ts",
     "backtest:gold-macro": "tsx scripts/backtest-gold-macro.ts",
+    "backtest:v2-factors": "tsx scripts/backtest-v2-factors.ts",
     "test:fmp-rate-limit-diagnose": "tsx scripts/fmp-rate-limit-diagnose.ts",
     "test:oanda-verify": "tsx scripts/oanda-verify.ts",
     "test:retail-sentiment-cron-verify": "tsx scripts/retail-sentiment-cron-verify.ts",

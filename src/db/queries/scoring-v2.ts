@@ -312,6 +312,37 @@ export async function recordIntegrityError(input: { symbol: string; errors: stri
   await db.insert(scoringIntegrityErrors).values({ symbol: input.symbol, errors: input.errors, scoringVersionId: input.scoringVersionId });
 }
 
+/** Full per-day V2 factor-contribution history for a symbol, for
+ * scripts/backtest-v2-factors.ts (requirement #20) — unlike
+ * getRecentFactorScoreV2Snapshots (capped at a small `limit` for the
+ * attribution UI), this returns every day in range, ascending, one entry
+ * per calendar day using that day's LAST computation cycle (matching the
+ * daily granularity of stored candles). */
+export async function getFactorScoreV2History(symbol: string, sinceDays = 365): Promise<{ date: string; factors: { key: string; contribution: number }[] }[]> {
+  const db = getDb();
+  const since = new Date(Date.now() - sinceDays * 24 * 3_600_000);
+  const rows = await db
+    .select()
+    .from(factorScoresV2)
+    .where(and(eq(factorScoresV2.symbol, symbol), gte(factorScoresV2.computedAt, since)))
+    .orderBy(factorScoresV2.computedAt);
+
+  const byDay = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const day = r.computedAt.toISOString().slice(0, 10);
+    const factorsForDay = byDay.get(day) ?? new Map<string, number>();
+    factorsForDay.set(r.factorKey, r.weightedScore); // later rows for the same day/key overwrite — "the day's last cycle"
+    byDay.set(day, factorsForDay);
+  }
+
+  return Array.from(byDay.entries())
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([date, factorsForDay]) => ({
+      date,
+      factors: Array.from(factorsForDay.entries()).map(([key, contribution]) => ({ key, contribution })),
+    }));
+}
+
 export type IntegrityErrorRow = { symbol: string; errors: string[]; scoringVersionId: number | null; computedAt: string };
 
 /** Recent integrity failures across every symbol, for Admin visibility —

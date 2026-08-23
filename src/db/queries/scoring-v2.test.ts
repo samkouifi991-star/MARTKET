@@ -46,6 +46,7 @@ function makeQuery<T>(data: T[]): FakeQuery<T> {
 import {
   upsertCurrentScoreV2,
   getRecentFactorScoreV2Snapshots,
+  getFactorScoreV2History,
   recordShadowComparison,
   getLatestShadowComparisons,
   recordIntegrityError,
@@ -125,6 +126,35 @@ describe("getRecentFactorScoreV2Snapshots", () => {
     selectResults["factor_scores_v2"] = [];
     const snapshots = await getRecentFactorScoreV2Snapshots("XAUUSD");
     expect(snapshots).toEqual([]);
+  });
+});
+
+describe("getFactorScoreV2History", () => {
+  beforeEach(() => {
+    selectResults = {};
+  });
+
+  it("groups every row into one entry per calendar day, using that day's LAST cycle per factor key", async () => {
+    const morningCycle = new Date("2027-01-01T09:00:00.000Z");
+    const eveningCycle = new Date("2027-01-01T18:00:00.000Z"); // same day, later cycle — should win
+    const nextDay = new Date("2027-01-02T09:00:00.000Z");
+    selectResults["factor_scores_v2"] = [
+      { symbol: "XAUUSD", factorKey: "inflation", rawScore: 1, weight: 0.1, weightedScore: 0.5, explanation: "e", provider: "p", source: "s", status: "live", sourceUpdatedAt: null, nextExpectedUpdate: null, computedAt: morningCycle },
+      { symbol: "XAUUSD", factorKey: "inflation", rawScore: 2, weight: 0.1, weightedScore: 1.2, explanation: "e", provider: "p", source: "s", status: "live", sourceUpdatedAt: null, nextExpectedUpdate: null, computedAt: eveningCycle },
+      { symbol: "XAUUSD", factorKey: "technical", rawScore: 3, weight: 0.2, weightedScore: 0.3, explanation: "e", provider: "p", source: "s", status: "live", sourceUpdatedAt: null, nextExpectedUpdate: null, computedAt: nextDay },
+    ];
+
+    const history = await getFactorScoreV2History("XAUUSD");
+    expect(history).toHaveLength(2);
+    expect(history[0].date).toBe("2027-01-01");
+    expect(history[0].factors).toEqual([{ key: "inflation", contribution: 1.2 }]); // evening cycle's value, not morning's
+    expect(history[1].date).toBe("2027-01-02");
+    expect(history[1].factors).toEqual([{ key: "technical", contribution: 0.3 }]);
+  });
+
+  it("returns an empty array when no history exists yet for this symbol", async () => {
+    selectResults["factor_scores_v2"] = [];
+    expect(await getFactorScoreV2History("XAUUSD")).toEqual([]);
   });
 });
 
