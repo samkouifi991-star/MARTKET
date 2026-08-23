@@ -53,6 +53,17 @@ export default async function AdminPage() {
       <AdminClient initialAuditLog={AUDIT_LOGS} activeScoringConfig={activeScoringConfig} />
 
       <Card
+        title="Scoring Engine V2 (shadow mode)"
+        subtitle="Event-driven, asset-specific engine running alongside V1 — not shown to regular users yet"
+        action={<Link href="/admin/scoring-v2" className="text-xs text-(--accent) hover:underline">Open comparison page →</Link>}
+      >
+        <p className="text-sm text-(--text-faint)">
+          Compares V1&apos;s live score against V2&apos;s shadow score per market, including the &quot;why did the score change&quot;
+          attribution breakdown and any integrity-check failures.
+        </p>
+      </Card>
+
+      <Card
         title="GBPUSD dependency-chain validation"
         subtitle="Live reference market — every provider/dataset behind the GBPUSD score, checked individually"
         action={<Link href="/admin/gbpusd-validation" className="text-xs text-(--accent) hover:underline">Open validation page →</Link>}

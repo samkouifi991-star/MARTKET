@@ -11,6 +11,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth/dal");
 vi.mock("@/db/queries/scoring-config");
 vi.mock("@/lib/pipeline/scoring-engine");
+vi.mock("@/lib/scoring-v2/engine");
 vi.mock("@/services/data-mode", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/data-mode")>();
   return { ...actual, isDemoOnly: vi.fn(() => false), strictLiveSymbolList: vi.fn(() => ["GBPUSD", "EURUSD", "BTCUSD"]) };
@@ -19,10 +20,12 @@ vi.mock("@/services/data-mode", async (importOriginal) => {
 import { requireAdmin } from "@/lib/auth/dal";
 import { createScoringConfiguration } from "@/db/queries/scoring-config";
 import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";
+import { computeMarketScoreV2 } from "@/lib/scoring-v2/engine";
 import { isDemoOnly, strictLiveSymbolList } from "@/services/data-mode";
-import { saveScoringConfiguration, recomputeAllScores } from "./admin";
+import { saveScoringConfiguration, recomputeAllScores, recomputeScoresV2Now } from "./admin";
 import { SCORE_FACTOR_KEYS } from "@/lib/types";
 import { DEFAULT_FACTOR_WEIGHTS, DEFAULT_BIAS_THRESHOLDS } from "@/lib/config";
+import { DEFAULT_SCORING_V2_SETTINGS } from "@/lib/scoring-v2/config";
 import type { User } from "@/db/queries/users";
 
 const ADMIN_USER: User = { id: 1, email: "samkouifi991@gmail.com", passwordHash: "x", name: null, createdAt: new Date() };
@@ -117,6 +120,100 @@ describe("saveScoringConfiguration", () => {
     expect(createScoringConfiguration).toHaveBeenCalled();
     expect(computeLiveMarketScore).not.toHaveBeenCalled();
     expect(result?.success).toMatch(/configuration saved — v5 active/i);
+  });
+
+  it("saves the complete Scoring V2 config in the same request when v2:* fields are submitted (one Save & Version for the whole model)", async () => {
+    const fd = weightsFormData();
+    fd.set("v2:eventShockMax", "4");
+    fd.set("v2:decayHigh", "48");
+    fd.set("v2:decayMedium", "12");
+    fd.set("v2:decayLow", "3");
+    fd.set("v2:minConfidenceForExtreme", "65");
+    fd.set("v2:smoothingAlpha", "0.6");
+    fd.set("v2:smoothingAlphaHighImpact", "0.9");
+    fd.set("v2:hysteresis:veryBullish:enter", "8");
+    fd.set("v2:hysteresis:veryBullish:exit", "6.5");
+    fd.set("v2:hysteresis:bullish:enter", "4");
+    fd.set("v2:hysteresis:bullish:exit", "3");
+    fd.set("v2:hysteresis:bearish:enter", "-4");
+    fd.set("v2:hysteresis:bearish:exit", "-3");
+    fd.set("v2:hysteresis:veryBearish:enter", "-8");
+    fd.set("v2:hysteresis:veryBearish:exit", "-6.5");
+    fd.set("v2:familyCap:macro", "6");
+    fd.set("v2:familyCap:positioning", "4");
+    fd.set("v2:familyCap:technical", "4");
+    fd.set("v2:familyCap:event", "3");
+
+    await saveScoringConfiguration(undefined, fd);
+
+    expect(createScoringConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        v2Settings: expect.objectContaining({
+          eventShock: { maxContribution: 4, decayHalfLifeHoursByTier: { HIGH: 48, MEDIUM: 12, LOW: 3 } },
+          minConfidenceForExtreme: 65,
+          smoothingAlpha: 0.6,
+          smoothingAlphaHighImpact: 0.9,
+        }),
+      })
+    );
+  });
+
+  it("falls back to DEFAULT_SCORING_V2_SETTINGS field-by-field when no v2:* fields are submitted at all (pre-V2 form compatibility)", async () => {
+    await saveScoringConfiguration(undefined, weightsFormData());
+
+    expect(createScoringConfiguration).toHaveBeenCalledWith(expect.objectContaining({ v2Settings: DEFAULT_SCORING_V2_SETTINGS }));
+  });
+
+  it("rejects a hysteresis exit threshold on the wrong side of its own entry threshold", async () => {
+    const fd = weightsFormData();
+    fd.set("v2:hysteresis:bullish:enter", "4");
+    fd.set("v2:hysteresis:bullish:exit", "5"); // exit above entry — the band could never hold anything
+
+    const result = await saveScoringConfiguration(undefined, fd);
+
+    expect(result?.error).toMatch(/exit threshold/i);
+    expect(createScoringConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("rejects a minimum confidence for extreme labels outside [0, 100]", async () => {
+    const fd = weightsFormData();
+    fd.set("v2:minConfidenceForExtreme", "150");
+
+    const result = await saveScoringConfiguration(undefined, fd);
+
+    expect(result?.error).toMatch(/between 0 and 100/i);
+    expect(createScoringConfiguration).not.toHaveBeenCalled();
+  });
+});
+
+describe("recomputeScoresV2Now", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(requireAdmin).mockResolvedValue(ADMIN_USER);
+    vi.mocked(isDemoOnly).mockReturnValue(false);
+    vi.mocked(strictLiveSymbolList).mockReturnValue(["GBPUSD", "EURUSD", "BTCUSD"]);
+    vi.mocked(computeMarketScoreV2).mockResolvedValue({
+      symbol: "x", totalScore: 0, rawScore: 0, bias: "Neutral", confidence: 50, change24h: 0, factors: [], history: [], lastUpdated: new Date().toISOString(),
+    });
+  });
+
+  it("recomputes every strict-live market's V2 shadow score with storageOnly:true and persist:true", async () => {
+    const result = await recomputeScoresV2Now();
+
+    expect(computeMarketScoreV2).toHaveBeenCalledTimes(3);
+    for (const [symbol, , options] of vi.mocked(computeMarketScoreV2).mock.calls) {
+      expect(["GBPUSD", "EURUSD", "BTCUSD"]).toContain(symbol);
+      expect(options).toMatchObject({ storageOnly: true, persist: true });
+    }
+    expect(result?.success).toMatch(/scoring engine v2.*recalculated 3\/3/i);
+  });
+
+  it("skips recomputation entirely in demo mode", async () => {
+    vi.mocked(isDemoOnly).mockReturnValue(true);
+    const result = await recomputeScoresV2Now();
+
+    expect(computeMarketScoreV2).not.toHaveBeenCalled();
+    expect(result?.success).toMatch(/demo mode/i);
   });
 });
 
