@@ -14,7 +14,7 @@ import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { Card } from "@/components/ui/Card";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
-import { IndicatorRow, InterestRatesSection, ScorecardData, SurpriseIndexRow, TechnicalsRow } from "@/lib/pipeline/scorecard";
+import { IndicatorRow, IndicatorSection, InterestRatesSection, ScorecardData, SurpriseIndexRow, TechnicalsRow } from "@/lib/pipeline/scorecard";
 
 function StatusBadge({ sentiment }: { sentiment: FactorSentiment | null }) {
   if (!sentiment) {
@@ -79,6 +79,49 @@ function IndicatorTable({ rows }: { rows: IndicatorRow[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// Renders the calendar-release table when real releases exist; otherwise
+// falls back to the Macro State view (real FRED level + period-over-period
+// trend, see lib/pipeline/scorecard.ts's resolveMacroStateRow) instead of
+// leaving the section blank; "unavailable" only when neither has any real
+// data for this country/indicator.
+function IndicatorSectionView({ section }: { section: IndicatorSection }) {
+  if (section.kind === "calendar") return <IndicatorTable rows={section.rows} />;
+  if (section.kind === "unavailable") return <p className="text-xs text-(--text-faint)">Data temporarily unavailable — {section.reason}</p>;
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-(--text-faint)">No calendar release stored for this category yet — showing the underlying macro trend instead.</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-(--text-faint) text-left">
+              <th className="font-medium pb-1 pr-2">Status</th>
+              <th className="font-medium pb-1 pr-2">Indicator</th>
+              <th className="font-medium pb-1 pr-2 text-right">Value</th>
+              <th className="font-medium pb-1 pr-2 text-right">Change</th>
+              <th className="font-medium pb-1 pr-2">Trend</th>
+              <th className="font-medium pb-1 text-right">Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {section.rows.map((r) => (
+              <tr key={r.label} className="border-t border-(--border)" title={r.source}>
+                <td className="py-1.5 pr-2">
+                  <StatusBadge sentiment={r.classification} />
+                </td>
+                <td className="py-1.5 pr-2 whitespace-nowrap">{r.label}</td>
+                <td className="py-1.5 pr-2 text-right tabular-nums font-medium">{fmtNum(r.value)}</td>
+                <td className="py-1.5 pr-2 text-right tabular-nums text-(--text-faint)">{formatSigned(r.changeAbs, 2)}</td>
+                <td className="py-1.5 pr-2 whitespace-nowrap text-(--text-faint)">{r.trend}</td>
+                <td className="py-1.5 text-right tabular-nums text-(--text-faint) whitespace-nowrap">{r.date.slice(0, 10)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -247,15 +290,15 @@ export function Scorecard({ instrument, score, data, biasThresholds }: { instrum
           </SectionShell>
 
           <SectionShell title="Economic Growth">
-            <IndicatorTable rows={data.economicGrowth} />
+            <IndicatorSectionView section={data.economicGrowth} />
           </SectionShell>
 
           <SectionShell title="Inflation">
-            <IndicatorTable rows={data.inflation} />
+            <IndicatorSectionView section={data.inflation} />
           </SectionShell>
 
           <SectionShell title="Jobs Market">
-            <IndicatorTable rows={data.jobsMarket} />
+            <IndicatorSectionView section={data.jobsMarket} />
           </SectionShell>
 
           <SectionShell title="Interest Rates">

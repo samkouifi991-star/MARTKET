@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyIndicatorSurprise } from "./indicator-classification";
+import { classifyIndicatorSurprise, classifyMacroTrend } from "./indicator-classification";
 
 const GOLD = { symbol: "XAUUSD", name: "Gold", assetClass: "Commodities" as const, decimals: 2 };
 const SPX500 = { symbol: "SPX500", name: "S&P 500", assetClass: "Indices" as const, macroCountry: "US", decimals: 2 };
@@ -66,5 +66,42 @@ describe("classifyIndicatorSurprise", () => {
   it("classifies consumerConfidence/michiganSentiment as growth-sentiment reads even though V2's own taxonomy files them as 'other' for shock-dispatch purposes", () => {
     expect(classifyIndicatorSurprise(SPX500, "consumerConfidence", 105, 100)).toBe("Bullish");
     expect(classifyIndicatorSurprise(GOLD, "michiganSentiment", 105, 100)).toBe("Bearish");
+  });
+});
+
+describe("classifyMacroTrend — same polarity model, applied to a period-over-period FRED change instead of a calendar surprise", () => {
+  it("a rising GDP growth rate reads Bullish for equities, Bearish for gold (inverted polarity, same as classifyIndicatorSurprise's growth case)", () => {
+    expect(classifyMacroTrend(SPX500, "growth", 0.5)).toBe("Bullish");
+    expect(classifyMacroTrend(GOLD, "growth", 0.5)).toBe("Bearish");
+  });
+
+  it("a falling GDP growth rate reads Bearish for equities, Bullish for gold", () => {
+    expect(classifyMacroTrend(SPX500, "growth", -0.3)).toBe("Bearish");
+    expect(classifyMacroTrend(GOLD, "growth", -0.3)).toBe("Bullish");
+  });
+
+  it("a rising unemployment rate (economically weaker) reads Bearish for equities, Bullish for gold — jobs inverts direction before polarity, same as classifyIndicatorSurprise's unemploymentRate case", () => {
+    expect(classifyMacroTrend(SPX500, "jobs", 0.2)).toBe("Bearish");
+    expect(classifyMacroTrend(GOLD, "jobs", 0.2)).toBe("Bullish");
+  });
+
+  it("a falling unemployment rate (economically stronger) reads Bullish for equities, Bearish for gold", () => {
+    expect(classifyMacroTrend(SPX500, "jobs", -0.2)).toBe("Bullish");
+    expect(classifyMacroTrend(GOLD, "jobs", -0.2)).toBe("Bearish");
+  });
+
+  it("inflation always uses +1 polarity regardless of asset class: rising CPI reads Bullish even for gold", () => {
+    expect(classifyMacroTrend(GOLD, "inflation", 1.2)).toBe("Bullish");
+    expect(classifyMacroTrend(SPX500, "inflation", 1.2)).toBe("Bullish");
+  });
+
+  it("falling CPI reads Bearish", () => {
+    expect(classifyMacroTrend(GOLD, "inflation", -0.8)).toBe("Bearish");
+  });
+
+  it("a zero change reads Neutral regardless of kind or asset", () => {
+    expect(classifyMacroTrend(GOLD, "growth", 0)).toBe("Neutral");
+    expect(classifyMacroTrend(SPX500, "jobs", 0)).toBe("Neutral");
+    expect(classifyMacroTrend(GBPUSD, "inflation", 0)).toBe("Neutral");
   });
 });

@@ -178,7 +178,9 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
       return null;
     });
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    const gdpRow = data.economicGrowth.find((r) => r.indicatorKey === "gdp");
+    expect(data.economicGrowth.kind).toBe("calendar");
+    if (data.economicGrowth.kind !== "calendar") throw new Error("unreachable");
+    const gdpRow = data.economicGrowth.rows.find((r) => r.indicatorKey === "gdp");
     expect(gdpRow).toBeDefined();
     expect(gdpRow!.classification).toBeNull();
     expect(gdpRow!.forecast).toBeNull();
@@ -186,12 +188,12 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
     expect(gdpRow!.actual).toBe(2.1);
   });
 
-  it("an indicator with no stored event at all is omitted entirely, not stubbed", async () => {
+  it("falls back to 'unavailable' (never a fabricated stub) when neither the calendar nor FRED has any real data for this country", async () => {
     vi.mocked(getLatestEconomicEventByIndicator).mockResolvedValue(null);
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    expect(data.economicGrowth).toHaveLength(0);
-    expect(data.inflation).toHaveLength(0);
-    expect(data.jobsMarket).toHaveLength(0);
+    expect(data.economicGrowth.kind).toBe("unavailable");
+    expect(data.inflation.kind).toBe("unavailable");
+    expect(data.jobsMarket.kind).toBe("unavailable");
   });
 
   it("classifies a real actual+forecast pair, inverted for gold on a growth beat", async () => {
@@ -200,7 +202,8 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
       return null;
     });
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    const gdpRow = data.economicGrowth.find((r) => r.indicatorKey === "gdp")!;
+    if (data.economicGrowth.kind !== "calendar") throw new Error("unreachable");
+    const gdpRow = data.economicGrowth.rows.find((r) => r.indicatorKey === "gdp")!;
     expect(gdpRow.classification).toBe("Bearish");
     expect(gdpRow.surprise).toBeCloseTo(1.0);
   });
@@ -212,9 +215,92 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
       return null;
     });
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    const pmiRow = data.economicGrowth.find((r) => r.label === "Manufacturing PMI")!;
+    if (data.economicGrowth.kind !== "calendar") throw new Error("unreachable");
+    const pmiRow = data.economicGrowth.rows.find((r) => r.label === "Manufacturing PMI")!;
     expect(pmiRow.indicatorKey).toBe("spGlobalManufacturingPmi");
     expect(pmiRow.actual).toBe(51.2);
+  });
+});
+
+describe("buildScorecardData — Macro State fallback (Phase 3: never leave Growth/Inflation/Jobs blank when the calendar has nothing)", () => {
+  function fredSeries(values: number[]): { date: string; value: number }[] {
+    return values.map((value, i) => ({ date: `2026-0${i + 1}-01`, value }));
+  }
+
+  it("falls back to a real FRED-backed Macro State row for Growth when no calendar release exists", async () => {
+    vi.mocked(getLatestEconomicEventByIndicator).mockResolvedValue(null);
+    vi.mocked(getFredSeriesWithFallback).mockImplementation(async (_country, indicator) => ({
+      provider: "fred",
+      source: "FRED (Federal Reserve Economic Data)",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: "2026-03-01",
+      nextExpectedUpdate: null,
+      value: indicator === "gdpGrowth" ? fredSeries([2.0, 2.2, 2.6]) : null,
+    }));
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.economicGrowth.kind).toBe("macro-state");
+    if (data.economicGrowth.kind !== "macro-state") throw new Error("unreachable");
+    expect(data.economicGrowth.rows).toHaveLength(1);
+    const row = data.economicGrowth.rows[0];
+    expect(row.value).toBe(2.6);
+    expect(row.previousValue).toBe(2.2);
+    expect(row.changeAbs).toBeCloseTo(0.4);
+    // Gold: growth accelerating is a headwind (inverted polarity), same
+    // convention classifyIndicatorSurprise already applies to a real
+    // calendar growth beat.
+    expect(row.classification).toBe("Bearish");
+    expect(row.source).toBe("FRED (Federal Reserve Economic Data)");
+  });
+
+  it("never fabricates a Macro State row when FRED has fewer than 3 real observations either — reports unavailable instead", async () => {
+    vi.mocked(getLatestEconomicEventByIndicator).mockResolvedValue(null);
+    vi.mocked(getFredSeriesWithFallback).mockResolvedValue({
+      provider: "fred",
+      source: "FRED",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: "2026-02-01",
+      nextExpectedUpdate: null,
+      value: fredSeries([2.0, 2.2]),
+    });
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.economicGrowth.kind).toBe("unavailable");
+  });
+
+  it("prefers real calendar release rows over the Macro State fallback whenever both exist", async () => {
+    vi.mocked(getLatestEconomicEventByIndicator).mockImplementation(async (_country, key) => {
+      if (key === "gdp") return { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.1, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" };
+      return null;
+    });
+    vi.mocked(getFredSeriesWithFallback).mockResolvedValue({
+      provider: "fred",
+      source: "FRED",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: "2026-03-01",
+      nextExpectedUpdate: null,
+      value: fredSeries([2.0, 2.2, 2.6]),
+    });
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.economicGrowth.kind).toBe("calendar");
+  });
+
+  it("computes an unemployment-rate Macro State row with jobs-kind polarity (falling unemployment reads Bearish for gold)", async () => {
+    vi.mocked(getLatestEconomicEventByIndicator).mockResolvedValue(null);
+    vi.mocked(getFredSeriesWithFallback).mockImplementation(async (_country, indicator) => ({
+      provider: "fred",
+      source: "FRED",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: "2026-03-01",
+      nextExpectedUpdate: null,
+      value: indicator === "unemploymentRate" ? fredSeries([4.2, 4.0, 3.8]) : null,
+    }));
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.jobsMarket.kind).toBe("macro-state");
+    if (data.jobsMarket.kind !== "macro-state") throw new Error("unreachable");
+    expect(data.jobsMarket.rows[0].classification).toBe("Bearish"); // falling unemployment = stronger economy = bearish for gold
   });
 });
 

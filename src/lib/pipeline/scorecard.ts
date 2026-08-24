@@ -18,7 +18,9 @@ import { getRecentReleaseTracking } from "@/db/queries/release-tracking";
 import { getSurpriseById } from "@/db/queries/economic-releases";
 import { getFredSeriesWithFallback } from "@/services/market-data/last-known-good";
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
-import { classifyIndicatorSurprise, IndicatorClassification } from "./indicator-classification";
+import { FredIndicatorKey } from "@/services/market-data/fred-series";
+import { scoreIndicator, Trend } from "@/lib/engines/macro-differential";
+import { classifyIndicatorSurprise, classifyMacroTrend, IndicatorClassification, MacroTrendKind } from "./indicator-classification";
 import { computeGoldMacroRegime, GOLD_SYMBOL, GoldMacroDriver } from "./gold-macro";
 import { InstitutionalCardData, LiveMarketDetail } from "./market-detail";
 import { CardResult, worseOf } from "./types";
@@ -137,6 +139,63 @@ async function resolveIndicatorRows(instrument: Instrument, country: string, def
   return resolved.filter((r): r is IndicatorRow => r !== null);
 }
 
+// ---- Macro State fallback (used only when the calendar has no released
+// indicators at all for a category, e.g. FMP's economic-calendar endpoint
+// is unavailable) — built from the SAME real FRED series already powering
+// macro.ts's economicGrowth/inflation/labor factors, via the SAME real
+// trend computation (macro-differential.ts's scoreIndicator) the score
+// itself uses. Never a fabricated forecast/surprise — there is no forecast
+// concept here, only a genuine period-over-period change in a real stored
+// series. A section still renders "unavailable" (never a blank/empty
+// table) when even this has no usable series or history for the country. ----
+export type MacroStateRow = {
+  label: string;
+  value: number;
+  previousValue: number;
+  changeAbs: number;
+  changePct: number | null;
+  trend: Trend;
+  classification: IndicatorClassification;
+  date: string;
+  freshness: DataFreshness;
+  source: string;
+};
+
+export type IndicatorSection = { kind: "calendar"; rows: IndicatorRow[] } | { kind: "macro-state"; rows: MacroStateRow[] } | { kind: "unavailable"; reason: string };
+
+type MacroStateDef = { label: string; fredKey: FredIndicatorKey; trendKind: MacroTrendKind };
+
+async function resolveMacroStateRow(instrument: Instrument, country: string, def: MacroStateDef, storageOnly: boolean): Promise<MacroStateRow | { reason: string }> {
+  const result = await getFredSeriesWithFallback(country, def.fredKey, 24, storageOnly);
+  const usable = (result.status === "live" || result.status === "delayed" || result.status === "stale") && result.value && result.value.length > 0;
+  if (!usable) return { reason: result.error ?? `No verified FRED series configured for ${country}/${def.fredKey}` };
+
+  const scored = scoreIndicator(def.fredKey, result.value!);
+  if (!scored) return { reason: "Insufficient FRED observation history to compute a trend (need at least 3 data points)" };
+
+  return {
+    label: def.label,
+    value: scored.currentValue,
+    previousValue: scored.previousValue,
+    changeAbs: scored.changeAbs,
+    changePct: scored.changePct,
+    trend: scored.trend,
+    classification: classifyMacroTrend(instrument, def.trendKind, scored.changeAbs),
+    date: result.value![result.value!.length - 1].date,
+    freshness: result.status,
+    source: result.source,
+  };
+}
+
+async function resolveIndicatorSection(instrument: Instrument, country: string, defs: IndicatorRowDef[], macroFallback: MacroStateDef, storageOnly: boolean): Promise<IndicatorSection> {
+  const rows = await resolveIndicatorRows(instrument, country, defs);
+  if (rows.length > 0) return { kind: "calendar", rows };
+
+  const macroRow = await resolveMacroStateRow(instrument, country, macroFallback, storageOnly);
+  if ("reason" in macroRow) return { kind: "unavailable", reason: macroRow.reason };
+  return { kind: "macro-state", rows: [macroRow] };
+}
+
 // ---- Interest Rates section ----
 // Gold's is the SAME real, asset-specific driver breakdown (real 10Y
 // yield, USD, 2Y yield/Fed-cut expectations, VIX) already computed by
@@ -253,9 +312,9 @@ export type ScorecardData = {
   technicals: TechnicalsRow[];
   institutional: CardResult<InstitutionalCardData>;
   retail: CardResult<NormalizedRetailSentiment>;
-  economicGrowth: IndicatorRow[];
-  inflation: IndicatorRow[];
-  jobsMarket: IndicatorRow[];
+  economicGrowth: IndicatorSection;
+  inflation: IndicatorSection;
+  jobsMarket: IndicatorSection;
   interestRates: InterestRatesSection;
   surpriseIndex: SurpriseIndexSection;
 };
@@ -263,9 +322,9 @@ export type ScorecardData = {
 export async function buildScorecardData(instrument: Instrument, score: MarketScore, live: LiveMarketDetail, storageOnly = false): Promise<ScorecardData> {
   const country = primaryMacroCountry(instrument);
   const [economicGrowth, inflation, jobsMarket, interestRates, surpriseIndex] = await Promise.all([
-    resolveIndicatorRows(instrument, country, GROWTH_INDICATORS),
-    resolveIndicatorRows(instrument, country, INFLATION_INDICATORS),
-    resolveIndicatorRows(instrument, country, JOBS_INDICATORS),
+    resolveIndicatorSection(instrument, country, GROWTH_INDICATORS, { label: "GDP Growth Rate (QoQ)", fredKey: "gdpGrowth", trendKind: "growth" }, storageOnly),
+    resolveIndicatorSection(instrument, country, INFLATION_INDICATORS, { label: "CPI (Index level)", fredKey: "cpi", trendKind: "inflation" }, storageOnly),
+    resolveIndicatorSection(instrument, country, JOBS_INDICATORS, { label: "Unemployment Rate", fredKey: "unemploymentRate", trendKind: "jobs" }, storageOnly),
     resolveInterestRatesSection(instrument, country, storageOnly),
     resolveSurpriseIndexSection(instrument.symbol),
   ]);

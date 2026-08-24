@@ -70,3 +70,31 @@ export function classifyIndicatorSurprise(instrument: Instrument, indicatorKey: 
   if (assetSign < 0) return "Bearish";
   return "Neutral";
 }
+
+export type MacroTrendKind = "growth" | "inflation" | "jobs";
+
+/**
+ * Same polarity model as classifyIndicatorSurprise above, applied to a
+ * period-over-period CHANGE in a raw FRED series level instead of an
+ * actual-vs-forecast surprise — used only by the scorecard's Macro State
+ * fallback (lib/pipeline/scorecard.ts), for when no calendar release
+ * exists to compare against a forecast at all. `change` is the raw,
+ * unflipped change in the series' own value (e.g. macro-differential.ts's
+ * scoreIndicator().changeAbs) — positive means the series level itself
+ * rose, never pre-flipped by the caller. "jobs" here always means
+ * unemploymentRate, where a rise is weaker (mirrors HIGHER_IS_WEAKER
+ * above); "growth" (gdpGrowth) and "inflation" (cpi) both read a rise as
+ * stronger/hotter before polarity is applied.
+ */
+export function classifyMacroTrend(instrument: Instrument, kind: MacroTrendKind, change: number): IndicatorClassification {
+  if (change === 0) return "Neutral";
+
+  const rawSign = Math.sign(change);
+  const economicStrengthSign = kind === "jobs" ? -rawSign : rawSign;
+  const polarity = kind === "inflation" ? INFLATION_POLARITY : growthLaborPolarity(instrument);
+  const assetSign = economicStrengthSign * polarity;
+
+  if (assetSign > 0) return "Bullish";
+  if (assetSign < 0) return "Bearish";
+  return "Neutral";
+}
