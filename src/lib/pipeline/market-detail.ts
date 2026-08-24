@@ -19,10 +19,11 @@
 // Watchlists/the landing page all call too, so this page can never show a
 // different current price for a symbol than any other surface does.
 import { getInstrument } from "@/lib/instruments";
+import { publicInstruments } from "@/services/market-coverage";
 import { generatePositioning } from "@/lib/demo/positioning";
 import { currentMonthStat as demoCurrentMonthStat } from "@/lib/demo/seasonality";
 import { upcomingHighImpact } from "@/lib/demo/calendar";
-import { computeCurrentMonthStat, computeHistoricalSampleDepth } from "@/lib/engines/seasonality";
+import { computeCurrentMonthStat, computeHistoricalSampleDepth, computeMonthlySeasonality, computeWeekdaySeasonality } from "@/lib/engines/seasonality";
 import { formatPrice } from "@/lib/format";
 import { Instrument, MarketScore, PriceData, SeasonalityStat } from "@/lib/types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
@@ -35,6 +36,8 @@ import { getCanonicalPriceCard } from "./price";
 
 export type InstitutionalCardData = {
   classification: string;
+  longContracts: number;
+  shortContracts: number;
   netPositioning: number;
   netWeeklyChange: number;
   pctLong: number;
@@ -59,6 +62,8 @@ async function institutionalCard(symbol: string, mode: DataMode): Promise<CardRe
     return {
       data: {
         classification: v.classification,
+        longContracts: v.longContracts,
+        shortContracts: v.shortContracts,
         netPositioning: v.netPositioning,
         netWeeklyChange: v.netWeeklyChange,
         pctLong: v.pctLong,
@@ -80,6 +85,8 @@ async function institutionalCard(symbol: string, mode: DataMode): Promise<CardRe
     return {
       data: {
         classification: "Composite institutional positioning (demo)",
+        longContracts: demo.longContracts,
+        shortContracts: demo.shortContracts,
         netPositioning: demo.netPositioning,
         netWeeklyChange: demo.netWeeklyChange,
         pctLong: demo.pctLong,
@@ -186,6 +193,50 @@ export async function getLiveMarketDetail(symbol: string, mode: DataMode): Promi
     seasonalityCard(symbol, mode),
   ]);
   return { price, institutional, retail, smartMoney, seasonality };
+}
+
+// Phase 18 (public-launch demo sweep): the aggregate Institutional
+// Positioning / Retail Sentiment / Smart Money / Seasonality pages used to
+// call the pure demo generators for every INSTRUMENT unconditionally,
+// regardless of DATA_MODE — real numbers were available (this same
+// getLiveMarketDetail already powers the Scorecard) but those pages never
+// called it. This is the shared "one real card set per publicly-launchable
+// market" fetch those pages now use instead — restricted to
+// publicInstruments() (LAUNCH_READY only), matching every other public
+// surface (Dashboard, Top Setups, Markets) since Phase 1.
+export async function getAllLiveMarketDetails(mode: DataMode): Promise<{ instrument: Instrument; detail: LiveMarketDetail }[]> {
+  const instruments = publicInstruments();
+  const details = await Promise.all(instruments.map((i) => getLiveMarketDetail(i.symbol, mode)));
+  return instruments.map((instrument, i) => ({ instrument, detail: details[i] }));
+}
+
+// Same Phase 18 motivation as getAllLiveMarketDetails above, for the
+// dedicated Seasonality page — which needs the FULL monthly/weekday
+// breakdown (computeMonthlySeasonality/computeWeekdaySeasonality), not just
+// seasonalityCard's single current-month stat. Same MIN_YEARS_FOR_LIVE_SEASONALITY
+// gate and demo-candle-history source as seasonalityCard, just not
+// restricted to the current calendar month.
+export type LiveSeasonalityResult = { monthly: SeasonalityStat[]; weekday: SeasonalityStat[] } | null;
+
+export async function getAllLiveSeasonality(): Promise<{ instrument: Instrument; result: LiveSeasonalityResult; unavailableReason: string | null }[]> {
+  const instruments = publicInstruments();
+  return Promise.all(
+    instruments.map(async (instrument) => {
+      const history = await getDailyCandlesWithFallback(instrument.symbol, 20 * 365);
+      if (isUsable(history.status, history.value)) {
+        const depth = computeHistoricalSampleDepth(history.value!);
+        if (depth && depth.yearsSpanned >= MIN_YEARS_FOR_LIVE_SEASONALITY) {
+          return { instrument, result: { monthly: computeMonthlySeasonality(history.value!), weekday: computeWeekdaySeasonality(history.value!) }, unavailableReason: null };
+        }
+        return {
+          instrument,
+          result: null,
+          unavailableReason: `Only ${depth?.yearsSpanned ?? 0} year(s) of real stored history — below the ${MIN_YEARS_FOR_LIVE_SEASONALITY}-year minimum for a live seasonality read.`,
+        };
+      }
+      return { instrument, result: null, unavailableReason: history.error ?? "Historical price data currently unavailable." };
+    })
+  );
 }
 
 function formatSignedNoPct(v: number): string {

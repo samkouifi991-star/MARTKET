@@ -255,6 +255,26 @@ export type InvestorSentiment = {
 
 export type NewsImpact = "Bullish" | "Bearish" | "Mixed" | "Neutral" | "Unclear";
 
+/** Base fields every article — demo or live/stored — always carries; the
+ * rest are demo-only extras with no honest real-data equivalent (see
+ * lib/pipeline/news-feed.ts), so they're optional here. NewsArticle below
+ * (the demo shape) structurally satisfies this. */
+export type ClientNewsArticle = {
+  id: string;
+  headline: string;
+  source: string;
+  publishedAt: string;
+  affectedMarkets: string[];
+  interpretation: NewsImpact;
+  importance: number;
+  confidence: number;
+  explanation: string;
+  topic?: string;
+  urgency?: number;
+  isPriced?: boolean;
+  expectedImpactDuration?: string;
+};
+
 export type NewsArticle = {
   id: string;
   headline: string;
@@ -273,6 +293,25 @@ export type NewsArticle = {
 };
 
 export type CalendarImpact = "Low" | "Medium" | "High";
+
+/** Base fields every calendar row — demo or live/stored — always carries;
+ * see lib/pipeline/calendar-feed.ts for why real/forecast/actual are plain
+ * numbers (no unit string per indicator is stored) and historicalReaction
+ * has no honest real-data equivalent, so it's optional here. CalendarEvent
+ * below (the demo shape) does NOT structurally satisfy this one (its
+ * previous/forecast/actual are pre-formatted strings) — pages convert. */
+export type ClientCalendarEvent = {
+  id: string;
+  dateTime: string;
+  country: string;
+  event: string;
+  impact: CalendarImpact | "Unclassified";
+  previous: number | string | null;
+  forecast: number | string | null;
+  actual: number | string | null;
+  affectedMarkets: string[];
+  historicalReaction?: string;
+};
 
 export type CalendarEvent = {
   id: string;

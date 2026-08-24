@@ -176,6 +176,99 @@ export async function insertNewsArticle(article: NormalizedNewsArticle, analysis
     .onConflictDoNothing({ target: newsArticles.url });
 }
 
+export type StoredCalendarEvent = {
+  id: number;
+  country: string;
+  event: string;
+  dateTime: string;
+  impact: string | null;
+  actual: number | null;
+  previous: number | null;
+  forecast: number | null;
+  affectedMarkets: string[];
+};
+
+function toStoredCalendarEvent(r: {
+  id: number;
+  country: string;
+  event: string;
+  dateTime: Date;
+  impact: string | null;
+  actual: number | null;
+  previous: number | null;
+  forecast: number | null;
+  affectedMarkets: string[];
+}): StoredCalendarEvent {
+  return { id: r.id, country: r.country, event: r.event, dateTime: r.dateTime.toISOString(), impact: r.impact, actual: r.actual, previous: r.previous, forecast: r.forecast, affectedMarkets: r.affectedMarkets };
+}
+
+// Storage-first read for the general economic-calendar surfaces (the
+// Dashboard's "Upcoming high-impact events" card and the /economic-calendar
+// page) — reads the same economicEvents rows the FMP calendar cron already
+// writes (see updateEconomicEventClassification/upsertEconomicEvent), no
+// live provider call at render time.
+export async function getUpcomingHighImpactEvents(withinHours: number, limit: number): Promise<StoredCalendarEvent[]> {
+  const db = getDb();
+  const now = new Date();
+  const until = new Date(now.getTime() + withinHours * 3600_000);
+  const rows = await db
+    .select()
+    .from(economicEvents)
+    .where(and(eq(economicEvents.impact, "High"), sql`${economicEvents.dateTime} > ${now}`, sql`${economicEvents.dateTime} <= ${until}`))
+    .orderBy(economicEvents.dateTime)
+    .limit(limit);
+  return rows.map(toStoredCalendarEvent);
+}
+
+/** Every stored event within [fromDate, toDate] — the wide window the
+ * calendar page's client-side Upcoming/Past/All filters operate over. */
+export async function getEconomicEventsInRange(fromDate: Date, toDate: Date, limit: number): Promise<StoredCalendarEvent[]> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(economicEvents)
+    .where(and(sql`${economicEvents.dateTime} >= ${fromDate}`, sql`${economicEvents.dateTime} <= ${toDate}`))
+    .orderBy(economicEvents.dateTime)
+    .limit(limit);
+  return rows.map(toStoredCalendarEvent);
+}
+
+export type StoredNewsArticle = {
+  id: number;
+  headline: string;
+  source: string;
+  url: string;
+  publishedAt: string;
+  affectedMarkets: string[];
+  interpretation: string;
+  importance: number;
+  confidence: number;
+  reason: string;
+};
+
+// Storage-first read for the general (non-symbol-scoped) news feed — the
+// Dashboard's "High-importance news" card and the /news page. Reads the
+// same newsArticles rows cron/news's insertNewsArticle already writes (real
+// FMP articles run through the v1 keyword classifier) — no live provider
+// call at render time, matching every other public surface's
+// storage-first rule (see last-known-good.ts's file header).
+export async function getRecentNews(limit: number): Promise<StoredNewsArticle[]> {
+  const db = getDb();
+  const rows = await db.select().from(newsArticles).orderBy(desc(newsArticles.publishedAt)).limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    headline: r.headline,
+    source: r.source,
+    url: r.url,
+    publishedAt: r.publishedAt.toISOString(),
+    affectedMarkets: r.affectedMarkets,
+    interpretation: r.interpretation,
+    importance: r.importance,
+    confidence: r.confidence,
+    reason: r.reason,
+  }));
+}
+
 export type StoredPrice = {
   price: number;
   changePct24h: number;

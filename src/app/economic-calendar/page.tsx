@@ -1,20 +1,30 @@
 import { CALENDAR_EVENTS, upcomingHighImpact } from "@/lib/demo/calendar";
+import { getLiveCalendarFeed } from "@/lib/pipeline/calendar-feed";
+import { getUpcomingHighImpactEvents } from "@/db/queries/market-data";
 import { CalendarClient } from "./CalendarClient";
 import { AlertTriangle } from "lucide-react";
 import { formatDateTime } from "@/lib/time";
 import { requireEntitlement } from "@/lib/auth/dal";
+import { isDemoOnly } from "@/services/data-mode";
 
 export const metadata = { title: "Economic Calendar — Market Intelligence AI" };
+export const dynamic = "force-dynamic";
 
 export default async function EconomicCalendarPage() {
   await requireEntitlement();
-  const soon = upcomingHighImpact(24);
+  const demoMode = isDemoOnly();
+
+  const [events, soon] = demoMode
+    ? [CALENDAR_EVENTS, upcomingHighImpact(24)]
+    : await Promise.all([getLiveCalendarFeed(14, 60), getUpcomingHighImpactEvents(24, 10)]);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Economic Calendar</h1>
-        <p className="text-sm text-(--text-faint) mt-1">Every tracked release and central-bank decision, with forecast, previous, actual, and historical market reaction.</p>
+        <p className="text-sm text-(--text-faint) mt-1">
+          Every tracked release and central-bank decision, with forecast, previous, and actual values{demoMode ? ", and historical market reaction" : ""}.
+        </p>
       </div>
 
       {soon.length > 0 && (
@@ -32,7 +42,7 @@ export default async function EconomicCalendarPage() {
         </div>
       )}
 
-      <CalendarClient events={CALENDAR_EVENTS} />
+      <CalendarClient events={events} />
     </div>
   );
 }

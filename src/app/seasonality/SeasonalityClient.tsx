@@ -8,27 +8,34 @@ export function SeasonalityClient({
   instruments,
   monthlyBySymbol,
   weekdayBySymbol,
+  unavailable = {},
 }: {
   instruments: Instrument[];
   monthlyBySymbol: Record<string, SeasonalityStat[]>;
   weekdayBySymbol: Record<string, SeasonalityStat[]>;
+  unavailable?: Record<string, string>;
 }) {
-  const [symbol, setSymbol] = useState(instruments[0].symbol);
+  const firstWithData = instruments.find((i) => monthlyBySymbol[i.symbol])?.symbol ?? instruments[0].symbol;
+  const [symbol, setSymbol] = useState(firstWithData);
   const [view, setView] = useState<"Monthly" | "Day of Week">("Monthly");
 
-  const stats = useMemo(() => (view === "Monthly" ? monthlyBySymbol[symbol] : weekdayBySymbol[symbol]), [symbol, view, monthlyBySymbol, weekdayBySymbol]);
-  const currentIndex = view === "Monthly" ? 7 : null; // August is live period in this demo
+  const stats = useMemo(() => (view === "Monthly" ? monthlyBySymbol[symbol] : weekdayBySymbol[symbol]) ?? [], [symbol, view, monthlyBySymbol, weekdayBySymbol]);
+  const currentMonthName = new Date().toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+  const currentIndex = view === "Monthly" ? stats.findIndex((s) => s.period === currentMonthName) : null;
+
+  if (unavailable[symbol]) {
+    return (
+      <div className="space-y-4">
+        <SymbolPicker symbol={symbol} setSymbol={setSymbol} instruments={instruments} />
+        <div className="card p-6 text-sm text-(--text-faint)">{unavailable[symbol]}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <select value={symbol} onChange={(e) => setSymbol(e.target.value)} className="h-8 rounded-lg border border-(--border) bg-(--bg-card) px-2 text-xs">
-          {instruments.map((i) => (
-            <option key={i.symbol} value={i.symbol}>
-              {i.symbol} — {i.name}
-            </option>
-          ))}
-        </select>
+        <SymbolPicker symbol={symbol} setSymbol={setSymbol} instruments={instruments} />
         <div className="flex rounded-lg border border-(--border) overflow-hidden">
           {(["Monthly", "Day of Week"] as const).map((v) => (
             <button
@@ -83,5 +90,17 @@ export function SeasonalityClient({
         Averages alone can be distorted by outliers — compare against the median, win rate, and range before treating any single period as a signal. Seasonality contributes to the total score as one factor among nine, never as a standalone trade trigger.
       </p>
     </div>
+  );
+}
+
+function SymbolPicker({ symbol, setSymbol, instruments }: { symbol: string; setSymbol: (s: string) => void; instruments: Instrument[] }) {
+  return (
+    <select value={symbol} onChange={(e) => setSymbol(e.target.value)} className="h-8 rounded-lg border border-(--border) bg-(--bg-card) px-2 text-xs">
+      {instruments.map((i) => (
+        <option key={i.symbol} value={i.symbol}>
+          {i.symbol} — {i.name}
+        </option>
+      ))}
+    </select>
   );
 }

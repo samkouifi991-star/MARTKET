@@ -28,7 +28,7 @@ export function AppShell({ children, dataMode, user }: { children: React.ReactNo
 
   return (
     <div className="flex min-h-dvh">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} dataMode={dataMode} />
       <div className="flex-1 min-w-0 flex flex-col">
         <Topbar onMenu={() => setSidebarOpen(true)} dataMode={dataMode} user={user} />
         <main className="flex-1 min-w-0 px-4 sm:px-6 py-6 max-w-[1600px] w-full mx-auto">{children}</main>

@@ -136,7 +136,7 @@ describe("buildScorecardData — sub-scores", () => {
 describe("buildScorecardData — institutional vs retail sentiment stay distinct sections", () => {
   it("CFTC positioning (institutional) and retail sentiment are separately keyed, never merged", async () => {
     const institutional: CardResult<InstitutionalCardData> = {
-      data: { classification: "Non-Commercial", netPositioning: 12000, netWeeklyChange: 500, pctLong: 60, pctShort: 40, openInterest: 50000, percentile: 70, direction: "Bullish", strength: "Moderate", reportDate: "2027-01-01" },
+      data: { classification: "Non-Commercial", longContracts: 30000, shortContracts: 20000, netPositioning: 12000, netWeeklyChange: 500, pctLong: 60, pctShort: 40, openInterest: 50000, percentile: 70, direction: "Bullish", strength: "Moderate", reportDate: "2027-01-01" },
       freshness: "live",
       source: "CFTC Traders in Financial Futures",
       lastUpdated: new Date().toISOString(),

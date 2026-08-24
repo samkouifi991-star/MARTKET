@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { DataMode } from "@/services/data-mode";
 import {
   LayoutDashboard,
   ListOrdered,
@@ -29,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 
-type NavItem = { label: string; href: string; icon: React.ComponentType<{ size?: number; className?: string }> };
+type NavItem = { label: string; href: string; icon: React.ComponentType<{ size?: number; className?: string }>; demoOnly?: boolean };
 type NavGroup = { title: string; items: NavItem[] };
 
 const NAV_GROUPS: NavGroup[] = [
@@ -64,7 +65,12 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Inflation", href: "/inflation", icon: Percent },
       { label: "Labor Market", href: "/labor-market", icon: Briefcase },
       { label: "Interest Rates", href: "/interest-rates", icon: Landmark },
-      { label: "Options Sentiment", href: "/options-sentiment", icon: SlidersHorizontal },
+      // Phase 18 (public-launch demo sweep): put/call ratios, the VIX proxy,
+      // Fear & Greed, and credit-spread readings on this page have no real
+      // data source anywhere in this codebase (no provider integration
+      // exists for any of them) — demo-only, hidden from nav outside demo
+      // mode rather than shown with fabricated numbers. See page.tsx.
+      { label: "Options Sentiment", href: "/options-sentiment", icon: SlidersHorizontal, demoOnly: true },
     ],
   },
   {
@@ -93,7 +99,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function Sidebar({ open, onClose, dataMode }: { open: boolean; onClose: () => void; dataMode: DataMode }) {
   const pathname = usePathname();
 
   return (
@@ -123,7 +129,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 {group.title}
               </div>
               <div className="space-y-0.5">
-                {group.items.map((item) => {
+                {group.items.filter((item) => !item.demoOnly || dataMode === "demo").map((item) => {
                   const active = pathname === item.href;
                   const Icon = item.icon;
                   return (

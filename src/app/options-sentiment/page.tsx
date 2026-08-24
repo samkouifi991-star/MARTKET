@@ -4,11 +4,34 @@ import { INVESTOR_SENTIMENT } from "@/lib/demo/investorSentiment";
 import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
 import { requireEntitlement } from "@/lib/auth/dal";
+import { isDemoOnly } from "@/services/data-mode";
 
 export const metadata = { title: "Options & Investor Sentiment — Market Intelligence AI" };
+export const dynamic = "force-dynamic";
 
+// Phase 18 (public-launch demo sweep): put/call ratios, the VIX proxy,
+// Fear & Greed, and credit-spread readings here have no real data source
+// anywhere in this codebase — no provider integration exists for any of
+// them, and building one is out of scope for this pass ("do not add
+// another market-data provider"). Demo-mode only; outside demo mode this
+// renders an honest "not available yet" state instead of fabricated
+// numbers. Hidden from nav outside demo mode too — see Sidebar.tsx.
 export default async function OptionsSentimentPage() {
   await requireEntitlement();
+  if (!isDemoOnly()) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-xl font-semibold">Options & Investor Sentiment</h1>
+        </div>
+        <Card>
+          <p className="text-sm text-(--text-faint) py-6 text-center">
+            Not available yet — this feature requires an options/investor-sentiment data provider not yet connected. It is not shown with estimated data.
+          </p>
+        </Card>
+      </div>
+    );
+  }
   const indices = INSTRUMENTS.filter((i) => i.assetClass === "Indices").map((i) => ({ instrument: i, options: generateOptionsSentiment(i) }));
 
   return (

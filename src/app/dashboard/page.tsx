@@ -5,12 +5,17 @@ import { Card } from "@/components/ui/Card";
 import { AutoRefresh } from "@/components/ui/AutoRefresh";
 import { formatSigned, scoreColorClass } from "@/lib/format";
 import { generateRiskGauge } from "@/lib/demo/riskGauge";
+import { getLiveRiskGauge } from "@/lib/pipeline/risk-gauge";
 import { NEWS_ARTICLES } from "@/lib/demo/news";
+import { getLiveNewsFeed } from "@/lib/pipeline/news-feed";
 import { upcomingHighImpact } from "@/lib/demo/calendar";
+import { getUpcomingHighImpactEvents } from "@/db/queries/market-data";
 import { formatDateTime, formatRelative } from "@/lib/time";
 import { publicInstruments } from "@/services/market-coverage";
 import { generateSmartMoney } from "@/lib/demo/smartMoney";
+import { resolveSmartMoney } from "@/lib/pipeline/positioning";
 import { requireEntitlement } from "@/lib/auth/dal";
+import { isDemoOnly } from "@/services/data-mode";
 import { ArrowRight, Gauge } from "lucide-react";
 
 export const metadata = { title: "Dashboard — Market Intelligence AI" };
@@ -37,15 +42,41 @@ export default async function DashboardPage() {
   const veryBullish = eligible.filter((r) => r.score!.bias === "Very Bullish").length;
   const veryBearish = eligible.filter((r) => r.score!.bias === "Very Bearish").length;
 
-  const risk = generateRiskGauge();
-  const topNews = [...NEWS_ARTICLES].sort((a, b) => b.importance - a.importance).slice(0, 4);
-  const events = upcomingHighImpact(72).slice(0, 4);
-  // TODO(Phase 18 — remove demo feel): this card still calls the pure demo
-  // generator unconditionally, regardless of DATA_MODE — it needs the same
-  // real-data treatment score/price already got. Scoped out of Phase 1,
-  // which only restricts symbol EXPOSURE (publicInstruments()) to
-  // LAUNCH_READY markets, not the demo-vs-live data source itself.
-  const divergences = publicInstruments().map((i) => generateSmartMoney(i)).filter((d) => d.signal !== "None").slice(0, 3);
+  const demoMode = isDemoOnly();
+  // Phase 18 (public-launch demo sweep): 6 of the gauge's 9 components are
+  // fed real 24h % changes from the same canonical, storage-first quote
+  // resolver every other public surface uses; the 3 components with no live
+  // source anywhere in this codebase (VIX, yield-curve slope, credit
+  // spread) are left honestly unavailable rather than estimated — see
+  // pipeline/risk-gauge.ts.
+  const liveRisk = demoMode ? null : await getLiveRiskGauge();
+  const risk = demoMode ? generateRiskGauge() : liveRisk!.result;
+  // Phase 18 (public-launch demo sweep): both cards below now read real
+  // stored data outside demo mode — the same newsArticles/economicEvents
+  // rows the cron jobs already populate — instead of the hand-seeded demo
+  // arrays regardless of DATA_MODE.
+  const topNews = demoMode
+    ? [...NEWS_ARTICLES].sort((a, b) => b.importance - a.importance).slice(0, 4)
+    : (await getLiveNewsFeed(30)).sort((a, b) => b.importance - a.importance).slice(0, 4);
+  const events = demoMode ? upcomingHighImpact(72).slice(0, 4) : await getUpcomingHighImpactEvents(72, 4);
+  // Phase 18 (public-launch demo sweep): this card now calls the real
+  // CFTC-positioning-momentum resolver (the same one the Scorecard's Smart
+  // Money section and /smart-money page use) outside demo mode, instead of
+  // the pure demo generator regardless of DATA_MODE.
+  const divergences = demoMode
+    ? publicInstruments()
+        .map((i) => {
+          const d = generateSmartMoney(i);
+          return { symbol: i.symbol, signal: d.signal, confidence: d.confidence };
+        })
+        .filter((d) => d.signal !== "None")
+        .slice(0, 3)
+    : (
+        await Promise.all(publicInstruments().map(async (i) => ({ symbol: i.symbol, ...(await resolveSmartMoney(i.symbol)) })))
+      )
+        .filter((d) => d.signal !== "None")
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, 3);
 
   return (
     <div className="space-y-6">
@@ -104,21 +135,27 @@ export default async function DashboardPage() {
         </Card>
 
         <Card title="Risk-On / Risk-Off Gauge" action={<Link href="/risk-gauge" className="text-xs text-(--accent) hover:underline">Details →</Link>}>
-          <div className="flex items-center gap-4">
-            <div className="grid place-items-center w-14 h-14 rounded-full bg-(--accent-soft) text-(--accent)">
-              <Gauge size={24} />
-            </div>
-            <div>
-              <div className="text-2xl font-semibold tabular-nums">{risk.value}</div>
-              <div className="text-sm text-(--text-dim)">{risk.label}</div>
-            </div>
-          </div>
-          <div className="h-1.5 w-full rounded-full bg-(--border) mt-4">
-            <div
-              className="h-1.5 rounded-full bg-gradient-to-r from-rose-400 via-slate-400 to-emerald-400"
-              style={{ width: `${risk.value}%` }}
-            />
-          </div>
+          {risk ? (
+            <>
+              <div className="flex items-center gap-4">
+                <div className="grid place-items-center w-14 h-14 rounded-full bg-(--accent-soft) text-(--accent)">
+                  <Gauge size={24} />
+                </div>
+                <div>
+                  <div className="text-2xl font-semibold tabular-nums">{risk.value}</div>
+                  <div className="text-sm text-(--text-dim)">{risk.label}</div>
+                </div>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-(--border) mt-4">
+                <div
+                  className="h-1.5 rounded-full bg-gradient-to-r from-rose-400 via-slate-400 to-emerald-400"
+                  style={{ width: `${risk.value}%` }}
+                />
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-(--text-faint)">{liveRisk?.unavailableReason ?? "Data temporarily unavailable."}</p>
+          )}
         </Card>
       </div>
 

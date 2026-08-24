@@ -1,18 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarEvent } from "@/lib/types";
+import { ClientCalendarEvent } from "@/lib/types";
 import { formatDateTime, formatRelative, NOW } from "@/lib/time";
 
-const IMPACT_CLASSES: Record<CalendarEvent["impact"], string> = {
+const IMPACT_CLASSES: Record<ClientCalendarEvent["impact"], string> = {
   High: "text-rose-400 bg-rose-500/10",
   Medium: "text-amber-400 bg-amber-500/10",
   Low: "text-(--text-faint) bg-slate-500/10",
+  Unclassified: "text-(--text-faint) bg-slate-500/10",
 };
 
-export function CalendarClient({ events }: { events: CalendarEvent[] }) {
+export function CalendarClient({ events }: { events: ClientCalendarEvent[] }) {
   const [country, setCountry] = useState("All");
-  const [impact, setImpact] = useState<"All" | CalendarEvent["impact"]>("All");
+  const [impact, setImpact] = useState<"All" | ClientCalendarEvent["impact"]>("All");
   const [when, setWhen] = useState<"Upcoming" | "Past" | "All">("Upcoming");
 
   const countries = useMemo(() => ["All", ...Array.from(new Set(events.map((e) => e.country)))], [events]);
@@ -38,7 +39,7 @@ export function CalendarClient({ events }: { events: CalendarEvent[] }) {
           ))}
         </select>
         <select value={impact} onChange={(e) => setImpact(e.target.value as typeof impact)} className="h-8 rounded-lg border border-(--border) bg-(--bg-card) px-2 text-xs">
-          {["All", "High", "Medium", "Low"].map((i) => (
+          {["All", "High", "Medium", "Low", ...(events.some((e) => e.impact === "Unclassified") ? ["Unclassified"] : [])].map((i) => (
             <option key={i} value={i}>{i} impact</option>
           ))}
         </select>
@@ -62,7 +63,7 @@ export function CalendarClient({ events }: { events: CalendarEvent[] }) {
               <th className="py-2 px-3 text-right">Previous</th>
               <th className="py-2 px-3 text-right">Forecast</th>
               <th className="py-2 px-3 text-right">Actual</th>
-              <th className="py-2 pl-3">Historical reaction</th>
+              {events.some((e) => e.historicalReaction) && <th className="py-2 pl-3">Historical reaction</th>}
             </tr>
           </thead>
           <tbody>
@@ -77,10 +78,10 @@ export function CalendarClient({ events }: { events: CalendarEvent[] }) {
                 <td className="py-2 px-3">
                   <span className={`text-[11px] rounded-full px-2 py-0.5 font-medium ${IMPACT_CLASSES[e.impact]}`}>{e.impact}</span>
                 </td>
-                <td className="py-2 px-3 text-right tabular-nums text-(--text-faint)">{e.previous}</td>
-                <td className="py-2 px-3 text-right tabular-nums text-(--text-faint)">{e.forecast}</td>
+                <td className="py-2 px-3 text-right tabular-nums text-(--text-faint)">{e.previous ?? "—"}</td>
+                <td className="py-2 px-3 text-right tabular-nums text-(--text-faint)">{e.forecast ?? "—"}</td>
                 <td className="py-2 px-3 text-right tabular-nums font-medium">{e.actual ?? "—"}</td>
-                <td className="py-2 pl-3 text-xs text-(--text-faint) max-w-xs">{e.historicalReaction}</td>
+                {events.some((ev) => ev.historicalReaction) && <td className="py-2 pl-3 text-xs text-(--text-faint) max-w-xs">{e.historicalReaction}</td>}
               </tr>
             ))}
           </tbody>
