@@ -11,6 +11,16 @@ export function verifyCronAuth(req: NextRequest): boolean {
   return req.headers.get("authorization") === `Bearer ${secret}`;
 }
 
+/** Same idea as verifyCronAuth, for routes triggered by an external
+ * scheduler (GitHub Actions) rather than Vercel Cron itself — accepts a
+ * dedicated EVENT_WATCH_SECRET if one is configured, falling back to the
+ * existing CRON_SECRET so a separate secret is optional, not required. */
+export function verifyEventWatchAuth(req: NextRequest): boolean {
+  const secret = process.env.EVENT_WATCH_SECRET || process.env.CRON_SECRET;
+  if (!secret) return false; // fail closed: no secret configured means no access
+  return req.headers.get("authorization") === `Bearer ${secret}`;
+}
+
 export function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
