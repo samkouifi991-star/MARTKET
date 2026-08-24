@@ -1,5 +1,5 @@
 # Phase 19 — one-off, manually-triggered runner for the public-launch
-# readiness audit (GET /api/admin/launch-audit). This sandbox's own
+# readiness audit (GET /api/watch/launch-audit). This sandbox's own
 # outbound network policy blocks *.vercel.app directly (see
 # scorecard-diagnostic-screenshot.yml's header for the same limitation),
 # so this reuses that workflow's pattern: a GitHub Actions runner
@@ -30,7 +30,7 @@ jobs:
           echo "BEGIN_AUDIT_JSON"
           http_status=$(curl -sS -L -D headers.txt -o response.json -w "%{http_code}" \
             -H "Authorization: Bearer ${AUDIT_SECRET}" \
-            "${APP_BASE_URL}/api/admin/launch-audit")
+            "${APP_BASE_URL}/api/watch/launch-audit")
           echo "HTTP_STATUS: ${http_status}"
           echo "BEGIN_HEADERS"
           cat headers.txt
