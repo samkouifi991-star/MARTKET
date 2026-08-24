@@ -21,8 +21,12 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 // the high-frequency economic-release watch route — see
 // app/api/watch/economic-releases/route.ts — is the same shape, called by
 // GitHub Actions with EVENT_WATCH_SECRET/CRON_SECRET, never a browser).
+// /diagnostics/ is the same shape too: read-only verification pages
+// (app/diagnostics/**) that check their own EVENT_WATCH_SECRET/CRON_SECRET
+// via a URL query param instead of a session — see that page's own header
+// comment. Never linked from the product UI.
 const PUBLIC_EXACT = new Set(["/", "/signup", "/signin", "/pricing"]);
-const PUBLIC_PREFIXES = ["/legal", "/api/webhooks/", "/api/cron/", "/api/watch/"];
+const PUBLIC_PREFIXES = ["/legal", "/api/webhooks/", "/api/cron/", "/api/watch/", "/diagnostics/"];
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_EXACT.has(pathname)) return true;
