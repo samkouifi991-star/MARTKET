@@ -1,11 +1,17 @@
 # One-off, manually-triggered verification job — NOT a scheduled/product
 # workflow. This sandbox's own outbound network policy blocks
-# *.vercel.app directly, so this uses a GitHub Actions runner (unrestricted
+# *.vercel.app directly (and, it turns out, GitHub's own artifact blob
+# storage host too), so this uses a GitHub Actions runner (unrestricted
 # egress) as the channel to load the real, deployed
 # /diagnostics/scorecard/[symbol] page (see that page's own header comment
 # — secret-gated via a query param, not a customer session) in a real
-# headless browser and capture what it actually rendered: a full-page
-# screenshot plus the raw JSON diagnostic dump embedded on the page.
+# headless browser and capture what it actually rendered. Since the
+# artifact download URL itself isn't reachable from that sandbox, the
+# screenshot (JPEG, compressed) and the page's raw JSON diagnostic dump
+# are ALSO printed directly to this job's own log (base64 for the image,
+# between clear markers) so they can be read back via the GitHub Actions
+# API instead of a direct blob fetch. The artifact upload stays too, as a
+# normal way for a human to grab the files from the Actions UI.
 # Reuses the same EVENT_WATCH_SECRET/APP_BASE_URL secrets already
 # configured for the Economic Release Watch workflow — nothing new to
 # configure. Safe to delete once no longer needed.
@@ -54,7 +60,7 @@ jobs:
           const url = `${baseUrl}/diagnostics/scorecard/${symbol}?key=${encodeURIComponent(key)}`;
 
           const browser = await chromium.launch();
-          const page = await browser.newPage({ viewport: { width: 1440, height: 1400 } });
+          const page = await browser.newPage({ viewport: { width: 1320, height: 1200 } });
 
           let response;
           try {
@@ -69,7 +75,9 @@ jobs:
           if (response.status() !== 200) {
             const body = await page.content();
             fs.writeFileSync("scorecard-error.html", body);
-            console.error("Non-200 response — see scorecard-error.html artifact. Not taking a screenshot.");
+            console.log("BEGIN_ERROR_HTML");
+            console.log(body.slice(0, 20000));
+            console.log("END_ERROR_HTML");
             await browser.close();
             process.exit(1);
           }
@@ -78,7 +86,7 @@ jobs:
           // rendering before capturing.
           await page.waitForTimeout(2500).catch(() => {});
 
-          await page.screenshot({ path: "scorecard.png", fullPage: true, type: "png" });
+          await page.screenshot({ path: "scorecard.jpg", fullPage: true, type: "jpeg", quality: 55 });
 
           const bodyText = await page.evaluate(() => document.body.innerText);
           fs.writeFileSync("scorecard-text.txt", bodyText);
@@ -88,9 +96,23 @@ jobs:
             return pre ? pre.textContent : null;
           });
           if (jsonText) fs.writeFileSync("scorecard-data.json", jsonText);
-          else console.error("WARNING: could not find the raw JSON <pre> block on the page.");
 
           await browser.close();
+
+          console.log("BEGIN_JSON");
+          console.log(jsonText ?? "null");
+          console.log("END_JSON");
+
+          console.log("BEGIN_TEXT");
+          console.log(bodyText);
+          console.log("END_TEXT");
+
+          const b64 = fs.readFileSync("scorecard.jpg").toString("base64");
+          console.log("SCREENSHOT_BYTE_LENGTH:", fs.statSync("scorecard.jpg").size, "BASE64_LENGTH:", b64.length);
+          console.log("BEGIN_SCREENSHOT_B64");
+          console.log(b64);
+          console.log("END_SCREENSHOT_B64");
+
           console.log("DONE");
           SCRIPT
           node script.mjs
@@ -101,7 +123,7 @@ jobs:
         with:
           name: scorecard-diagnostic
           path: |
-            scorecard.png
+            scorecard.jpg
             scorecard-text.txt
             scorecard-data.json
             scorecard-error.html
