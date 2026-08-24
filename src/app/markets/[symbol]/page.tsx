@@ -92,7 +92,6 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
   // from Neon capped at the same window (see db/queries/scores.ts's
   // SCORE_HISTORY_WINDOW_HOURS) — never fabricated or interpolated.
   const recentPriceSeries = price ? filterToRecentWindow(price.series) : [];
-  const recentScoreHistory = filterToRecentWindow(score.history);
 
   // Reference lines (and the tooltip's Bias label) on the Score History
   // chart must reflect whatever Admin currently has configured — never a
@@ -220,7 +219,7 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
         </Card>
 
         <Card title="Score history (5 months)" subtitle={`24h change ${formatSigned(score.change24h)}`}>
-          <ScoreHistoryChart history={recentScoreHistory} thresholds={scoringConfig.biasThresholds} />
+          <ScoreHistoryChart history={score.history} thresholds={scoringConfig.biasThresholds} autoWindow />
         </Card>
       </div>
 

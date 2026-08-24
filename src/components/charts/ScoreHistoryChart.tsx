@@ -2,7 +2,8 @@
 
 import { ScoreHistoryPoint } from "@/lib/types";
 import { BiasThreshold, DEFAULT_BIAS_THRESHOLDS, classifyBias } from "@/lib/config";
-import { formatDate } from "@/lib/time";
+import { formatDate, filterToRecentWindow } from "@/lib/time";
+import { dedupeScoreHistoryByDate, MIN_LEGITIMATE_OBSERVATIONS } from "@/lib/pipeline/score-history-view";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 function thresholdMin(thresholds: BiasThreshold[], bias: string): number | undefined {
@@ -34,9 +35,43 @@ function ScoreTooltipContent({ active, payload, thresholds }: ScoreTooltipPayloa
  * Bias label) always reflect what Admin actually has configured, never a
  * hardcoded ±4/±8. Changing thresholds in Admin only changes how this
  * chart's existing, unchanged historical scores are labeled/framed — it
- * never rewrites the stored history itself. */
-export function ScoreHistoryChart({ history, thresholds = DEFAULT_BIAS_THRESHOLDS, height = 220 }: { history: ScoreHistoryPoint[]; thresholds?: BiasThreshold[]; height?: number }) {
-  const data = history.map((p) => ({ ...p, label: formatDate(p.date) }));
+ * never rewrites the stored history itself.
+ *
+ * `autoWindow` (default false, preserving every existing caller's current
+ * behavior unchanged) opts into this component owning the "is there enough
+ * real history to show a 5-month chart" decision: pass the FULL, un-
+ * windowed history in this mode. Below MIN_LEGITIMATE_OBSERVATIONS deduped
+ * points, it renders an honest "still building" note instead of stretching
+ * a handful of real points across a misleadingly wide axis; once enough
+ * real history has accumulated, it auto-switches to the normal 5-month
+ * window. The landing page keeps doing its own separate real-vs-
+ * illustrative-example selection upstream (see app/page.tsx) and passes
+ * `autoWindow={false}` (the default) to keep that logic in charge there. */
+export function ScoreHistoryChart({
+  history,
+  thresholds = DEFAULT_BIAS_THRESHOLDS,
+  height = 220,
+  autoWindow = false,
+}: {
+  history: ScoreHistoryPoint[];
+  thresholds?: BiasThreshold[];
+  height?: number;
+  autoWindow?: boolean;
+}) {
+  const deduped = dedupeScoreHistoryByDate(history);
+
+  if (autoWindow && deduped.length < MIN_LEGITIMATE_OBSERVATIONS) {
+    return (
+      <div style={{ height }} className="flex items-center justify-center text-center px-4">
+        <p className="text-xs text-(--text-faint)">
+          {deduped.length === 0 ? "Score history is building — tracking has not started yet." : `Score history is building — tracking began ${formatDate(deduped[0].date)}.`}
+        </p>
+      </div>
+    );
+  }
+
+  const windowed = autoWindow ? filterToRecentWindow(deduped) : deduped;
+  const data = windowed.map((p) => ({ ...p, label: formatDate(p.date) }));
 
   const veryBullish = thresholdMin(thresholds, "Very Bullish");
   const bullish = thresholdMin(thresholds, "Bullish");

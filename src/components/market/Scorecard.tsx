@@ -271,7 +271,7 @@ export function Scorecard({ instrument, score, data, biasThresholds }: { instrum
         </div>
         <div className="w-full mt-3">
           <div className="text-[10px] text-(--text-faint) uppercase tracking-wide mb-1">Score history</div>
-          <ScoreHistoryChart history={score.history} thresholds={biasThresholds} height={120} />
+          <ScoreHistoryChart history={score.history} thresholds={biasThresholds} height={120} autoWindow />
         </div>
       </Card>
 
