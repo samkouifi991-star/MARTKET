@@ -1,7 +1,10 @@
 import { DataFreshness } from "@/lib/types";
 import { formatRelative } from "@/lib/time";
 
-const LABELS: Record<DataFreshness, { text: string; classes: string }> = {
+// Exported so other components (e.g. the scorecard's data-quality summary)
+// can reuse the exact same freshness wording instead of maintaining a
+// second parallel label set.
+export const DATA_FRESHNESS_LABELS: Record<DataFreshness, { text: string; classes: string }> = {
   live: { text: "Live", classes: "text-emerald-400 bg-emerald-500/10" },
   delayed: { text: "Delayed", classes: "text-amber-400 bg-amber-500/10" },
   estimated: { text: "Estimated", classes: "text-sky-400 bg-sky-500/10" },
@@ -14,7 +17,7 @@ const LABELS: Record<DataFreshness, { text: string; classes: string }> = {
 };
 
 export function DataFreshnessTag({ freshness, lastUpdated }: { freshness: DataFreshness; lastUpdated?: string }) {
-  const meta = LABELS[freshness];
+  const meta = DATA_FRESHNESS_LABELS[freshness];
   return (
     <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${meta.classes}`}>
       {meta.text}

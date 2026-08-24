@@ -336,6 +336,29 @@ describe("buildScorecardData — 'Why this score?' driver attribution (Phase 7)"
   });
 });
 
+describe("buildScorecardData — data-quality/trust summary (Phase 8)", () => {
+  it("tallies all 9 factors as live for the default fixture — a pure count, matching score.factors exactly", async () => {
+    const score = fixtureScore({});
+    const data = await buildScorecardData(GOLD, score, fixtureLiveDetail());
+    expect(data.dataQuality.total).toBe(9);
+    expect(data.dataQuality.counts.live).toBe(9);
+    expect(Object.keys(data.dataQuality.counts)).toEqual(["live"]);
+  });
+
+  it("tallies mixed freshness values correctly, matching each factor's own real freshness", async () => {
+    const base = fixtureScore({});
+    const score: MarketScore = {
+      ...base,
+      factors: base.factors.map((f, i) => (i === 0 ? { ...f, freshness: "delayed" } : i === 1 ? { ...f, freshness: "not_applicable" } : f)),
+    };
+    const data = await buildScorecardData(GOLD, score, fixtureLiveDetail());
+    expect(data.dataQuality.total).toBe(9);
+    expect(data.dataQuality.counts.delayed).toBe(1);
+    expect(data.dataQuality.counts.not_applicable).toBe(1);
+    expect(data.dataQuality.counts.live).toBe(7);
+  });
+});
+
 describe("buildScorecardData — Interest Rates section", () => {
   it("uses Gold's real asset-specific driver breakdown, not a generic policy-rate read", async () => {
     vi.mocked(computeGoldMacroRegime).mockResolvedValue({

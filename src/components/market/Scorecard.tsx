@@ -16,6 +16,7 @@ import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
 import { IndicatorRow, IndicatorSection, InterestRatesSection, ScorecardData, ScoreDriverRow, SurpriseIndexRow, TechnicalsRow } from "@/lib/pipeline/scorecard";
 import { UnavailableState } from "@/components/ui/UnavailableState";
+import { DATA_FRESHNESS_LABELS } from "@/components/ui/DataFreshnessTag";
 
 // The uppercase leading word for a not-yet-available section, matching
 // DataFreshnessTag's own vocabulary — "not_applicable" (a factor that
@@ -43,6 +44,25 @@ function badgeFromSurprise(row: IndicatorRow | SurpriseIndexRow): FactorSentimen
   if (row.surprise > 0) return "Bullish";
   if (row.surprise < 0) return "Bearish";
   return "Neutral";
+}
+
+// Compact "N contributing factors, X live, Y delayed, Z not applicable"
+// trust summary — a pure tally of score.factors' existing freshness values
+// (lib/pipeline/scorecard.ts's buildDataQualitySummary), with a tooltip
+// explaining that confidence reflects data availability/freshness/coverage
+// rather than a separate, unexplained number.
+function DataQualitySummaryLine({ summary }: { summary: { total: number; counts: Partial<Record<DataFreshness, number>> } }) {
+  const order: DataFreshness[] = ["live", "delayed", "stale", "estimated", "not_applicable", "unavailable", "error"];
+  const parts = order.filter((f) => summary.counts[f]).map((f) => `${summary.counts[f]} ${DATA_FRESHNESS_LABELS[f].text.toLowerCase()}`);
+  return (
+    <p
+      className="text-[10px] text-(--text-faint) leading-relaxed"
+      title="Confidence reflects data availability, freshness, and coverage across this market's contributing factors — not just the raw score."
+    >
+      {summary.total} contributing factor{summary.total === 1 ? "" : "s"}
+      {parts.length > 0 ? ` — ${parts.join(", ")}` : ""}
+    </p>
+  );
 }
 
 function SectionShell({ title, children }: { title: string; children: React.ReactNode }) {
@@ -338,6 +358,9 @@ export function Scorecard({
         </div>
         <div className="w-full mt-3">
           <ConfidenceBar value={score.confidence} />
+        </div>
+        <div className="w-full mt-1.5">
+          <DataQualitySummaryLine summary={data.dataQuality} />
         </div>
         <div className="w-full mt-3">
           <div className="text-[10px] text-(--text-faint) uppercase tracking-wide mb-1">Score history</div>

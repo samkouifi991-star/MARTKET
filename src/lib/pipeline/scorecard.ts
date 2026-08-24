@@ -75,6 +75,18 @@ function buildScoreDrivers(factors: ScoreFactor[]): { positive: ScoreDriverRow[]
   return { positive, negative };
 }
 
+// ---- Data-quality / trust summary (Phase 8) ----
+// A compact per-freshness count across all 9 score.factors — e.g. "9
+// factors — 6 live, 2 delayed, 1 not applicable" — purely a tally of
+// values already on score.factors, no I/O, no new classification.
+export type DataQualitySummary = { total: number; counts: Partial<Record<DataFreshness, number>> };
+
+function buildDataQualitySummary(factors: ScoreFactor[]): DataQualitySummary {
+  const counts: Partial<Record<DataFreshness, number>> = {};
+  for (const f of factors) counts[f.freshness] = (counts[f.freshness] ?? 0) + 1;
+  return { total: factors.length, counts };
+}
+
 // ---- Technicals section — derived directly from score.factors, no fetch ----
 export type TechnicalsRow = { label: string; classification: FactorSentiment; explanation: string; freshness: DataFreshness; lastUpdated: string; source: string };
 
@@ -336,6 +348,7 @@ async function resolveSurpriseIndexSection(symbol: string): Promise<SurpriseInde
 export type ScorecardData = {
   subScores: ScorecardSubScores;
   scoreDrivers: { positive: ScoreDriverRow[]; negative: ScoreDriverRow[] };
+  dataQuality: DataQualitySummary;
   technicals: TechnicalsRow[];
   institutional: CardResult<InstitutionalCardData>;
   retail: CardResult<NormalizedRetailSentiment>;
@@ -359,6 +372,7 @@ export async function buildScorecardData(instrument: Instrument, score: MarketSc
   return {
     subScores: computeSubScores(score.factors),
     scoreDrivers: buildScoreDrivers(score.factors),
+    dataQuality: buildDataQualitySummary(score.factors),
     technicals: buildTechnicalsRows(score.factors),
     // Institutional and Retail are distinct sections/fields — never merged
     // into one "positioning" object — CFTC (institutional) and retail
