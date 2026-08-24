@@ -330,6 +330,25 @@ export const sessions = pgTable("sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Rate-limiting for signin/signup (Phase 14 security audit) — a real DB
+// table rather than an in-memory counter because this app runs on
+// serverless (Vercel) instances with no shared in-process memory across
+// requests; an in-memory limiter would silently do nothing under real
+// traffic. One row per attempt (success or failure — the point is
+// request VOLUME, not outcome); db/queries/rate-limit.ts counts rows
+// within a window and prunes old ones on write so this table stays
+// bounded without a separate cleanup job.
+export const authAttempts = pgTable(
+  "auth_attempts",
+  {
+    id: serial("id").primaryKey(),
+    identifier: varchar("identifier", { length: 64 }).notNull(), // client IP (x-forwarded-for), or "unknown" if absent
+    action: varchar("action", { length: 16 }).notNull(), // "signin" | "signup"
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("auth_attempts_identifier_action_idx").on(t.identifier, t.action, t.attemptedAt)]
+);
+
 // One row per user — Stripe webhooks are the sole writer of status/period
 // fields (see app/api/webhooks/stripe/route.ts); this table is the app's
 // local cache of Stripe's billing state, read by the entitlement guard on
