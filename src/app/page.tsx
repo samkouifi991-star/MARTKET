@@ -403,6 +403,16 @@ export default async function LandingPage() {
                 </div>
               ))}
             </div>
+
+            <div className="mt-10 pt-8 border-t border-(--border)">
+              <h3 className="text-center text-xs font-semibold uppercase tracking-wide text-(--text-faint) mb-5">Data sources</h3>
+              <div className="grid sm:grid-cols-4 gap-4 max-w-3xl mx-auto text-center">
+                <DataSource name="OANDA" desc="FX prices, candles, retail positioning" />
+                <DataSource name="CFTC" desc="Institutional (Commitments of Traders)" />
+                <DataSource name="FRED" desc="Macro data & policy rates" />
+                <DataSource name="FMP" desc="Indices, metals, crypto, technicals" />
+              </div>
+            </div>
           </div>
         </section>
 
@@ -527,6 +537,15 @@ function MarketClassTile({ icon, label, count }: { icon: React.ReactNode; label:
       <div className="mx-auto grid place-items-center w-9 h-9 rounded-lg bg-(--accent-soft) text-(--accent) mb-2">{icon}</div>
       <div className="text-lg font-semibold tabular-nums">{count}</div>
       <div className="text-xs text-(--text-faint)">{label}</div>
+    </div>
+  );
+}
+
+function DataSource({ name, desc }: { name: string; desc: string }) {
+  return (
+    <div>
+      <div className="text-sm font-semibold">{name}</div>
+      <div className="text-[11px] text-(--text-faint) mt-0.5">{desc}</div>
     </div>
   );
 }
