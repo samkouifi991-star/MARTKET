@@ -80,6 +80,44 @@ export async function hasProcessedReleaseKey(releaseKey: string): Promise<boolea
   return rows.length > 0;
 }
 
+export type SurpriseRow = {
+  id: number;
+  indicatorKey: EconomicIndicatorKey;
+  country: string;
+  releaseDateTime: string;
+  actual: number;
+  forecast: number | null;
+  previous: number | null;
+  revisedPrevious: number | null;
+  surprise: number | null;
+  surpriseZ: number | null;
+  effectiveSurprise: number | null;
+  importanceTier: ImportanceTier;
+};
+
+/** Full stored surprise detail for one release — the Admin Event Monitor's
+ * per-release drill-down (requirement #9) joins this in via
+ * economicReleaseTracking.surpriseId. */
+export async function getSurpriseById(id: number): Promise<SurpriseRow | null> {
+  const db = getDb();
+  const [row] = await db.select().from(economicReleaseSurprises).where(eq(economicReleaseSurprises.id, id)).limit(1);
+  if (!row) return null;
+  return {
+    id: row.id,
+    indicatorKey: row.indicatorKey as EconomicIndicatorKey,
+    country: row.country,
+    releaseDateTime: row.releaseDateTime.toISOString(),
+    actual: row.actual,
+    forecast: row.forecast,
+    previous: row.previous,
+    revisedPrevious: row.revisedPrevious,
+    surprise: row.surprise,
+    surpriseZ: row.surpriseZ,
+    effectiveSurprise: row.effectiveSurprise,
+    importanceTier: row.importanceTier as ImportanceTier,
+  };
+}
+
 export type EventShockInput = { symbol: string; factorKey: string | null; sourceReleaseId: number | null; initialContribution: number; importanceTier: ImportanceTier };
 
 export async function recordEventShock(input: EventShockInput): Promise<void> {
@@ -139,6 +177,16 @@ export async function hasEventShockForRelease(symbol: string, sourceReleaseId: n
 }
 
 export type StoredEventShockRow = { symbol: string; factorKey: string | null; initialContribution: number; importanceTier: ImportanceTier; occurredAt: string };
+
+/** All shocks created FROM one specific release, across every symbol —
+ * the Admin Event Monitor's drill-down (requirement #9) "markets
+ * recomputed" detail. Distinct from getRecentEventShocks (all of one
+ * symbol's shocks, for engine.ts's own decay math). */
+export async function getEventShocksForRelease(sourceReleaseId: number): Promise<StoredEventShockRow[]> {
+  const db = getDb();
+  const rows = await db.select().from(eventShocks).where(eq(eventShocks.sourceReleaseId, sourceReleaseId));
+  return rows.map((r) => ({ symbol: r.symbol, factorKey: r.factorKey, initialContribution: r.initialContribution, importanceTier: r.importanceTier as ImportanceTier, occurredAt: r.occurredAt.toISOString() }));
+}
 
 /** All shocks for a symbol still within a generous lookback window (30
  * days covers every configured decay half-life with room to spare — a

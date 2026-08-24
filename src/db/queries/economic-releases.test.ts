@@ -30,10 +30,12 @@ function makeQuery<T>(data: T[]): FakeQuery<T> {
 }
 
 import {
+  getEventShocksForRelease,
   getHistoricalEffectiveSurprises,
   getRecentDiagnosticCounts,
   getRecentEventShocks,
   getRecentSurprisesForCountries,
+  getSurpriseById,
   hasDiagnostic,
   hasEventShockForRelease,
   hasProcessedReleaseKey,
@@ -120,6 +122,34 @@ describe("event shocks", () => {
 
     selectResults["event_shocks"] = [{ symbol: "XAUUSD", factorKey: "inflation", sourceReleaseId: 5, initialContribution: 1.2, importanceTier: "HIGH", occurredAt: new Date() }];
     expect(await hasEventShockForRelease("XAUUSD", 5)).toBe(true);
+  });
+
+  it("getEventShocksForRelease returns every symbol's shock created from one release", async () => {
+    selectResults["event_shocks"] = [
+      { symbol: "XAUUSD", factorKey: "inflation", initialContribution: 1.2, importanceTier: "HIGH", occurredAt: new Date() },
+      { symbol: "BTCUSD", factorKey: null, initialContribution: 0.8, importanceTier: "HIGH", occurredAt: new Date() },
+    ];
+    const shocks = await getEventShocksForRelease(5);
+    expect(shocks.map((s) => s.symbol).sort()).toEqual(["BTCUSD", "XAUUSD"]);
+  });
+});
+
+describe("getSurpriseById", () => {
+  beforeEach(() => {
+    selectResults = {};
+  });
+
+  it("returns the real stored surprise detail for a release", async () => {
+    selectResults["economic_release_surprises"] = [
+      { id: 5, indicatorKey: "cpi", country: "US", releaseDateTime: new Date("2027-01-15T13:30:00.000Z"), actual: 0.4, forecast: 0.2, previous: 0.2, revisedPrevious: null, surprise: 0.2, surpriseZ: 2.0, effectiveSurprise: 0.2, importanceTier: "HIGH" },
+    ];
+    const surprise = await getSurpriseById(5);
+    expect(surprise).toMatchObject({ id: 5, indicatorKey: "cpi", surpriseZ: 2.0, releaseDateTime: "2027-01-15T13:30:00.000Z" });
+  });
+
+  it("returns null for an id with no stored surprise", async () => {
+    selectResults["economic_release_surprises"] = [];
+    expect(await getSurpriseById(999)).toBeNull();
   });
 });
 

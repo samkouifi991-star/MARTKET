@@ -5,7 +5,7 @@
 // V1's tables and this file's tables never intersect: no query here ever
 // touches a v1 table, and vice versa — the shadow-mode isolation is
 // structural, not a runtime filter that could be forgotten.
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import { currentFactorScoresV2, currentMarketScoresV2, factorScoresV2, marketScoresV2, scoringIntegrityErrors, scoringShadowComparisons } from "../schema";
 import { Bias, DataFreshness, ScoreFactor, ScoreFactorKey } from "@/lib/types";
@@ -115,6 +115,25 @@ export async function getScoreHistoryV2(symbol: string, sinceHours = 24 * 150): 
     .where(and(eq(marketScoresV2.symbol, symbol), gte(marketScoresV2.computedAt, since)))
     .orderBy(desc(marketScoresV2.computedAt));
   return rows.map((r) => ({ computedAt: r.computedAt.toISOString(), totalScore: r.totalScore, bias: r.bias, confidence: r.confidence }));
+}
+
+export type ScoreSnapshotV2 = { totalScore: number; bias: Bias; confidence: number; computedAt: string };
+
+/** The most recent real V2 history observation strictly BEFORE a given
+ * timestamp — used by the Admin Event Monitor (requirement #9) to show
+ * "V2 score before this release" alongside the current ("after") score
+ * from getAllCurrentScoresV2/getCurrentScoreV2. Returns null when no
+ * observation exists that far back yet — never a fabricated baseline. */
+export async function getScoreV2AsOf(symbol: string, beforeISODate: string): Promise<ScoreSnapshotV2 | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(marketScoresV2)
+    .where(and(eq(marketScoresV2.symbol, symbol), lt(marketScoresV2.computedAt, new Date(beforeISODate))))
+    .orderBy(desc(marketScoresV2.computedAt))
+    .limit(1);
+  if (!row) return null;
+  return { totalScore: row.totalScore, bias: row.bias as Bias, confidence: row.confidence, computedAt: row.computedAt.toISOString() };
 }
 
 export async function getCurrentScoreV2(symbol: string): Promise<MarketScoreV2 | null> {

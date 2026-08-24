@@ -47,6 +47,7 @@ import {
   upsertCurrentScoreV2,
   getRecentFactorScoreV2Snapshots,
   getFactorScoreV2History,
+  getScoreV2AsOf,
   recordShadowComparison,
   getLatestShadowComparisons,
   recordIntegrityError,
@@ -155,6 +156,23 @@ describe("getFactorScoreV2History", () => {
   it("returns an empty array when no history exists yet for this symbol", async () => {
     selectResults["factor_scores_v2"] = [];
     expect(await getFactorScoreV2History("XAUUSD")).toEqual([]);
+  });
+});
+
+describe("getScoreV2AsOf", () => {
+  beforeEach(() => {
+    selectResults = {};
+  });
+
+  it("returns the real stored score/bias/confidence for a prior observation", async () => {
+    selectResults["market_scores_v2"] = [{ symbol: "XAUUSD", totalScore: 2.3, bias: "Neutral", confidence: 55, computedAt: new Date("2027-01-01T00:00:00.000Z") }];
+    const snapshot = await getScoreV2AsOf("XAUUSD", "2027-01-02T00:00:00.000Z");
+    expect(snapshot).toEqual({ totalScore: 2.3, bias: "Neutral", confidence: 55, computedAt: "2027-01-01T00:00:00.000Z" });
+  });
+
+  it("returns null when no observation exists that far back yet — never a fabricated baseline", async () => {
+    selectResults["market_scores_v2"] = [];
+    expect(await getScoreV2AsOf("XAUUSD", "2027-01-02T00:00:00.000Z")).toBeNull();
   });
 });
 
