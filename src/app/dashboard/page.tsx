@@ -8,7 +8,7 @@ import { generateRiskGauge } from "@/lib/demo/riskGauge";
 import { NEWS_ARTICLES } from "@/lib/demo/news";
 import { upcomingHighImpact } from "@/lib/demo/calendar";
 import { formatDateTime, formatRelative } from "@/lib/time";
-import { INSTRUMENTS } from "@/lib/instruments";
+import { publicInstruments } from "@/services/market-coverage";
 import { generateSmartMoney } from "@/lib/demo/smartMoney";
 import { requireEntitlement } from "@/lib/auth/dal";
 import { ArrowRight, Gauge } from "lucide-react";
@@ -40,7 +40,12 @@ export default async function DashboardPage() {
   const risk = generateRiskGauge();
   const topNews = [...NEWS_ARTICLES].sort((a, b) => b.importance - a.importance).slice(0, 4);
   const events = upcomingHighImpact(72).slice(0, 4);
-  const divergences = INSTRUMENTS.map((i) => generateSmartMoney(i)).filter((d) => d.signal !== "None").slice(0, 3);
+  // TODO(Phase 18 — remove demo feel): this card still calls the pure demo
+  // generator unconditionally, regardless of DATA_MODE — it needs the same
+  // real-data treatment score/price already got. Scoped out of Phase 1,
+  // which only restricts symbol EXPOSURE (publicInstruments()) to
+  // LAUNCH_READY markets, not the demo-vs-live data source itself.
+  const divergences = publicInstruments().map((i) => generateSmartMoney(i)).filter((d) => d.signal !== "None").slice(0, 3);
 
   return (
     <div className="space-y-6">

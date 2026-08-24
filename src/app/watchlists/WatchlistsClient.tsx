@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Watchlist } from "@/lib/types";
-import { INSTRUMENTS } from "@/lib/instruments";
 import { MarketRow } from "@/lib/market-data";
 import { Card } from "@/components/ui/Card";
 import { BiasBadge } from "@/components/ui/BiasBadge";
@@ -16,7 +15,13 @@ export function WatchlistsClient({ defaults, rows }: { defaults: Watchlist[]; ro
   const [lists, setLists] = useState<Watchlist[]>(defaults);
   const [activeId, setActiveId] = useState(defaults[0]?.id ?? "");
   const [newName, setNewName] = useState("");
-  const [addSymbol, setAddSymbol] = useState(INSTRUMENTS[0].symbol);
+  // rows is already restricted to publicly launch-ready instruments (see
+  // pipeline/top-setups.ts's getCanonicalMarketRows) — deriving the
+  // pickable instrument list from it, instead of importing INSTRUMENTS
+  // directly, means this dropdown can never offer a market that isn't
+  // ready to show publicly.
+  const availableInstruments = rows.map((r) => r.instrument);
+  const [addSymbol, setAddSymbol] = useState(availableInstruments[0]?.symbol ?? "");
   const [hydrated, setHydrated] = useState(false);
 
   // One-time hydration from localStorage after mount: SSR has no access to
@@ -131,7 +136,7 @@ export function WatchlistsClient({ defaults, rows }: { defaults: Watchlist[]; ro
                   className="h-8 rounded-lg border border-(--border) bg-(--bg-card) px-2 text-sm font-medium outline-none"
                 />
                 <select value={addSymbol} onChange={(e) => setAddSymbol(e.target.value)} className="h-8 rounded-lg border border-(--border) bg-(--bg-card) px-2 text-xs">
-                  {INSTRUMENTS.map((i) => (
+                  {availableInstruments.map((i) => (
                     <option key={i.symbol} value={i.symbol}>{i.symbol}</option>
                   ))}
                 </select>

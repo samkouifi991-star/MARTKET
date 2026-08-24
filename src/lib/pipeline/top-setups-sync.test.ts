@@ -32,7 +32,10 @@ vi.mock("@/services/market-data/last-known-good");
 // top-setups.ts's isDemoOnly() branch is out of scope here (demo mode never
 // calls getCurrentScore/computeLiveMarketScore at all) — pin live mode so
 // this test exercises the real-data path being fixed.
-vi.mock("@/services/data-mode", () => ({ DATA_MODE: "live", isDemoOnly: () => false, allowsDemoFallback: () => false }));
+vi.mock("@/services/data-mode", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/data-mode")>();
+  return { ...actual, DATA_MODE: "live", isDemoOnly: () => false, allowsDemoFallback: () => false };
+});
 
 import { getCurrentScore } from "@/db/queries/scores";
 import { computeLiveMarketScore } from "./scoring-engine";
@@ -119,5 +122,34 @@ describe("getCanonicalMarketRows reads the same canonical current-score record a
 
     expect(gbpRow.score).toEqual(fallback);
     expect(computeLiveMarketScore).toHaveBeenCalledWith("GBPUSD", expect.anything(), { storageOnly: true, updateCurrent: true });
+  });
+});
+
+describe("getCanonicalMarketRows launch-market filtering (Phase 1)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getQuoteWithFallback).mockResolvedValue(unavailable("fmp", "Financial Modeling Prep"));
+    vi.mocked(getDailyCandlesWithFallback).mockResolvedValue(unavailable("fmp", "Financial Modeling Prep"));
+    vi.mocked(getIntradayCandlesWithFallback).mockResolvedValue(unavailable("fmp", "Financial Modeling Prep"));
+    vi.mocked(getCurrentScore).mockResolvedValue(scoreFor("x"));
+  });
+
+  it("excludes blocked/incomplete markets (NAS100, DAX40, COPPER, XPTUSD, WTIUSD, NATGAS) by default — the exact set every public surface (Markets/Top Setups/Heatmap/Watchlists/landing page) must never list", async () => {
+    const rows = await getCanonicalMarketRows();
+    const symbols = rows.map((r) => r.instrument.symbol);
+    for (const blocked of ["NAS100", "DAX40", "COPPER", "XPTUSD", "WTIUSD", "NATGAS"]) {
+      expect(symbols).not.toContain(blocked);
+    }
+    for (const ready of STRICT_LIVE_SYMBOLS) {
+      expect(symbols).toContain(ready);
+    }
+  });
+
+  it("includes every market, blocked ones included, when includeAll:true — for admin diagnostics only", async () => {
+    const rows = await getCanonicalMarketRows({ includeAll: true });
+    const symbols = rows.map((r) => r.instrument.symbol);
+    for (const blocked of ["NAS100", "DAX40", "COPPER", "XPTUSD", "WTIUSD", "NATGAS"]) {
+      expect(symbols).toContain(blocked);
+    }
   });
 });

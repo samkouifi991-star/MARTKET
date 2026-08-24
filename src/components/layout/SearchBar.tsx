@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
-import { INSTRUMENTS } from "@/lib/instruments";
+import { publicInstruments } from "@/services/market-coverage";
 
 export function SearchBar() {
   const [query, setQuery] = useState("");
@@ -14,7 +14,9 @@ export function SearchBar() {
   const results = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
-    return INSTRUMENTS.filter((i) => i.symbol.toLowerCase().includes(q) || i.name.toLowerCase().includes(q)).slice(0, 8);
+    return publicInstruments()
+      .filter((i) => i.symbol.toLowerCase().includes(q) || i.name.toLowerCase().includes(q))
+      .slice(0, 8);
   }, [query]);
 
   function go(symbol: string) {

@@ -25,7 +25,10 @@ vi.mock("@/db/queries/scores");
 vi.mock("./scoring-engine");
 vi.mock("@/services/market-data/last-known-good");
 vi.mock("./positioning");
-vi.mock("@/services/data-mode", () => ({ DATA_MODE: "live", isDemoOnly: () => false, allowsDemoFallback: () => false }));
+vi.mock("@/services/data-mode", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/data-mode")>();
+  return { ...actual, DATA_MODE: "live", isDemoOnly: () => false, allowsDemoFallback: () => false };
+});
 
 import { getCurrentScore } from "@/db/queries/scores";
 import {

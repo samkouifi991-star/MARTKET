@@ -1,4 +1,6 @@
 import { allMarketRows } from "@/lib/market-data";
+import { INSTRUMENTS } from "@/lib/instruments";
+import { coverageReasonFor, coverageStatusFor } from "@/services/market-coverage";
 import { AUDIT_LOGS, API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY } from "@/lib/demo/admin";
 import { AdminClient } from "./AdminClient";
 import { ProviderHealthTable } from "./ProviderHealthTable";
@@ -94,6 +96,48 @@ export default async function AdminPage() {
         ) : (
           <ProviderHealthTable rows={providerHealthRows} />
         )}
+      </Card>
+
+      <Card title="Market coverage" subtitle="LAUNCH_READY markets are the only ones shown on public surfaces (Markets, Top Setups, Dashboard rankings, Search, Watchlists, landing page) — PARTIAL/BLOCKED stay visible here only">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-(--text-faint) text-xs">
+                <th className="font-medium pb-2 pr-3">Symbol</th>
+                <th className="font-medium pb-2 pr-3">Asset class</th>
+                <th className="font-medium pb-2 pr-3">Status</th>
+                <th className="font-medium pb-2">Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {INSTRUMENTS.map((i) => {
+                const status = coverageStatusFor(i.symbol);
+                const reason = coverageReasonFor(i.symbol);
+                const statusClasses =
+                  status === "LAUNCH_READY"
+                    ? "text-emerald-400 bg-emerald-500/10"
+                    : status === "PARTIAL"
+                      ? "text-amber-400 bg-amber-500/10"
+                      : "text-rose-400 bg-rose-500/10";
+                return (
+                  <tr key={i.symbol} className="border-t border-(--border)">
+                    <td className="py-1.5 pr-3">
+                      <Link href={`/markets/${i.symbol}`} className="font-medium hover:text-(--accent)">{i.symbol}</Link>
+                      <span className="text-(--text-faint) text-xs ml-1">{i.name}</span>
+                    </td>
+                    <td className="py-1.5 pr-3 text-(--text-faint)">{i.assetClass}</td>
+                    <td className="py-1.5 pr-3">
+                      <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${statusClasses}`}>{status}</span>
+                    </td>
+                    <td className="py-1.5 text-(--text-faint) text-xs">
+                      {reason ?? (status === "PARTIAL" ? "Real provider config exists but hasn't cleared full verification/promotion yet." : "")}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </Card>
 
       <Card title="Data quality — non-live factors" subtitle="Stale or estimated data is automatically down-weighted in scoring">

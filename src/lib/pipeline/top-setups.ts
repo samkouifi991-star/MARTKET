@@ -44,11 +44,20 @@ import { computeLiveMarketScore } from "./scoring-engine";
 import { getCanonicalPriceCard } from "./price";
 import { getCurrentScore } from "@/db/queries/scores";
 import { DATA_MODE, isDemoOnly } from "@/services/data-mode";
+import { publicInstruments } from "@/services/market-coverage";
 import { MarketRow } from "@/lib/market-data";
 
-export async function getCanonicalMarketRows(): Promise<MarketRow[]> {
+// Every real caller of this function (Markets, Top Setups, Heatmap,
+// Watchlists, the landing page preview) is a public surface — restricted
+// to LAUNCH_READY instruments by default (see services/market-coverage.ts)
+// so a PARTIAL/BLOCKED market (no verified real-data coverage yet) is
+// never listed, ranked, searched, or shown as a landing-page example.
+// Admin diagnostics pass includeAll:true to see every market instead.
+export async function getCanonicalMarketRows({ includeAll = false }: { includeAll?: boolean } = {}): Promise<MarketRow[]> {
+  const instruments = includeAll ? INSTRUMENTS : publicInstruments();
+
   if (isDemoOnly()) {
-    return INSTRUMENTS.map((instrument) => ({
+    return instruments.map((instrument) => ({
       instrument,
       price: generatePriceData(instrument),
       priceFreshness: "estimated",
@@ -57,7 +66,7 @@ export async function getCanonicalMarketRows(): Promise<MarketRow[]> {
   }
 
   return Promise.all(
-    INSTRUMENTS.map(async (instrument) => {
+    instruments.map(async (instrument) => {
       const [score, priceCard] = await Promise.all([
         (async () => (await getCurrentScore(instrument.symbol).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { storageOnly: true, updateCurrent: true })))(),
         getCanonicalPriceCard(instrument.symbol, DATA_MODE),
