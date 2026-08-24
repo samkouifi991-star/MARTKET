@@ -9,6 +9,10 @@ import * as fmp from "../market-data/fmp";
 import { Provenance } from "../types";
 import { EconomicCalendarProvider, EconomicRelease } from "./provider";
 import { importanceTierFor, matchIndicator } from "./indicator-taxonomy";
+import { countryCodeFor } from "./affected-markets";
+import { releaseKeyFor } from "./release-identity";
+
+const PROVIDER_NAME = "fmp";
 
 export const fmpEconomicCalendarProvider: EconomicCalendarProvider = {
   async getReleases(fromISO: string, toISO: string): Promise<Provenance<EconomicRelease[]>> {
@@ -17,12 +21,14 @@ export const fmpEconomicCalendarProvider: EconomicCalendarProvider = {
 
     const releases: EconomicRelease[] = result.value.map((e) => {
       const indicatorKey = matchIndicator(e.event);
+      const country = countryCodeFor(e.country) ?? e.country;
       return {
         id: e.id,
         country: e.country,
         event: e.event,
         indicatorKey,
         importanceTier: indicatorKey ? importanceTierFor(indicatorKey) : null,
+        releaseKey: indicatorKey ? releaseKeyFor(PROVIDER_NAME, country, indicatorKey, e.dateTime) : null,
         dateTime: e.dateTime,
         actual: e.actual,
         forecast: e.forecast,

@@ -65,18 +65,16 @@ export async function GET(req: NextRequest) {
     // one only ever backfills the V2-only classification columns.
     await updateEconomicEventClassification(release.id, { indicatorKey: release.indicatorKey, importanceTier: release.importanceTier, revisedPrevious: release.revisedPrevious }).catch(() => {});
 
-    // NOTE: computed inline for now — src/services/economic-calendar/
-    // release-identity.ts (a following milestone) centralizes this exact
-    // format so both this cron and the high-frequency watch route agree.
-    const country = countryCodeFor(release.country) ?? release.country;
-    const releaseKey = `fmp:${country}:${release.indicatorKey}:${release.dateTime}`;
-
+    // Guaranteed non-null here — releaseKey is null exactly when
+    // indicatorKey is null, and that case was already skipped above.
+    const releaseKey = release.releaseKey!;
     if (await hasProcessedReleaseKey(releaseKey)) {
       skippedCount++;
       continue; // already processed on a prior run — idempotent
     }
 
     try {
+      const country = countryCodeFor(release.country) ?? release.country;
       const surprise = computeSurprise(release.actual, release.forecast);
       const revisionAdjustment = computeRevisionAdjustment(release.previous, release.revisedPrevious);
       const effectiveSurprise = computeEffectiveSurprise(surprise, revisionAdjustment);

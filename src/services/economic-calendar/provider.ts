@@ -9,11 +9,15 @@ import { Provenance } from "../types";
 import { EconomicIndicatorKey, ImportanceTier } from "./indicator-taxonomy";
 
 export type EconomicRelease = {
-  id: string; // provider's external id, stable across repeated fetches of the same release
+  id: string; // provider's own external id — NOT the dedup key, see release-identity.ts
   country: string; // provider's raw country label
   event: string; // raw free-text event name, kept for display/debugging
   indicatorKey: EconomicIndicatorKey | null; // null when the taxonomy couldn't classify `event` — never guessed
   importanceTier: ImportanceTier | null; // null exactly when indicatorKey is null
+  // The real, order-independent identity (release-identity.ts's
+  // releaseKeyFor) — null exactly when indicatorKey is null, since the key
+  // is only meaningful once a release is classified.
+  releaseKey: string | null;
   dateTime: string; // ISO
   actual: number | null;
   forecast: number | null;

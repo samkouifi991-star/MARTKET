@@ -24,6 +24,10 @@ describe("fmpEconomicCalendarProvider", () => {
     expect(release.importanceTier).toBe("HIGH");
     expect(release.revisedPrevious).toBeNull();
     expect(release.actual).toBe(0.3);
+    // Order-independent identity — normalized country code, not the raw
+    // "United States" label, and never derived from the provider's own
+    // (response-index-dependent) raw id.
+    expect(release.releaseKey).toBe("fmp:US:cpi:2027-01-15T13:30:00.000Z");
   });
 
   it("leaves indicatorKey and importanceTier null for an event the taxonomy can't classify, rather than guessing", async () => {
@@ -40,6 +44,7 @@ describe("fmpEconomicCalendarProvider", () => {
     const result = await fmpEconomicCalendarProvider.getReleases("2027-01-01", "2027-01-31");
     expect(result.value![0].indicatorKey).toBeNull();
     expect(result.value![0].importanceTier).toBeNull();
+    expect(result.value![0].releaseKey).toBeNull();
   });
 
   it("passes through a failed/unavailable live fetch unchanged", async () => {
