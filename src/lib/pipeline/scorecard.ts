@@ -118,7 +118,7 @@ type IndicatorRowDef = { label: string; keys: EconomicIndicatorKey[] };
 // every non-FX asset (instrument.macroCountry ?? "US"); for FX specifically
 // this mirrors macro.ts's own two-country differential's base side, not a
 // change to how V1 actually scores FX (this is a display-only read).
-function primaryMacroCountry(instrument: Instrument): string {
+export function primaryMacroCountry(instrument: Instrument): string {
   if (instrument.currencies) return CCY_TO_COUNTRY[instrument.currencies[0]] ?? "US";
   return instrument.macroCountry ?? "US";
 }

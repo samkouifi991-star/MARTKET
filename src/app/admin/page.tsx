@@ -5,6 +5,8 @@ import { coverageReasonFor, coverageStatusFor } from "@/services/market-coverage
 import { AUDIT_LOGS, API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY } from "@/lib/demo/admin";
 import { AdminClient } from "./AdminClient";
 import { ProviderHealthTable } from "./ProviderHealthTable";
+import { PipelineHealthTable } from "./PipelineHealthTable";
+import { buildPipelineHealthReport, PipelineHealthRow } from "@/lib/pipeline/pipeline-health";
 import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
@@ -28,6 +30,15 @@ async function loadProviderHealth(): Promise<{ rows: ProviderHealthRow[]; error:
   }
 }
 
+async function loadPipelineHealth(): Promise<{ rows: PipelineHealthRow[]; error: string | null }> {
+  if (DATA_MODE === "demo") return { rows: [], error: null };
+  try {
+    return { rows: await buildPipelineHealthReport(), error: null };
+  } catch (err) {
+    return { rows: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export default async function AdminPage() {
   await requireAdmin();
   // Previously always read allMarketRows() (lib/market-data.ts's demo-only
@@ -43,6 +54,7 @@ export default async function AdminPage() {
       .map((f) => ({ symbol: r.instrument.symbol, factor: f }))
   );
   const { rows: providerHealthRows, error: providerHealthError } = await loadProviderHealth();
+  const { rows: pipelineHealthRows, error: pipelineHealthError } = await loadPipelineHealth();
   const activeScoringConfig = await resolveActiveScoringConfig();
 
   return (
@@ -102,6 +114,23 @@ export default async function AdminPage() {
           <p className="text-sm text-rose-400">Data temporarily unavailable: {providerHealthError}</p>
         ) : (
           <ProviderHealthTable rows={providerHealthRows} />
+        )}
+      </Card>
+
+      <Card
+        title="Data Pipeline Health"
+        subtitle={
+          DATA_MODE === "demo"
+            ? "Becomes live once DATA_MODE is set to hybrid or live"
+            : "Per-market freshness age for every dataset feeding the score — highlighted cells are beyond that dataset's own established SLA"
+        }
+      >
+        {DATA_MODE === "demo" ? (
+          <p className="text-sm text-(--text-faint)">Pipeline health is populated by the scheduled ingestion jobs once DATA_MODE is hybrid or live. Currently running in demo mode — nothing to show.</p>
+        ) : pipelineHealthError ? (
+          <p className="text-sm text-rose-400">Data temporarily unavailable: {pipelineHealthError}</p>
+        ) : (
+          <PipelineHealthTable rows={pipelineHealthRows} />
         )}
       </Card>
 
