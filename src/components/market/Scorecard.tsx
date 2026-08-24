@@ -6,7 +6,7 @@
 // or MarketScore — nothing is computed in this file beyond formatting and
 // badge coloring. Dark theme, existing CSS variables/components only.
 import { BiasThreshold } from "@/lib/config";
-import { Instrument, MarketScore, ScoreFactorKey } from "@/lib/types";
+import { DataFreshness, Instrument, MarketScore, ScoreFactorKey } from "@/lib/types";
 import { FactorSentiment, factorSentiment, factorSentimentBadgeClasses, formatSigned } from "@/lib/format";
 import { formatDateTime } from "@/lib/time";
 import { ScoreGauge } from "@/components/ui/ScoreGauge";
@@ -15,6 +15,16 @@ import { Card } from "@/components/ui/Card";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
 import { IndicatorRow, IndicatorSection, InterestRatesSection, ScorecardData, SurpriseIndexRow, TechnicalsRow } from "@/lib/pipeline/scorecard";
+import { UnavailableState } from "@/components/ui/UnavailableState";
+
+// The uppercase leading word for a not-yet-available section, matching
+// DataFreshnessTag's own vocabulary — "not_applicable" (a factor that
+// structurally can't exist for this asset, e.g. no CFTC contract) reads
+// distinctly from "unavailable" (a real, temporary provider/data gap), the
+// same distinction the freshness badge already draws.
+function unavailableLeadWord(freshness: DataFreshness): "NOT APPLICABLE" | "UNAVAILABLE" {
+  return freshness === "not_applicable" ? "NOT APPLICABLE" : "UNAVAILABLE";
+}
 
 function StatusBadge({ sentiment }: { sentiment: FactorSentiment | null }) {
   if (!sentiment) {
@@ -50,7 +60,7 @@ function fmtNum(v: number | null, decimals = 2): string {
 }
 
 function IndicatorTable({ rows }: { rows: IndicatorRow[] }) {
-  if (rows.length === 0) return <p className="text-xs text-(--text-faint)">No released indicators are currently stored for this category.</p>;
+  if (rows.length === 0) return <UnavailableState>UNAVAILABLE — no released indicators are currently stored for this category.</UnavailableState>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
@@ -90,7 +100,7 @@ function IndicatorTable({ rows }: { rows: IndicatorRow[] }) {
 // data for this country/indicator.
 function IndicatorSectionView({ section }: { section: IndicatorSection }) {
   if (section.kind === "calendar") return <IndicatorTable rows={section.rows} />;
-  if (section.kind === "unavailable") return <p className="text-xs text-(--text-faint)">Data temporarily unavailable — {section.reason}</p>;
+  if (section.kind === "unavailable") return <UnavailableState>UNAVAILABLE — {section.reason}</UnavailableState>;
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-(--text-faint)">No calendar release stored for this category yet — showing the underlying macro trend instead.</p>
@@ -127,7 +137,7 @@ function IndicatorSectionView({ section }: { section: IndicatorSection }) {
 }
 
 function TechnicalsRows({ rows }: { rows: TechnicalsRow[] }) {
-  if (rows.length === 0) return <p className="text-xs text-(--text-faint)">Data temporarily unavailable.</p>;
+  if (rows.length === 0) return <UnavailableState>UNAVAILABLE — no factor data available.</UnavailableState>;
   return (
     <div className="space-y-1.5">
       {rows.map((r) => (
@@ -145,7 +155,7 @@ function TechnicalsRows({ rows }: { rows: TechnicalsRow[] }) {
 
 function InterestRatesView({ section }: { section: InterestRatesSection }) {
   if (section.kind === "gold-drivers") {
-    if (section.drivers.length === 0) return <p className="text-xs text-(--text-faint)">Data temporarily unavailable: no gold-macro-regime series resolved.</p>;
+    if (section.drivers.length === 0) return <UnavailableState>UNAVAILABLE — no gold-macro-regime series resolved.</UnavailableState>;
     return (
       <div className="space-y-1.5">
         {section.drivers.map((d) => (
@@ -285,7 +295,10 @@ export function Scorecard({ instrument, score, data, biasThresholds }: { instrum
                 <p className="text-[10px] text-(--text-faint) pt-1">Source: {data.institutional.source}</p>
               </div>
             ) : (
-              <p className="text-xs text-(--text-faint)">Data temporarily unavailable{data.institutional.reason ? ` — ${data.institutional.reason}` : ""}.</p>
+              <UnavailableState>
+                {unavailableLeadWord(data.institutional.freshness)}
+                {data.institutional.reason ? ` — ${data.institutional.reason}` : ""}
+              </UnavailableState>
             )}
           </SectionShell>
 
@@ -321,7 +334,7 @@ export function Scorecard({ instrument, score, data, biasThresholds }: { instrum
                 <p className="text-[10px] text-(--text-faint) pt-1">Source: {data.retail.source}</p>
               </div>
             ) : (
-              <p className="text-xs text-(--text-faint)">UNAVAILABLE — verified retail sentiment provider not connected yet</p>
+              <UnavailableState>UNAVAILABLE — verified retail sentiment provider not connected yet</UnavailableState>
             )}
           </SectionShell>
 

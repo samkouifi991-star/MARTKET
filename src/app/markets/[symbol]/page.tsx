@@ -24,6 +24,7 @@ import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { Card } from "@/components/ui/Card";
 import { AutoRefresh } from "@/components/ui/AutoRefresh";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
+import { UnavailableState } from "@/components/ui/UnavailableState";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
@@ -214,7 +215,7 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
               {!demoMode && <p className="text-[10px] text-(--text-faint) mt-1">Source: {priceSource}</p>}
             </>
           ) : (
-            <UnavailableNote reason={live?.price.reason} />
+            <UnavailableNote reason={live?.price.reason} freshness={priceFreshness} />
           )}
         </Card>
 
@@ -269,7 +270,7 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
           ) : (
             <>
               <DataFreshnessTag freshness={live!.smartMoney.freshness} />
-              <UnavailableNote reason={live!.smartMoney.reason} />
+              <UnavailableNote reason={live!.smartMoney.reason} freshness={live!.smartMoney.freshness} />
             </>
           )}
         </Card>
@@ -308,7 +309,7 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
               <p className="text-[10px] text-(--text-faint) mt-2">Source: {live!.seasonality.source}</p>
             </>
           ) : (
-            <UnavailableNote reason={live!.seasonality.reason} />
+            <UnavailableNote reason={live!.seasonality.reason} freshness={live!.seasonality.freshness} />
           )}
           <Link href="/seasonality" className="text-xs text-(--accent) hover:underline mt-2 inline-block">Full seasonality module →</Link>
         </Card>
@@ -385,8 +386,16 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
   );
 }
 
-function UnavailableNote({ reason }: { reason?: string }) {
-  return <p className="text-sm text-(--text-faint) mt-2">Data temporarily unavailable{reason ? ` — ${reason}` : ""}.</p>;
+function UnavailableNote({ reason, freshness }: { reason?: string; freshness?: DataFreshness }) {
+  const lead = freshness === "not_applicable" ? "NOT APPLICABLE" : "UNAVAILABLE";
+  return (
+    <div className="mt-2">
+      <UnavailableState>
+        {lead}
+        {reason ? ` — ${reason}` : ""}
+      </UnavailableState>
+    </div>
+  );
 }
 
 function InstitutionalDemoRows({ instrument }: { instrument: string }) {
