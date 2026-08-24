@@ -5,23 +5,23 @@ import { getSessionUser } from "./session";
 import { getSubscriptionByUserId } from "@/db/queries/users";
 import type { User, Subscription } from "@/db/queries/users";
 
-// Approved admin/developer identities that bypass the paywall entirely —
-// explicitly scoped to non-production so building/testing this never
-// accidentally leaves a backdoor into the real production paywall. Vercel
-// sets VERCEL_ENV (not NODE_ENV, which `next build` always pins to
-// "production") to distinguish the real production deployment from
-// preview/local, so that's the flag this checks.
+// The approved owner/admin identity — bypasses the SUBSCRIPTION/paywall
+// check only (see requireEntitlement/requireAdmin below), in every
+// environment including production. This is deliberate: it's the site
+// owner's own real account, not a dev/test-only backdoor, so it must work
+// wherever they actually use the product. It never bypasses
+// authentication itself — every call site below still requires a real,
+// valid session (requireSession) before this is even consulted, and it
+// never touches Stripe/subscription state (no fake subscription is
+// created, no checkout is triggered) — it just short-circuits the
+// entitlement check to true for this one email.
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? "samkouifi991@gmail.com")
   .split(",")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);
 
-export function isAdminBypassAllowed(): boolean {
-  return process.env.VERCEL_ENV !== "production";
-}
-
 export function isAdminUser(user: User | undefined): boolean {
-  return Boolean(user && isAdminBypassAllowed() && ADMIN_EMAILS.includes(user.email.toLowerCase()));
+  return Boolean(user && ADMIN_EMAILS.includes(user.email.toLowerCase()));
 }
 
 // Statuses that grant access to the paid product, mirroring Stripe's own
@@ -53,9 +53,12 @@ export async function requireSession(): Promise<User> {
   return user;
 }
 
-/** The real gate for the paid product: logged in AND (trialing/active OR
- * an approved admin bypass in non-production). Redirects to /paywall
- * otherwise — never silently renders paid content for an unentitled user. */
+/** The real gate for the paid product: logged in AND (the approved admin/
+ * owner account, OR a trialing/active subscription). Redirects to
+ * /paywall otherwise — never silently renders paid content for an
+ * unentitled user. requireSession() below still runs first in every case,
+ * so this never bypasses authentication itself, only the subscription
+ * check. */
 export async function requireEntitlement(): Promise<{ user: User; subscription: Subscription | null }> {
   const user = await requireSession();
   if (isAdminUser(user)) return { user, subscription: null };
