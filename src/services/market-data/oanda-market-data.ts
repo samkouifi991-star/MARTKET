@@ -66,6 +66,18 @@ async function fetchCandles(instrument: string, granularity: OandaGranularity, c
   url.searchParams.set("granularity", granularity);
   url.searchParams.set("count", String(count));
   url.searchParams.set("price", "M"); // mid prices — matches the single OHLC series FMP/NormalizedCandle already assume
+  if (granularity === "D") {
+    // OANDA defaults a daily bar's boundary to 17:00 America/New_York, so an
+    // unqualified request timestamps "today's" daily candle roughly 21-22h
+    // before FMP's date-only ("YYYY-MM-DD" -> parsed as UTC midnight) bar
+    // for the same trading day. getLatestStoredCandles picks whichever
+    // stored candle has the greatest `date` across BOTH providers — with
+    // that systematic offset, a genuinely fresher OANDA candle can sort
+    // behind an older FMP fallback row. Forcing UTC/midnight alignment here
+    // makes OANDA's daily `time` directly comparable to FMP's.
+    url.searchParams.set("alignmentTimezone", "UTC");
+    url.searchParams.set("dailyAlignment", "0");
+  }
   const res = await fetch(url.toString(), { headers: authHeaders(), next: { revalidate: 0 } });
   if (!res.ok) {
     const body = await res.text().catch(() => "");

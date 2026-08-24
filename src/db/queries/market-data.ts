@@ -40,7 +40,11 @@ export async function upsertCandles(symbol: string, timeframe: "1h" | "4h" | "1d
       .values(chunk.map((c) => ({ symbol, timeframe, date: new Date(c.date), open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume, provider })))
       .onConflictDoUpdate({
         target: [marketCandles.symbol, marketCandles.timeframe, marketCandles.date],
-        set: { open: sql`excluded.open`, high: sql`excluded.high`, low: sql`excluded.low`, close: sql`excluded.close`, volume: sql`excluded.volume`, fetchedAt: new Date() },
+        // provider must update too — otherwise a bar first written during a
+        // provider's outage (e.g. an FMP fallback row) stays mislabeled
+        // forever even after the primary provider (OANDA for FX) re-writes
+        // the same date with corrected values on a later, healthy run.
+        set: { open: sql`excluded.open`, high: sql`excluded.high`, low: sql`excluded.low`, close: sql`excluded.close`, volume: sql`excluded.volume`, provider: sql`excluded.provider`, fetchedAt: new Date() },
       });
   }
 }

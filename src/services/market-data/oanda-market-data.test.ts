@@ -79,6 +79,30 @@ describe("oanda-market-data", () => {
       expect(new URL(fetchMock.mock.calls[1][0] as string).searchParams.get("granularity")).toBe("H4");
     });
 
+    it("requests UTC/midnight daily alignment for granularity=D — so a daily bar's date is directly comparable to FMP's date-only convention", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ candles: [candle("2026-08-21T00:00:00Z", 1, 1, 1, 1)] }));
+      vi.stubGlobal("fetch", fetchMock);
+      const oanda = await import("./oanda-market-data");
+
+      await oanda.getDailyCandles("GBPJPY");
+
+      const url = new URL(fetchMock.mock.calls[0][0] as string);
+      expect(url.searchParams.get("alignmentTimezone")).toBe("UTC");
+      expect(url.searchParams.get("dailyAlignment")).toBe("0");
+    });
+
+    it("does not set daily-alignment params for intraday (H1/H4) requests — only granularity=D has a day-boundary ambiguity", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ candles: [candle("2026-08-21T10:00:00Z", 1, 1, 1, 1)] }));
+      vi.stubGlobal("fetch", fetchMock);
+      const oanda = await import("./oanda-market-data");
+
+      await oanda.getIntradayCandles("GBPJPY", "H1");
+
+      const url = new URL(fetchMock.mock.calls[0][0] as string);
+      expect(url.searchParams.has("alignmentTimezone")).toBe(false);
+      expect(url.searchParams.has("dailyAlignment")).toBe(false);
+    });
+
     it("requests count=5000 for the max-depth backfill", async () => {
       const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ candles: [candle("2026-08-21T00:00:00Z", 1, 1, 1, 1)] }));
       vi.stubGlobal("fetch", fetchMock);
