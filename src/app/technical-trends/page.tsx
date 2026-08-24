@@ -3,6 +3,7 @@ import { allMarketRows } from "@/lib/market-data";
 import { getCanonicalMarketRows } from "@/lib/pipeline/top-setups";
 import { isDemoOnly } from "@/services/data-mode";
 import { Card } from "@/components/ui/Card";
+import { AutoRefresh } from "@/components/ui/AutoRefresh";
 import { formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
 import { requireEntitlement } from "@/lib/auth/dal";
 
@@ -22,6 +23,7 @@ export default async function TechnicalTrendsPage() {
 
   return (
     <div className="space-y-6">
+      <AutoRefresh intervalSeconds={45} />
       <div>
         <h1 className="text-xl font-semibold">Technical Trends</h1>
         <p className="text-sm text-(--text-faint) mt-1">
