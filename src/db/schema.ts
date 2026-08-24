@@ -130,7 +130,15 @@ export const economicEvents = pgTable(
     revisedPrevious: doublePrecision("revised_previous"),
     importanceTier: varchar("importance_tier", { length: 8 }), // "HIGH" | "MEDIUM" | "LOW" | null
   },
-  (t) => [index("economic_events_date_time").on(t.dateTime)]
+  (t) => [
+    index("economic_events_date_time").on(t.dateTime),
+    // Backs getLatestEconomicEventByIndicator (db/queries/market-data.ts) —
+    // the market scorecard's Economic Growth/Inflation/Jobs Market rows run
+    // this on every market-detail page render (force-dynamic), so a plain
+    // date_time index alone would mean a full-table scan filtered by
+    // country+indicatorKey on every visit.
+    index("economic_events_country_indicator_datetime").on(t.country, t.indicatorKey, t.dateTime),
+  ]
 );
 
 // ---- News articles + analysis ----

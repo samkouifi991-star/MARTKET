@@ -1,0 +1,1 @@
+CREATE INDEX "economic_events_country_indicator_datetime" ON "economic_events" USING btree ("country","indicator_key","date_time");

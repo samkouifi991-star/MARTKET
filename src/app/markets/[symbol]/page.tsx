@@ -11,6 +11,8 @@ import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";
 import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
 import { getCurrentScore } from "@/db/queries/scores";
 import { buildLiveInvalidationPoints, getLiveMarketDetail, LiveMarketDetail } from "@/lib/pipeline/market-detail";
+import { buildScorecardData } from "@/lib/pipeline/scorecard";
+import { Scorecard } from "@/components/market/Scorecard";
 import { DATA_MODE, isDemoOnly } from "@/services/data-mode";
 import { NEWS_ARTICLES } from "@/lib/demo/news";
 import { CALENDAR_EVENTS } from "@/lib/demo/calendar";
@@ -68,6 +70,11 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
     ? computeMarketScore(instrument)
     : (await getCurrentScore(instrument.symbol).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { updateCurrent: true }));
   const live: LiveMarketDetail | null = demoMode ? null : await getLiveMarketDetail(instrument.symbol, DATA_MODE);
+  // The grouped scorecard (components/market/Scorecard.tsx) composes with
+  // `score`/`live` above rather than recomputing them — see
+  // lib/pipeline/scorecard.ts. Never called in demo mode; demo keeps its
+  // existing, separate rendering path below.
+  const scorecardData = demoMode ? null : await buildScorecardData(instrument, score, live!);
 
   const price: PriceData | null = demoMode ? generatePriceData(instrument) : live!.price.data;
   const priceFreshness: DataFreshness = demoMode ? "estimated" : live!.price.freshness;
@@ -145,45 +152,49 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        <Card title="Total Score" className="lg:col-span-1 flex flex-col items-center">
-          <ScoreGauge score={score.totalScore} bias={score.bias} />
-          <div className="w-full mt-3">
-            <ConfidenceBar value={score.confidence} />
-          </div>
-        </Card>
+      {demoMode ? (
+        <div className="grid lg:grid-cols-3 gap-4">
+          <Card title="Total Score" className="lg:col-span-1 flex flex-col items-center">
+            <ScoreGauge score={score.totalScore} bias={score.bias} />
+            <div className="w-full mt-3">
+              <ConfidenceBar value={score.confidence} />
+            </div>
+          </Card>
 
-        <Card title="Score breakdown" subtitle="Every contributing factor, transparently weighted." className="lg:col-span-2">
-          <div className="space-y-3">
-            {score.factors.map((f) => (
-              <div key={f.key} className="border-b border-(--border) last:border-0 pb-3 last:pb-0">
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium">{factorLabel(f.key)}</span>
-                    <FactorSentimentBadge sentiment={factorSentiment(f.contribution)} />
-                    <DataFreshnessTag freshness={f.freshness} lastUpdated={f.lastUpdated} />
+          <Card title="Score breakdown" subtitle="Every contributing factor, transparently weighted." className="lg:col-span-2">
+            <div className="space-y-3">
+              {score.factors.map((f) => (
+                <div key={f.key} className="border-b border-(--border) last:border-0 pb-3 last:pb-0">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium">{factorLabel(f.key)}</span>
+                      <FactorSentimentBadge sentiment={factorSentiment(f.contribution)} />
+                      <DataFreshnessTag freshness={f.freshness} lastUpdated={f.lastUpdated} />
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-(--text-faint) tabular-nums">
+                      <span>raw {formatSigned(f.rawScore)}</span>
+                      <span>weight {(f.weight * 100).toFixed(0)}%</span>
+                      <span className={`font-semibold ${factorContributionColorClass(f.contribution)}`}>{formatSigned(f.contribution)}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-(--text-faint) tabular-nums">
-                    <span>raw {formatSigned(f.rawScore)}</span>
-                    <span>weight {(f.weight * 100).toFixed(0)}%</span>
-                    <span className={`font-semibold ${factorContributionColorClass(f.contribution)}`}>{formatSigned(f.contribution)}</span>
-                  </div>
+                  <p className="text-xs text-(--text-dim) mt-1 leading-relaxed">{f.explanation}</p>
+                  <p className="text-[10px] text-(--text-faint) mt-1">
+                    Source: {f.source} · Next update {formatRelative(f.nextUpdate)}
+                  </p>
                 </div>
-                <p className="text-xs text-(--text-dim) mt-1 leading-relaxed">{f.explanation}</p>
-                <p className="text-[10px] text-(--text-faint) mt-1">
-                  Source: {f.source} · Next update {formatRelative(f.nextUpdate)}
-                </p>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 pt-3 border-t border-(--border) flex items-center justify-between text-xs">
-            <span className="text-(--text-faint)">Total weighted score = sum of contributions above</span>
-            <span className={`font-semibold tabular-nums ${factorContributionColorClass(score.totalScore)}`}>
-              {score.factors.map((f) => formatSigned(f.contribution)).join(" ")} = {formatSigned(score.totalScore)}
-            </span>
-          </div>
-        </Card>
-      </div>
+              ))}
+            </div>
+            <div className="mt-3 pt-3 border-t border-(--border) flex items-center justify-between text-xs">
+              <span className="text-(--text-faint)">Total weighted score = sum of contributions above</span>
+              <span className={`font-semibold tabular-nums ${factorContributionColorClass(score.totalScore)}`}>
+                {score.factors.map((f) => formatSigned(f.contribution)).join(" ")} = {formatSigned(score.totalScore)}
+              </span>
+            </div>
+          </Card>
+        </div>
+      ) : (
+        <Scorecard instrument={instrument} score={score} data={scorecardData!} biasThresholds={scoringConfig.biasThresholds} />
+      )}
 
       <div className="grid lg:grid-cols-2 gap-4">
         <Card
@@ -212,66 +223,34 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
         </Card>
       </div>
 
+      {/* Institutional positioning and Retail sentiment are now covered by
+          the Scorecard's Institutional Activity / Retail-Crowd Sentiment
+          sections above for live/hybrid mode — kept here, unchanged, for
+          demo mode only. Smart money divergence isn't part of the
+          scorecard redesign, so it stays a standalone card in both modes,
+          spanning full width when it's the only card in this row. */}
       <div className="grid lg:grid-cols-3 gap-4">
-        <Card
-          title="Institutional positioning"
-          action={<Link href="/institutional" className="text-xs text-(--accent) hover:underline">Module →</Link>}
-        >
-          {demoMode ? (
+        {demoMode && (
+          <Card
+            title="Institutional positioning"
+            action={<Link href="/institutional" className="text-xs text-(--accent) hover:underline">Module →</Link>}
+          >
             <InstitutionalDemoRows instrument={symbol} />
-          ) : live!.institutional.data ? (
-            <>
-              <div className="flex items-center gap-2 mb-2">
-                <DataFreshnessTag freshness={live!.institutional.freshness} lastUpdated={live!.institutional.lastUpdated ?? undefined} />
-              </div>
-              <dl className="space-y-1.5 text-sm">
-                <Row label="Classification" value={live!.institutional.data.classification} />
-                <Row label="Net positioning" value={live!.institutional.data.netPositioning.toLocaleString()} />
-                <Row label="Weekly net change" value={formatSigned(live!.institutional.data.netWeeklyChange, 0)} />
-                <Row label="% long / short" value={`${live!.institutional.data.pctLong.toFixed(0)}% / ${live!.institutional.data.pctShort.toFixed(0)}%`} />
-                <Row label="Percentile (3yr)" value={live!.institutional.data.percentile !== null ? `${live!.institutional.data.percentile}th` : "n/a"} />
-                <Row label="Open interest" value={live!.institutional.data.openInterest.toLocaleString()} />
-              </dl>
-              <p className="text-[10px] text-(--text-faint) mt-2">Source: {live!.institutional.source}</p>
-            </>
-          ) : (
-            <>
-              <DataFreshnessTag freshness={live!.institutional.freshness} />
-              <UnavailableNote reason={live!.institutional.reason} />
-            </>
-          )}
-        </Card>
+          </Card>
+        )}
 
-        <Card
-          title="Retail sentiment"
-          action={<Link href="/retail-sentiment" className="text-xs text-(--accent) hover:underline">Module →</Link>}
-        >
-          {demoMode ? (
+        {demoMode && (
+          <Card
+            title="Retail sentiment"
+            action={<Link href="/retail-sentiment" className="text-xs text-(--accent) hover:underline">Module →</Link>}
+          >
             <RetailDemoRows instrument={symbol} />
-          ) : live!.retail.data ? (
-            <>
-              <div className="flex items-center gap-2 mb-2">
-                <DataFreshnessTag freshness={live!.retail.freshness} lastUpdated={live!.retail.lastUpdated ?? undefined} />
-              </div>
-              <dl className="space-y-1.5 text-sm">
-                <Row label="% long / short" value={`${live!.retail.data.pctLong.toFixed(0)}% / ${live!.retail.data.pctShort.toFixed(0)}%`} />
-                {live!.retail.data.longPositions !== undefined && <Row label="Long positions" value={live!.retail.data.longPositions.toLocaleString()} />}
-                {live!.retail.data.shortPositions !== undefined && <Row label="Short positions" value={live!.retail.data.shortPositions.toLocaleString()} />}
-                {live!.retail.data.avgLongPrice !== undefined && <Row label="Avg long price" value={formatPrice(live!.retail.data.avgLongPrice, instrument.decimals)} />}
-                {live!.retail.data.avgShortPrice !== undefined && <Row label="Avg short price" value={formatPrice(live!.retail.data.avgShortPrice, instrument.decimals)} />}
-              </dl>
-              <p className="text-[10px] text-(--text-faint) mt-2">Source: {live!.retail.source}</p>
-            </>
-          ) : (
-            <>
-              <DataFreshnessTag freshness={live!.retail.freshness} />
-              <UnavailableNote reason={live!.retail.reason} />
-            </>
-          )}
-        </Card>
+          </Card>
+        )}
 
         <Card
           title="Smart money divergence"
+          className={demoMode ? undefined : "lg:col-span-3"}
           action={<Link href="/smart-money" className="text-xs text-(--accent) hover:underline">Module →</Link>}
         >
           {demoMode ? (

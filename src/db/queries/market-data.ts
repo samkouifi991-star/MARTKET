@@ -8,13 +8,14 @@
 // last-known-good.ts): when a live provider call fails, the display/scoring
 // pipeline needs to read back exactly what was last actually stored, not
 // just append to it.
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import { marketPrices, marketCandles, institutionalPositioning, retailSentiment, economicIndicators, economicEvents, newsArticles } from "../schema";
 import { FredSeriesPoint, NormalizedCandle, NormalizedEconomicEvent, NormalizedNewsArticle, NormalizedQuote } from "@/services/types";
 import { CftcPositioningResult } from "@/services/market-data/cftc";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import { FredIndicatorKey } from "@/services/market-data/fred-series";
+import { EconomicIndicatorKey } from "@/services/economic-calendar/indicator-taxonomy";
 
 export async function upsertMarketPrice(symbol: string, quote: NormalizedQuote, provider: string): Promise<void> {
   const db = getDb();
@@ -120,6 +121,37 @@ export async function upsertEconomicEvent(event: NormalizedEconomicEvent, affect
 export async function updateEconomicEventClassification(externalId: string, fields: { indicatorKey: string | null; importanceTier: string | null; revisedPrevious: number | null }): Promise<void> {
   const db = getDb();
   await db.update(economicEvents).set(fields).where(eq(economicEvents.externalId, externalId));
+}
+
+export type StoredEconomicEventRow = {
+  event: string;
+  dateTime: string;
+  actual: number;
+  previous: number | null;
+  forecast: number | null;
+  importanceTier: string | null;
+};
+
+/** The most recently RELEASED (actual IS NOT NULL) stored calendar event
+ * for a given country/indicatorKey pair — the market scorecard's Economic
+ * Growth/Inflation/Jobs Market rows read this (never a live FMP call from
+ * the render path, matching this project's storage-first rule everywhere
+ * else). Reads economic_events, V1's own table (indicatorKey is a nullable
+ * V2-classification column backfilled onto it, not a separate V2 table —
+ * see updateEconomicEventClassification above) — this is real calendar
+ * history, not fabricated. Returns null, never a stub row, when nothing
+ * classified as this indicator has been released yet for this country. */
+export async function getLatestEconomicEventByIndicator(country: string, indicatorKey: EconomicIndicatorKey): Promise<StoredEconomicEventRow | null> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(economicEvents)
+    .where(and(eq(economicEvents.country, country), eq(economicEvents.indicatorKey, indicatorKey), isNotNull(economicEvents.actual)))
+    .orderBy(desc(economicEvents.dateTime))
+    .limit(1);
+  const r = rows[0];
+  if (!r || r.actual === null) return null;
+  return { event: r.event, dateTime: r.dateTime.toISOString(), actual: r.actual, previous: r.previous, forecast: r.forecast, importanceTier: r.importanceTier };
 }
 
 export async function insertNewsArticle(article: NormalizedNewsArticle, analysis: { interpretation: string; importance: number; confidence: number; reason: string }): Promise<void> {
