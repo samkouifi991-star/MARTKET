@@ -193,7 +193,7 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
           </Card>
         </div>
       ) : (
-        <Scorecard instrument={instrument} score={score} data={scorecardData!} biasThresholds={scoringConfig.biasThresholds} />
+        <Scorecard instrument={instrument} score={score} data={scorecardData!} biasThresholds={scoringConfig.biasThresholds} price={price} priceFreshness={priceFreshness} />
       )}
 
       <div className="grid lg:grid-cols-2 gap-4">

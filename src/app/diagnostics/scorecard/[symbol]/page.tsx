@@ -83,7 +83,7 @@ export default async function ScorecardDiagnosticPage({
         </p>
       </div>
 
-      <Scorecard instrument={instrument} score={score} data={scorecardData} biasThresholds={scoringConfig.biasThresholds} />
+      <Scorecard instrument={instrument} score={score} data={scorecardData} biasThresholds={scoringConfig.biasThresholds} price={live.price.data} priceFreshness={live.price.freshness} />
 
       <details className="text-xs">
         <summary className="cursor-pointer text-(--text-faint)">Raw JSON (score + scorecardData)</summary>

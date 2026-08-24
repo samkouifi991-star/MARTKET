@@ -6,8 +6,8 @@
 // or MarketScore — nothing is computed in this file beyond formatting and
 // badge coloring. Dark theme, existing CSS variables/components only.
 import { BiasThreshold } from "@/lib/config";
-import { DataFreshness, Instrument, MarketScore, ScoreFactorKey } from "@/lib/types";
-import { FactorSentiment, factorSentiment, factorSentimentBadgeClasses, formatSigned } from "@/lib/format";
+import { DataFreshness, Instrument, MarketScore, PriceData, ScoreFactorKey } from "@/lib/types";
+import { FactorSentiment, factorSentiment, factorSentimentBadgeClasses, formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
 import { formatDateTime } from "@/lib/time";
 import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
@@ -240,7 +240,21 @@ function SurpriseIndexTable({ section, symbol }: { section: ScorecardData["surpr
   );
 }
 
-export function Scorecard({ instrument, score, data, biasThresholds }: { instrument: Instrument; score: MarketScore; data: ScorecardData; biasThresholds: BiasThreshold[] }) {
+export function Scorecard({
+  instrument,
+  score,
+  data,
+  biasThresholds,
+  price,
+  priceFreshness,
+}: {
+  instrument: Instrument;
+  score: MarketScore;
+  data: ScorecardData;
+  biasThresholds: BiasThreshold[];
+  price: PriceData | null;
+  priceFreshness: DataFreshness;
+}) {
   const retailFactor = score.factors.find((f) => f.key === "retailSentiment" as ScoreFactorKey);
   // News has no dedicated screenshot section, but every one of the 9
   // scoring factors must stay visible somewhere in this redesign (nothing
@@ -258,6 +272,21 @@ export function Scorecard({ instrument, score, data, biasThresholds }: { instrum
         <div className="text-center mb-1">
           <div className="text-lg font-semibold">{instrument.symbol}</div>
           <div className="text-xs text-(--text-faint)">{instrument.name}</div>
+        </div>
+        <div className="text-center mb-3">
+          {price ? (
+            <>
+              <div className="flex items-baseline justify-center gap-2">
+                <span className="text-xl font-semibold tabular-nums">{formatPrice(price.current, instrument.decimals)}</span>
+                <span className={`text-sm tabular-nums font-medium ${scoreColorClass(price.changePct24h)}`}>{formatSignedPct(price.changePct24h)}</span>
+              </div>
+              <div className="mt-1 flex justify-center">
+                <DataFreshnessTag freshness={priceFreshness} />
+              </div>
+            </>
+          ) : (
+            <UnavailableState>{priceFreshness === "not_applicable" ? "NOT APPLICABLE" : "UNAVAILABLE"} — no current price available.</UnavailableState>
+          )}
         </div>
         <ScoreGauge score={score.totalScore} bias={score.bias} />
         <div className="w-full mt-3 space-y-1.5 text-xs">
@@ -324,13 +353,12 @@ export function Scorecard({ instrument, score, data, biasThresholds }: { instrum
 
           <SectionShell title="Retail / Crowd Sentiment">
             {data.retail.data ? (
-              <div className="space-y-1.5 text-xs">
+              <div className="space-y-1.5 text-xs" title={retailFactor?.explanation}>
                 <div className="flex items-center gap-2 mb-1">
                   <DataFreshnessTag freshness={data.retail.freshness} lastUpdated={data.retail.lastUpdated ?? undefined} />
                   {retailFactor && <StatusBadge sentiment={retailFactor.contribution > 0 ? "Bullish" : retailFactor.contribution < 0 ? "Bearish" : "Neutral"} />}
                 </div>
                 <Row label="Long % / Short %" value={`${data.retail.data.pctLong.toFixed(0)}% / ${data.retail.data.pctShort.toFixed(0)}%`} />
-                {retailFactor && <p className="text-(--text-dim) leading-relaxed pt-1">{retailFactor.explanation}</p>}
                 <p className="text-[10px] text-(--text-faint) pt-1">Source: {data.retail.source}</p>
               </div>
             ) : (
