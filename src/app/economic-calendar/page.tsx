@@ -2,10 +2,12 @@ import { CALENDAR_EVENTS, upcomingHighImpact } from "@/lib/demo/calendar";
 import { CalendarClient } from "./CalendarClient";
 import { AlertTriangle } from "lucide-react";
 import { formatDateTime } from "@/lib/time";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Economic Calendar — Market Intelligence AI" };
 
-export default function EconomicCalendarPage() {
+export default async function EconomicCalendarPage() {
+  await requireEntitlement();
   const soon = upcomingHighImpact(24);
 
   return (

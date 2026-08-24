@@ -23,12 +23,13 @@ export const API_USAGE = {
   activeApiKeys: 27,
 };
 
+// Single-plan product (Pro only, with a 3-day free trial) — subscribers are
+// tracked by trial-vs-paid status, not by plan tier.
 export const USER_ACTIVITY = {
   dailyActiveUsers: 1842,
   weeklyActiveUsers: 6210,
-  freeUsers: 4890,
-  proUsers: 1140,
-  professionalUsers: 180,
+  trialUsers: 214,
+  subscriberUsers: 1320,
 };
 
 export const SYSTEM_ANNOUNCEMENTS = [

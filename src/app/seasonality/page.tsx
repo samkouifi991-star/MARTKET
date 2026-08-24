@@ -1,10 +1,12 @@
 import { INSTRUMENTS } from "@/lib/instruments";
 import { monthlySeasonality, weekdaySeasonality } from "@/lib/demo/seasonality";
 import { SeasonalityClient } from "./SeasonalityClient";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Seasonality — Market Intelligence AI" };
 
-export default function SeasonalityPage() {
+export default async function SeasonalityPage() {
+  await requireEntitlement();
   const monthlyBySymbol: Record<string, ReturnType<typeof monthlySeasonality>> = {};
   const weekdayBySymbol: Record<string, ReturnType<typeof weekdaySeasonality>> = {};
   for (const i of INSTRUMENTS) {

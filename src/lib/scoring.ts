@@ -17,6 +17,7 @@ import { getEconomy } from "./demo/economies";
 import { CENTRAL_BANKS, getCentralBankByCurrency } from "./demo/centralBanks";
 import { currentMonthStat } from "./demo/seasonality";
 import { NEWS_ARTICLES } from "./demo/news";
+import { growthLaborPolarity } from "./pipeline/asset-polarity";
 
 function clamp(v: number, min = -10, max = 10): number {
   return Math.max(min, Math.min(max, v));
@@ -154,8 +155,15 @@ export function macroFactor(
   }
   const usEco = getEconomy("US");
   const weight = instrument.assetClass === "Indices" ? 0.8 : instrument.assetClass === "Crypto" ? 0.35 : 0.45;
-  const raw = clamp(usEco[metric] * weight);
-  const explanation = `US ${label} score is ${usEco[metric] > 0 ? "+" : ""}${usEco[metric].toFixed(1)}, applied as a global risk-appetite proxy scaled for ${instrument.assetClass.toLowerCase()}.`;
+  // Growth/labor strength isn't universally bullish — see pipeline/
+  // asset-polarity.ts. A stronger economy raises real yields and reduces
+  // safe-haven demand, a headwind (not a tailwind) for precious metals —
+  // the demo generator mirrors the same sign flip the live FRED pipeline
+  // applies in pipeline/macro.ts, so the two never disagree on direction.
+  const polarity = metric === "inflationScore" ? 1 : growthLaborPolarity(instrument);
+  const raw = clamp(usEco[metric] * weight * polarity);
+  const polarityNote = polarity < 0 ? ` Treated as a headwind, not a tailwind, for ${instrument.name} — a stronger economy raises real yields and reduces safe-haven demand.` : "";
+  const explanation = `US ${label} score is ${usEco[metric] > 0 ? "+" : ""}${usEco[metric].toFixed(1)}, applied as a global risk-appetite proxy scaled for ${instrument.assetClass.toLowerCase()}.${polarityNote}`;
   return { raw, explanation };
 }
 

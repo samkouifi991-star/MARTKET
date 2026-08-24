@@ -57,12 +57,53 @@ async function checkSeries(country: string, indicator: FredIndicatorKey, id: str
   }
 }
 
-// GBPUSD's dependency chain needs both sides fully covered — GB is
-// currently missing realGdp/gdpGrowth entirely (see fred-series.ts), so
-// this searches for candidates explicitly rather than silently skipping it.
-const GBPUSD_SEARCH_QUERIES: { country: string; indicator: FredIndicatorKey; query: string }[] = [
+// Search for candidates for any country/indicator gap a live batch needs,
+// rather than silently skipping it or guessing an ID.
+const SEARCH_QUERIES: { country: string; indicator: FredIndicatorKey; query: string }[] = [
   { country: "GB", indicator: "realGdp", query: "United Kingdom Real GDP" },
   { country: "GB", indicator: "gdpGrowth", query: "United Kingdom GDP Growth Rate" },
+  // AUDUSD batch: AU has no growth or policy-rate series configured at all.
+  { country: "AU", indicator: "realGdp", query: "Australia Real GDP" },
+  { country: "AU", indicator: "gdpGrowth", query: "Australia GDP Growth Rate" },
+  { country: "AU", indicator: "policyRate", query: "Australia Interbank Rate" },
+  // USDCAD batch: CA has no growth series configured (policyRate exists,
+  // unverified — the main verification loop above already checks it live).
+  { country: "CA", indicator: "realGdp", query: "Canada Real GDP" },
+  { country: "CA", indicator: "gdpGrowth", query: "Canada GDP Growth Rate" },
+  // NIKKEI225 batch: JP has cpi/unemploymentRate verified already, but no
+  // growth or policy-rate series configured at all — needed for the full
+  // 4-category primary local macro model (growth/inflation/labor/rates).
+  { country: "JP", indicator: "realGdp", query: "Japan Real GDP" },
+  { country: "JP", indicator: "gdpGrowth", query: "Japan GDP Growth Rate" },
+  { country: "JP", indicator: "policyRate", query: "Japan Interbank Rate" },
+  // USDCHF batch: CH has cpi/policyRate configured (unverified), but no
+  // growth or labor series at all.
+  { country: "CH", indicator: "realGdp", query: "Switzerland Real GDP" },
+  { country: "CH", indicator: "gdpGrowth", query: "Switzerland GDP Growth Rate" },
+  { country: "CH", indicator: "unemploymentRate", query: "Switzerland Unemployment Rate" },
+  // NZDUSD batch: NZ has only cpi configured (unverified) — needs growth,
+  // labor, and policy-rate series (RBNZ).
+  { country: "NZ", indicator: "realGdp", query: "New Zealand Real GDP" },
+  { country: "NZ", indicator: "gdpGrowth", query: "New Zealand GDP Growth Rate" },
+  { country: "NZ", indicator: "unemploymentRate", query: "New Zealand Unemployment Rate" },
+  { country: "NZ", indicator: "policyRate", query: "New Zealand Interbank Rate" },
+  // EURGBP/EURJPY batch: EU has cpi/unemploymentRate/policyRate verified,
+  // but no growth series at all — needed so EURGBP (EU vs GB) and EURJPY
+  // (EU vs JP) get a genuine economicGrowth factor instead of one side
+  // always reading unavailable.
+  { country: "EU", indicator: "realGdp", query: "Euro Area Real GDP" },
+  { country: "EU", indicator: "gdpGrowth", query: "Euro Area GDP Growth Rate" },
+  // DAX40 batch: DE has zero FRED coverage configured at all — needed for
+  // DAX40's full 4-category primary local macro model (growth/inflation/
+  // labor/rates), following the same real-search-then-metadata-confirm
+  // process every other country's series went through. This does NOT by
+  // itself unblock DAX40 for promotion — its price/candle source (FMP 402
+  // on ^GDAXI, unconfirmed either way) is a separate, still-open gap.
+  { country: "DE", indicator: "realGdp", query: "Germany Real GDP" },
+  { country: "DE", indicator: "gdpGrowth", query: "Germany GDP Growth Rate" },
+  { country: "DE", indicator: "cpi", query: "Germany Consumer Price Index" },
+  { country: "DE", indicator: "unemploymentRate", query: "Germany Unemployment Rate" },
+  { country: "DE", indicator: "policyRate", query: "Germany Interbank Rate" },
 ];
 
 async function main() {
@@ -106,8 +147,8 @@ async function main() {
   }
 
   console.log("\n" + "=".repeat(100));
-  console.log("Searching for GBPUSD-chain series that aren't configured yet (GB growth)...\n");
-  for (const { country, indicator, query } of GBPUSD_SEARCH_QUERIES) {
+  console.log("Searching for series that aren't configured yet...\n");
+  for (const { country, indicator, query } of SEARCH_QUERIES) {
     const existing = FRED_SERIES[country]?.[indicator];
     if (existing) {
       console.log(`  ${country}/${indicator}: already configured as ${existing.id} (verified: ${existing.verified}) — skipping search.`);

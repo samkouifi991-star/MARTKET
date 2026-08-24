@@ -1,6 +1,7 @@
 import { CENTRAL_BANKS } from "@/lib/demo/centralBanks";
 import { Card } from "@/components/ui/Card";
 import { formatDate } from "@/lib/time";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Interest Rates & Monetary Policy — Market Intelligence AI" };
 
@@ -10,7 +11,8 @@ const STANCE_CLASSES: Record<string, string> = {
   Neutral: "text-slate-300 bg-slate-500/10",
 };
 
-export default function InterestRatesPage() {
+export default async function InterestRatesPage() {
+  await requireEntitlement();
   return (
     <div className="space-y-6">
       <div>

@@ -9,6 +9,8 @@ import { factorLabel } from "@/lib/scoring";
 import { formatDate, formatRelative } from "@/lib/time";
 import { DATA_MODE } from "@/services/data-mode";
 import { getProviderHealth, ProviderHealthRow } from "@/db/queries/provider-health";
+import { requireAdmin } from "@/lib/auth/dal";
+import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
 import Link from "next/link";
 
 export const metadata = { title: "Admin — Market Intelligence AI" };
@@ -24,6 +26,7 @@ async function loadProviderHealth(): Promise<{ rows: ProviderHealthRow[]; error:
 }
 
 export default async function AdminPage() {
+  await requireAdmin();
   const rows = allMarketRows();
   const dataQualityIssues = rows.flatMap((r) =>
     r.score.factors
@@ -31,6 +34,7 @@ export default async function AdminPage() {
       .map((f) => ({ symbol: r.instrument.symbol, factor: f }))
   );
   const { rows: providerHealthRows, error: providerHealthError } = await loadProviderHealth();
+  const activeScoringConfig = await resolveActiveScoringConfig();
 
   return (
     <div className="space-y-6">
@@ -41,12 +45,23 @@ export default async function AdminPage() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatTile label="Daily active users" value={USER_ACTIVITY.dailyActiveUsers.toLocaleString()} />
-        <StatTile label="Free / Pro / Professional" value={`${USER_ACTIVITY.freeUsers.toLocaleString()} / ${USER_ACTIVITY.proUsers.toLocaleString()} / ${USER_ACTIVITY.professionalUsers.toLocaleString()}`} />
+        <StatTile label="Trialing / Subscribers" value={`${USER_ACTIVITY.trialUsers.toLocaleString()} / ${USER_ACTIVITY.subscriberUsers.toLocaleString()}`} />
         <StatTile label="API requests today" value={API_USAGE.requestsToday.toLocaleString()} sub={`${API_USAGE.activeApiKeys} active keys`} />
         <StatTile label="Rate limit" value={`${API_USAGE.rateLimitPerMin}/min`} />
       </div>
 
-      <AdminClient initialAuditLog={AUDIT_LOGS} />
+      <AdminClient initialAuditLog={AUDIT_LOGS} activeScoringConfig={activeScoringConfig} />
+
+      <Card
+        title="Scoring Engine V2 (shadow mode)"
+        subtitle="Event-driven, asset-specific engine running alongside V1 — not shown to regular users yet"
+        action={<Link href="/admin/scoring-v2" className="text-xs text-(--accent) hover:underline">Open comparison page →</Link>}
+      >
+        <p className="text-sm text-(--text-faint)">
+          Compares V1&apos;s live score against V2&apos;s shadow score per market, including the &quot;why did the score change&quot;
+          attribution breakdown and any integrity-check failures.
+        </p>
+      </Card>
 
       <Card
         title="GBPUSD dependency-chain validation"

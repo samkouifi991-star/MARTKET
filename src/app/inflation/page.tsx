@@ -2,10 +2,12 @@ import { allEconomies } from "@/lib/demo/economies";
 import { EconomicReleaseTable } from "@/components/tables/EconomicReleaseTable";
 import { StatTile } from "@/components/ui/StatTile";
 import { Card } from "@/components/ui/Card";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Inflation — Market Intelligence AI" };
 
-export default function InflationPage() {
+export default async function InflationPage() {
+  await requireEntitlement();
   const economies = allEconomies();
 
   return (

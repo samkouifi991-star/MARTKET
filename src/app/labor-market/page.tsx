@@ -1,10 +1,12 @@
 import { allEconomies } from "@/lib/demo/economies";
 import { EconomicReleaseTable } from "@/components/tables/EconomicReleaseTable";
 import { StatTile } from "@/components/ui/StatTile";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Labor Market — Market Intelligence AI" };
 
-export default function LaborMarketPage() {
+export default async function LaborMarketPage() {
+  await requireEntitlement();
   const economies = allEconomies();
 
   return (

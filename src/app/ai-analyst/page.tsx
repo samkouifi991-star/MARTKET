@@ -1,8 +1,10 @@
 import { AiAnalystClient } from "./AiAnalystClient";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "AI Analyst — Market Intelligence AI" };
 
-export default function AiAnalystPage() {
+export default async function AiAnalystPage() {
+  await requireEntitlement();
   return (
     <div className="space-y-4">
       <div>

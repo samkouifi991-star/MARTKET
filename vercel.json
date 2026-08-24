@@ -6,6 +6,7 @@
     { "path": "/api/cron/retail-sentiment", "schedule": "0 4 * * *" },
     { "path": "/api/cron/macro", "schedule": "0 2 * * *" },
     { "path": "/api/cron/calendar", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/economic-releases", "schedule": "10 5 * * *" },
     { "path": "/api/cron/news", "schedule": "0 7 * * *" },
     { "path": "/api/cron/scores", "schedule": "0 8 * * *" }
   ]

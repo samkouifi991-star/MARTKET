@@ -1,9 +1,11 @@
 import { NEWS_ARTICLES } from "@/lib/demo/news";
 import { NewsClient } from "./NewsClient";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "News Intelligence — Market Intelligence AI" };
 
-export default function NewsPage() {
+export default async function NewsPage() {
+  await requireEntitlement();
   const articles = [...NEWS_ARTICLES].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
   return (

@@ -1,10 +1,12 @@
 import { assetClassBacktest, riskRegimeBacktest, scoreRangeBacktest, volRegimeBacktest } from "@/lib/demo/backtest";
 import { BacktestClient } from "./BacktestClient";
 import { AlertTriangle } from "lucide-react";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Backtesting — Market Intelligence AI" };
 
-export default function BacktestingPage() {
+export default async function BacktestingPage() {
+  await requireEntitlement();
   return (
     <div className="space-y-6">
       <div>

@@ -13,6 +13,15 @@ export type Instrument = {
   assetClass: AssetClass;
   /** For FX pairs: [base, quote] currency codes used to pull two-sided macro data. */
   currencies?: [string, string];
+  /** For instruments without `currencies` (indices/commodities/crypto): the
+   * FRED country code whose macro data feeds the single-country model —
+   * only meaningful when assetClass is "Indices", where it names the
+   * index's real home market (e.g. "GB" for FTSE100) and is used as that
+   * index's primary local macro profile, not a proxy. Defaults to "US" in
+   * macro.ts when unset. Ignored for commodities/crypto, which have no
+   * single home-market economy and always use US data as an explicit
+   * risk-appetite/liquidity proxy regardless of this field. */
+  macroCountry?: string;
   decimals: number;
 };
 
@@ -45,8 +54,13 @@ export const FACTOR_LABELS: Record<ScoreFactorKey, string> = {
 // "estimated" is a demo-mode-only label (aggregated/synthetic value shown
 // honestly as such). "unavailable" / "error" are the live-pipeline states a
 // factor must fall into when its provider has no data or the request
-// failed — never silently substituted with demo data.
-export type DataFreshness = "live" | "delayed" | "estimated" | "stale" | "unavailable" | "error";
+// failed — never silently substituted with demo data. "not_applicable" is
+// distinct from both: it means the factor concept structurally does not
+// exist for this asset (e.g. no CFTC-reportable futures contract, no
+// retail-sentiment provider covers this asset class) — a permanent,
+// by-design gap, not a temporary data-quality problem, so it must not drag
+// down confidence the way a real missing/failed fetch does.
+export type DataFreshness = "live" | "delayed" | "estimated" | "stale" | "unavailable" | "error" | "not_applicable";
 
 export type ScoreFactor = {
   key: ScoreFactorKey;
@@ -54,7 +68,12 @@ export type ScoreFactor = {
   rawScore: number; // normalized -10..+10 before weighting
   weight: number; // 0..1
   explanation: string;
-  source: string;
+  source: string; // human-readable label, e.g. "CFTC Traders in Financial Futures" — can be long
+  // Short provider code, e.g. "fmp"/"cftc"/"fred"/"oanda"/"ig"/"myfxbook"/"demo"/"none" —
+  // distinct from `source` because the DB's factor_scores.provider column
+  // is varchar(32) and several `source` labels exceed that; optional since
+  // the demo generator (lib/scoring.ts) never persists to that table.
+  provider?: string;
   freshness: DataFreshness;
   lastUpdated: string; // ISO
   nextUpdate: string; // ISO
@@ -137,6 +156,23 @@ export type SmartMoneyData = {
   explanation: string;
 };
 
+// Real depth of the underlying daily-candle sample a seasonality read was
+// computed from — distinct from `SeasonalityStat.years` (how many times
+// the specific period, e.g. "August", occurs in that sample). A dataset can
+// report years=2 for August while only spanning ~13 months of real history
+// (August appearing once near each edge) — this is the honest measure used
+// to gate confidence and to describe the sample without overstating it.
+export type SeasonalitySampleDepth = {
+  earliestDate: string; // ISO date of the oldest candle in the sample
+  latestDate: string; // ISO date of the newest candle in the sample
+  observations: number; // total daily candles in the sample
+  yearsSpanned: number; // (latest - earliest) in years, continuous
+  calendarYears: number; // distinct calendar years represented
+  positiveYearPct: number; // % of whole calendar years with a positive close-to-close return
+  avgAnnualReturn: number; // mean of those whole-calendar-year returns
+  medianAnnualReturn: number; // median of those whole-calendar-year returns
+};
+
 export type SeasonalityStat = {
   period: string; // e.g. "August", "Week 32", "Monday"
   avgReturn: number;
@@ -149,6 +185,9 @@ export type SeasonalityStat = {
   avg10y: number;
   avg20y: number | null;
   maxDrawdown: number;
+  // Only populated for live/hybrid reads over real stored/fetched candles —
+  // demo data has no genuine sample to describe.
+  sampleDepth?: SeasonalitySampleDepth;
 };
 
 export type EconomicRelease = {
@@ -311,4 +350,4 @@ export type BacktestBucket = {
   avgMAE: number;
 };
 
-export type SubscriptionPlan = "Free" | "Pro" | "Professional";
+export type SubscriptionPlan = "Pro";

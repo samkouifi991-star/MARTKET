@@ -41,6 +41,15 @@ export const HIGHER_IS_BETTER: Record<FredIndicatorKey, boolean> = {
   policyRate: true,
   yield2y: true,
   yield10y: true,
+  // Not consumed by scoreIndicator()/computeCountryMacroScores() — these 4
+  // feed pipeline/gold-macro.ts's own composite directly (it reads raw
+  // change, not a HIGHER_IS_BETTER-signed z-score), never a country
+  // differential. Present only so this Record<FredIndicatorKey, ...> stays
+  // exhaustive; values are unused for these keys.
+  realYield10y: true,
+  breakevenInflation10y: true,
+  usdIndexBroad: true,
+  vix: false,
 };
 
 const INDICATOR_CATEGORY: Record<FredIndicatorKey, "growth" | "inflation" | "labor" | "rates"> = {
@@ -61,6 +70,12 @@ const INDICATOR_CATEGORY: Record<FredIndicatorKey, "growth" | "inflation" | "lab
   policyRate: "rates",
   yield2y: "rates",
   yield10y: "rates",
+  // Unused for these 4 (see HIGHER_IS_BETTER's comment above) — present
+  // only for exhaustiveness.
+  realYield10y: "rates",
+  breakevenInflation10y: "inflation",
+  usdIndexBroad: "rates",
+  vix: "rates",
 };
 
 function clamp(v: number, min = -10, max = 10): number {

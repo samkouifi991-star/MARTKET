@@ -7,10 +7,12 @@ import { generatePriceData } from "@/lib/demo/price";
 import { Card } from "@/components/ui/Card";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { formatSigned, formatSignedPct } from "@/lib/format";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Smart Money — Institutional vs. Retail — Market Intelligence AI" };
 
-export default function SmartMoneyPage() {
+export default async function SmartMoneyPage() {
+  await requireEntitlement();
   const rows = INSTRUMENTS.map((instrument) => ({
     instrument,
     signal: generateSmartMoney(instrument),

@@ -32,6 +32,44 @@ function credentialsConfigured(): boolean {
   return Boolean(process.env.MYFXBOOK_EMAIL && process.env.MYFXBOOK_PASSWORD);
 }
 
+/** Self-generated per-call ID (not Vercel's internal trace ID, which isn't
+ * reliably available inside process.env at the point this runs) purely to
+ * let log lines from the same login->outlook call be correlated with each
+ * other when reading raw logs — nothing sensitive, never the credentials or
+ * session itself. */
+function newExecutionId(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+/** Safe-only diagnostic line: region + execution id + booleans, never a
+ * credential or session value. */
+function logDiagnostic(executionId: string, step: string, detail: Record<string, string | boolean | undefined>): void {
+  const region = process.env.VERCEL_REGION ?? "unknown";
+  const parts = Object.entries(detail)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" ");
+  console.log(`[myfxbook exec=${executionId} region=${region}] ${step} ${parts}`);
+}
+
+/** Thrown when a freshly-issued session (login succeeded, session
+ * returned) is still rejected by Community Outlook within the same
+ * execution as its own login — twice, ruling out a one-off transient
+ * blip. Not a credentials problem (login succeeded) and not the
+ * cross-invocation session-reuse bug this client was already rewritten to
+ * avoid — a structural incompatibility between Myfxbook's session model
+ * and this deployment architecture. */
+class MyfxbookSessionIncompatibleError extends Error {}
+
+/** Thrown when Myfxbook's own API cleanly rejects the login call itself
+ * (e.g. "Wrong email/password") — a well-formed "no" from the provider,
+ * not a network/parsing failure. Myfxbook is an OPTIONAL retail-sentiment
+ * source (see gbpusd-validation.ts's REQUIRED/OPTIONAL classification), so
+ * this is surfaced as unavailable, never as an alarming ERROR — whether the
+ * stored credentials are stale is something only a human can confirm (this
+ * app cannot read back a Vercel "sensitive" env var's value, by design). */
+class MyfxbookLoginRejectedError extends Error {}
+
 // URLSearchParams.set() already percent-encodes the value it's given
 // (spaces, @, +, etc. in an email/password all come out correctly encoded
 // in the resulting query string) — this is not something to hand-roll.
@@ -43,7 +81,7 @@ async function login(): Promise<string> {
   const res = await fetch(url.toString(), { next: { revalidate: 0 } });
   if (!res.ok) throw new Error(`Myfxbook login failed: ${res.status} ${res.statusText}`);
   const data = (await res.json()) as { error: boolean; message?: string; session?: string };
-  if (data.error || !data.session) throw new Error(`Myfxbook login rejected: ${data.message ?? "no session returned"}`);
+  if (data.error || !data.session) throw new MyfxbookLoginRejectedError(data.message ?? "no session returned");
   return data.session;
 }
 
@@ -98,17 +136,35 @@ async function fetchOutlookOnce(session: string): Promise<OutlookResponse> {
 /** Logs in and immediately fetches the outlook within this same call —
  * login and outlook are never split across separate invocations. If the
  * session Myfxbook just issued is itself rejected, logs in again once
- * (fresh credentials each time, never reusing a session) before giving up. */
+ * (fresh credentials each time, never reusing a session) before giving up.
+ * If Community Outlook rejects a brand-new session twice in a row — both
+ * within this same execution — that's classified as a structural
+ * incompatibility (MyfxbookSessionIncompatibleError), not a transient error
+ * to keep retrying. */
 async function loginAndFetchOutlook(): Promise<OutlookRow[]> {
+  const executionId = newExecutionId();
+
   const session = await login();
+  logDiagnostic(executionId, "login", { loginSuccessful: true, sessionReceived: Boolean(session) });
+
   let data = await fetchOutlookOnce(session);
+  logDiagnostic(executionId, "community_outlook_attempt_1", { accepted: !data.error, rejectedReason: data.error ? data.message ?? "unknown" : undefined });
 
   if (data.error && isInvalidSessionError(data.message ?? "")) {
     const retrySession = await login();
+    logDiagnostic(executionId, "login_retry", { loginSuccessful: true, sessionReceived: Boolean(retrySession) });
+
     data = await fetchOutlookOnce(retrySession);
+    logDiagnostic(executionId, "community_outlook_attempt_2", { accepted: !data.error, rejectedReason: data.error ? data.message ?? "unknown" : undefined });
+
+    if (data.error && isInvalidSessionError(data.message ?? "")) {
+      logDiagnostic(executionId, "classified", { result: "incompatible" });
+      throw new MyfxbookSessionIncompatibleError(data.message ?? "session rejected immediately after issuance, twice, in the same execution");
+    }
   }
 
   if (data.error) throw new Error(`Myfxbook community outlook rejected: ${data.message ?? "unknown error"}`);
+  logDiagnostic(executionId, "classified", { result: "success" });
   return data.symbols ?? [];
 }
 
@@ -157,6 +213,27 @@ async function getRetailSentiment(internalSymbol: string): Promise<Provenance<No
       raw: row,
     };
   } catch (err) {
+    if (err instanceof MyfxbookSessionIncompatibleError) {
+      return unavailable(
+        "myfxbook",
+        SOURCE,
+        `Myfxbook rejected a freshly-issued session within the same execution as its own login (${err.message}) — not a credentials problem, a structural incompatibility between Myfxbook's session model and this serverless architecture. Treating Myfxbook as unavailable rather than retrying further; IG is already wired as a secondary retail-sentiment provider.`
+      );
+    }
+    if (err instanceof MyfxbookLoginRejectedError) {
+      // A clean, well-formed rejection from Myfxbook's own API (e.g. "Wrong
+      // email/password"), not a network/parsing failure — Myfxbook is an
+      // OPTIONAL dependency (see gbpusd-validation.ts), so this must not
+      // block or alarm as an ERROR. Whether the stored MYFXBOOK_EMAIL/
+      // MYFXBOOK_PASSWORD actually match the intended account is something
+      // only a human can confirm — this app cannot read back a Vercel
+      // "sensitive" env var's value once set, by design.
+      return unavailable(
+        "myfxbook",
+        SOURCE,
+        `Myfxbook's API rejected the configured login (${err.message}). This is an OPTIONAL dependency — confirm MYFXBOOK_EMAIL/MYFXBOOK_PASSWORD independently (e.g. logging into myfxbook.com with the same credentials) rather than retrying automatically. IG is already wired as an alternative retail-sentiment provider via the same RetailSentimentProvider interface.`
+      );
+    }
     return errorResult("myfxbook", SOURCE, err instanceof Error ? err.message : String(err));
   }
 }
@@ -174,7 +251,10 @@ export type MyfxbookDiagnostic = {
  * lookup) instead of a single opaque "unavailable". Never returns the
  * password or session token, even inside `error`. */
 export async function diagnoseMyfxbookConnection(symbol: string): Promise<MyfxbookDiagnostic> {
+  const executionId = newExecutionId();
+
   if (!credentialsConfigured()) {
+    logDiagnostic(executionId, "precheck", { credentialsConfigured: false });
     return { loginSuccessful: false, sessionReceived: false, communityOutlookSuccessful: false, symbolFound: false, error: "MYFXBOOK_EMAIL / MYFXBOOK_PASSWORD not configured" };
   }
 
@@ -182,20 +262,29 @@ export async function diagnoseMyfxbookConnection(symbol: string): Promise<Myfxbo
   try {
     session = await login();
   } catch (err) {
+    logDiagnostic(executionId, "login", { loginSuccessful: false });
     return { loginSuccessful: false, sessionReceived: false, communityOutlookSuccessful: false, symbolFound: false, error: err instanceof Error ? err.message : String(err) };
   }
   const sessionReceived = Boolean(session);
+  logDiagnostic(executionId, "login", { loginSuccessful: true, sessionReceived });
 
+  // Community Outlook is called immediately, in this same execution, using
+  // the session that was just issued above — never a session persisted
+  // from, or reused across, a separate invocation.
   try {
     const outlook = await fetchOutlookOnce(session);
+    logDiagnostic(executionId, "community_outlook", { accepted: !outlook.error, rejectedReason: outlook.error ? outlook.message ?? "unknown" : undefined });
+
     if (outlook.error) {
       return { loginSuccessful: true, sessionReceived, communityOutlookSuccessful: false, symbolFound: false, error: outlook.message ?? "community outlook rejected" };
     }
     const mapping = getSymbolMapping(symbol);
     const targetName = mapping?.myfxbookSymbol ?? symbol;
     const row = (outlook.symbols ?? []).find((s) => pickString(s, FIELD_CANDIDATES.name)?.toUpperCase() === targetName.toUpperCase());
+    logDiagnostic(executionId, "symbol_lookup", { symbolFound: Boolean(row) });
     return { loginSuccessful: true, sessionReceived, communityOutlookSuccessful: true, symbolFound: Boolean(row) };
   } catch (err) {
+    logDiagnostic(executionId, "community_outlook", { accepted: false, rejectedReason: err instanceof Error ? err.message : String(err) });
     return { loginSuccessful: true, sessionReceived, communityOutlookSuccessful: false, symbolFound: false, error: err instanceof Error ? err.message : String(err) };
   }
 }

@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const t0 = Date.now();
   const news = await fmp.getForexAndMarketNews(100);
   if (news.status !== "live" || !news.value) {
-    await recordProviderCheck({ provider: "fmp", ok: false, latencyMs: Date.now() - t0, error: news.error ?? "news unavailable" }).catch(() => {});
+    await recordProviderCheck({ provider: "fmp:news", ok: false, latencyMs: Date.now() - t0, error: news.error ?? "news unavailable" }).catch(() => {});
     return NextResponse.json({ job: "news", okCount: 0, failCount: 1, error: news.error }, { status: 502 });
   }
 
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
       reason: `v1 keyword classifier: ${classification.interpretation} (importance ${classification.importance}/100, confidence ${classification.confidence}/100)`,
     });
   }
-  await recordProviderCheck({ provider: "fmp", ok: true, latencyMs: Date.now() - t0 }).catch(() => {});
+  await recordProviderCheck({ provider: "fmp:news", ok: true, latencyMs: Date.now() - t0 }).catch(() => {});
 
   return NextResponse.json({ job: "news", okCount: news.value.length, failCount: 0 });
 }

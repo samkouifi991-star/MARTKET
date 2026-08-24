@@ -19,12 +19,16 @@ export const DEFAULT_FACTOR_WEIGHTS: Record<ScoreFactorKey, number> = {
 
 export type BiasThreshold = { bias: Bias; min: number };
 
+// Very Bearish's min is a real, admin-editable number like every other
+// tier (not -Infinity) — classifyBias's fallback below already returns
+// "Very Bearish" for anything under it, so this number is the honest
+// lower boundary of that tier rather than a sentinel floor.
 export const DEFAULT_BIAS_THRESHOLDS: BiasThreshold[] = [
   { bias: "Very Bullish", min: 8 },
   { bias: "Bullish", min: 4 },
   { bias: "Neutral", min: -3.9 },
   { bias: "Bearish", min: -7.9 },
-  { bias: "Very Bearish", min: -Infinity },
+  { bias: "Very Bearish", min: -10 },
 ];
 
 export function classifyBias(score: number, thresholds: BiasThreshold[] = DEFAULT_BIAS_THRESHOLDS): Bias {
@@ -55,42 +59,21 @@ export function classifyRiskGauge(value: number) {
   return "Strong Risk-On" as const;
 }
 
+// Single paid plan — Pro is the only subscription this product offers.
+// See app/settings/page.tsx for the pricing card that renders this.
 export const SUBSCRIPTION_PLANS = [
-  {
-    name: "Free" as const,
-    price: 0,
-    features: [
-      "10 featured instruments",
-      "Delayed scores (15 min)",
-      "One watchlist",
-      "5 AI Analyst questions / day",
-      "No advanced alerts",
-    ],
-  },
   {
     name: "Pro" as const,
     price: 39,
+    trialDays: 3,
     features: [
-      "All 26 instruments",
+      "All supported instruments",
       "Fastest available updates",
       "Unlimited watchlists",
-      "Advanced alerts (email, in-app)",
+      "Advanced alerts",
       "Full scoring breakdown",
-      "AI Analyst, unlimited",
+      "Unlimited AI Analyst",
       "Economic calendar & news intelligence",
-    ],
-  },
-  {
-    name: "Professional" as const,
-    price: 129,
-    features: [
-      "Everything in Pro",
-      "API access & webhooks",
-      "Advanced backtesting",
-      "Data export tools",
-      "Team accounts",
-      "Custom scoring models",
-      "Priority support",
     ],
   },
 ];

@@ -4,10 +4,12 @@ import { generateRetailSentiment } from "@/lib/demo/retail";
 import { Card } from "@/components/ui/Card";
 import { formatSigned } from "@/lib/format";
 import { DEFAULT_RETAIL_SENTIMENT_CONFIG } from "@/lib/config";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Retail Sentiment — Market Intelligence AI" };
 
-export default function RetailSentimentPage() {
+export default async function RetailSentimentPage() {
+  await requireEntitlement();
   const rows = INSTRUMENTS.map((instrument) => ({ instrument, retail: generateRetailSentiment(instrument) }));
   const extremes = rows.filter((r) => r.retail.isExtreme).sort((a, b) => Math.max(b.retail.pctLong, b.retail.pctShort) - Math.max(a.retail.pctLong, a.retail.pctShort));
 

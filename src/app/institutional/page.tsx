@@ -4,10 +4,12 @@ import { generatePositioning } from "@/lib/demo/positioning";
 import { Card } from "@/components/ui/Card";
 import { formatSigned } from "@/lib/format";
 import { formatDate } from "@/lib/time";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Institutional Positioning — Market Intelligence AI" };
 
-export default function InstitutionalPage() {
+export default async function InstitutionalPage() {
+  await requireEntitlement();
   const rows = INSTRUMENTS.map((instrument) => ({ instrument, pos: generatePositioning(instrument) }));
 
   const strongestBuying = [...rows].sort((a, b) => b.pos.netWeeklyChange - a.pos.netWeeklyChange).slice(0, 5);

@@ -12,6 +12,62 @@ function apiKey(): string | null {
   return process.env.FRED_API_KEY?.trim() || null;
 }
 
+// API availability and data freshness are separate concepts: a series can
+// resolve successfully (the HTTP call succeeds, real observations come
+// back) while still being months behind — GB CPI (GBRCPIALLMINMEI) is the
+// concrete case that motivated this: it resolves fine but FRED's own last
+// observation was ~17 months old at verification time. A successful fetch
+// must not automatically mean "live". Cadence is standard domain knowledge
+// per indicator (CPI/unemployment/payrolls publish monthly, GDP quarterly,
+// policy rates effectively daily), not derived per-call, so this needs no
+// extra API request.
+type FredCadence = "daily" | "weekly" | "monthly" | "quarterly";
+
+const INDICATOR_CADENCE: Record<FredIndicatorKey, FredCadence> = {
+  realGdp: "quarterly",
+  gdpGrowth: "quarterly",
+  industrialProduction: "monthly",
+  retailSales: "monthly",
+  cpi: "monthly",
+  coreCpi: "monthly",
+  pce: "monthly",
+  corePce: "monthly",
+  ppi: "monthly",
+  unemploymentRate: "monthly",
+  payrolls: "monthly",
+  initialClaims: "weekly",
+  wageGrowth: "monthly",
+  laborParticipation: "monthly",
+  policyRate: "daily",
+  yield2y: "daily",
+  yield10y: "daily",
+  realYield10y: "daily",
+  breakevenInflation10y: "daily",
+  usdIndexBroad: "daily",
+  vix: "daily",
+};
+
+// Generous windows (real-world publication lag, not the raw cadence
+// itself) — e.g. monthly CPI is typically released 2-5 weeks after the
+// reference month ends, so a ~45-day-old CPI print is still genuinely
+// current, not delayed.
+const CADENCE_WINDOW_DAYS: Record<FredCadence, { live: number; delayed: number }> = {
+  daily: { live: 5, delayed: 14 },
+  weekly: { live: 14, delayed: 30 },
+  monthly: { live: 60, delayed: 120 },
+  quarterly: { live: 150, delayed: 270 },
+};
+
+export type FredFreshness = "live" | "delayed" | "stale";
+
+export function classifyFredFreshness(indicator: FredIndicatorKey, latestObservationDateIso: string): { freshness: FredFreshness; ageDays: number; cadence: FredCadence } {
+  const cadence = INDICATOR_CADENCE[indicator];
+  const ageDays = Math.round((Date.now() - new Date(latestObservationDateIso).getTime()) / 86_400_000);
+  const window = CADENCE_WINDOW_DAYS[cadence];
+  const freshness: FredFreshness = ageDays <= window.live ? "live" : ageDays <= window.delayed ? "delayed" : "stale";
+  return { freshness, ageDays, cadence };
+}
+
 async function fredGet<T>(path: string, params: Record<string, string>): Promise<T> {
   const key = apiKey();
   if (!key) throw new Error("FRED_API_KEY is not configured");
@@ -51,16 +107,20 @@ export async function getSeries(country: string, indicator: FredIndicatorKey, li
 
     if (points.length === 0) return unavailable("fred", SOURCE, `No observations for ${series.id}`);
 
+    const latestObservationDate = points[points.length - 1].date;
+    const { freshness, ageDays, cadence } = classifyFredFreshness(indicator, latestObservationDate);
+
     const now = new Date().toISOString();
     return {
       provider: "fred",
       source: SOURCE,
-      status: "live",
+      status: freshness,
       fetchedAt: now,
-      sourceUpdatedAt: points[points.length - 1].date,
+      sourceUpdatedAt: latestObservationDate,
       nextExpectedUpdate: null,
       value: points,
       raw: data,
+      ...(freshness !== "live" ? { error: `Latest ${series.id} observation is ${latestObservationDate} (~${ageDays}d old, ${cadence} cadence) — ${freshness}, not current` } : {}),
     };
   } catch (err) {
     return errorResult("fred", SOURCE, err instanceof Error ? err.message : String(err));

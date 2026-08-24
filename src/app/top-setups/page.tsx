@@ -1,14 +1,26 @@
-import { allMarketRows } from "@/lib/market-data";
+import { getCanonicalMarketRows } from "@/lib/pipeline/top-setups";
 import { TopSetupsTable } from "@/components/tables/TopSetupsTable";
 import { InfoTooltip } from "@/components/ui/InfoTooltip";
+import { AutoRefresh } from "@/components/ui/AutoRefresh";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Top Market Setups — Market Intelligence AI" };
 
-export default function TopSetupsPage() {
-  const rows = allMarketRows();
+// Every score here must be the same canonical value /markets/[symbol]
+// computes — never a build-time snapshot. force-dynamic makes this route
+// render fresh (a real Neon read) on every request instead of being
+// prerendered once at build time and served frozen until the next deploy;
+// AutoRefresh below keeps it current for a tab a user leaves open, since a
+// server component can't re-run itself on a timer on its own.
+export const dynamic = "force-dynamic";
+
+export default async function TopSetupsPage() {
+  await requireEntitlement();
+  const rows = await getCanonicalMarketRows();
 
   return (
     <div>
+      <AutoRefresh intervalSeconds={45} />
       <div className="mb-5">
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold">Top Market Setups</h1>

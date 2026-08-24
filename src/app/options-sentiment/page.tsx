@@ -3,10 +3,12 @@ import { generateOptionsSentiment } from "@/lib/demo/options";
 import { INVESTOR_SENTIMENT } from "@/lib/demo/investorSentiment";
 import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
+import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Options & Investor Sentiment — Market Intelligence AI" };
 
-export default function OptionsSentimentPage() {
+export default async function OptionsSentimentPage() {
+  await requireEntitlement();
   const indices = INSTRUMENTS.filter((i) => i.assetClass === "Indices").map((i) => ({ instrument: i, options: generateOptionsSentiment(i) }));
 
   return (

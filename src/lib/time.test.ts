@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { formatRelative } from "./time";
+import { formatRelative, filterToRecentWindow, RECENT_CHART_WINDOW_DAYS } from "./time";
 
 describe("formatRelative", () => {
   beforeEach(() => {
@@ -51,5 +51,45 @@ describe("formatRelative", () => {
     const unixSeconds = Math.floor((Date.now() - 3600_000) / 1000);
     const iso = new Date(unixSeconds * 1000).toISOString();
     expect(formatRelative(iso)).toBe("1h ago");
+  });
+});
+
+describe("filterToRecentWindow", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2027-01-15T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("defaults to the shared ~5 month (150 day) window every chart on the platform uses", () => {
+    expect(RECENT_CHART_WINDOW_DAYS).toBe(150);
+  });
+
+  it("excludes points older than the window and keeps points within it", () => {
+    const points = [
+      { date: new Date(Date.now() - 200 * 86_400_000).toISOString() }, // too old
+      { date: new Date(Date.now() - 151 * 86_400_000).toISOString() }, // just outside
+      { date: new Date(Date.now() - 149 * 86_400_000).toISOString() }, // just inside
+      { date: new Date(Date.now() - 10 * 86_400_000).toISOString() }, // recent
+      { date: new Date().toISOString() }, // now
+    ];
+    const result = filterToRecentWindow(points);
+    expect(result).toHaveLength(3);
+    expect(result.map((p) => p.date)).toEqual([points[2].date, points[3].date, points[4].date]);
+  });
+
+  it("accepts a custom window size, independent of the default 150-day constant", () => {
+    const points = [
+      { date: new Date(Date.now() - 40 * 86_400_000).toISOString() },
+      { date: new Date(Date.now() - 20 * 86_400_000).toISOString() },
+    ];
+    expect(filterToRecentWindow(points, 30)).toHaveLength(1);
+  });
+
+  it("returns an empty array unchanged when given no points", () => {
+    expect(filterToRecentWindow([])).toEqual([]);
   });
 });

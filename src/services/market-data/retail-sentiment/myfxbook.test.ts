@@ -67,6 +67,80 @@ describe("myfxbook session retry", () => {
     expect(result.error).toContain("Internal server error");
   });
 
+  it("classifies Myfxbook unavailable (not error) when a freshly-issued session is rejected twice in the same execution", async () => {
+    // Reproduces exactly the real-world diagnostic result: login succeeds,
+    // a session is returned, but Community Outlook rejects it immediately
+    // — and rejects the retry's brand-new session too. Not a credentials
+    // problem (login always succeeds); should stop retrying and classify
+    // as a structural incompatibility rather than a generic error.
+    const fetchMock = vi.fn();
+    let loginCalls = 0;
+    fetchMock.mockImplementation(async (urlStr: string) => {
+      const url = new URL(urlStr);
+      if (url.pathname.endsWith("/login.json")) {
+        loginCalls += 1;
+        return jsonResponse({ error: false, session: `session-${loginCalls}` });
+      }
+      if (url.pathname.endsWith("/get-community-outlook.json")) {
+        return jsonResponse({ error: true, message: "Invalid session" });
+      }
+      throw new Error(`unexpected URL ${urlStr}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { myfxbookProvider } = await import("./myfxbook");
+    const result = await myfxbookProvider.getRetailSentiment("GBPUSD");
+
+    expect(loginCalls).toBe(2); // login retried once, both fresh
+    expect(result.status).toBe("unavailable"); // not "error" — see error message below
+    expect(result.error).toMatch(/not a credentials problem/i);
+    expect(result.error).toMatch(/alternative retail-sentiment provider|IG/i);
+  });
+
+  it("classifies a clean login rejection (wrong email/password) as unavailable, not error", async () => {
+    // Reproduces the real live result: Myfxbook's own API cleanly rejects
+    // the login call itself. Distinct from the session-incompatibility
+    // case above (login never even succeeds here) — still OPTIONAL, still
+    // must not read as an alarming ERROR or block GBPUSD.
+    const fetchMock = vi.fn();
+    fetchMock.mockImplementation(async (urlStr: string) => {
+      const url = new URL(urlStr);
+      if (url.pathname.endsWith("/login.json")) return jsonResponse({ error: true, message: "Wrong email/password" });
+      throw new Error(`unexpected URL ${urlStr}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { myfxbookProvider } = await import("./myfxbook");
+    const result = await myfxbookProvider.getRetailSentiment("GBPUSD");
+
+    expect(result.status).toBe("unavailable");
+    expect(result.error).toMatch(/Wrong email\/password/);
+    expect(result.error).toMatch(/OPTIONAL|optional/);
+  });
+
+  it("never logs the password or session value, even in diagnostic output", async () => {
+    const fetchMock = vi.fn();
+    fetchMock.mockImplementation(async (urlStr: string) => {
+      const url = new URL(urlStr);
+      if (url.pathname.endsWith("/login.json")) return jsonResponse({ error: false, session: "super-secret-session-value" });
+      if (url.pathname.endsWith("/get-community-outlook.json")) {
+        return jsonResponse({ error: false, symbols: [{ name: "GBPUSD", longPercentage: 60, shortPercentage: 40 }] });
+      }
+      throw new Error(`unexpected URL ${urlStr}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const { myfxbookProvider, diagnoseMyfxbookConnection } = await import("./myfxbook");
+    await myfxbookProvider.getRetailSentiment("GBPUSD");
+    await diagnoseMyfxbookConnection("GBPUSD");
+
+    const allLoggedText = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(allLoggedText).not.toContain("super-secret-session-value");
+    expect(allLoggedText).not.toContain("secret"); // the configured MYFXBOOK_PASSWORD
+    logSpy.mockRestore();
+  });
+
   it("never reuses a session across separate calls — each getRetailSentiment call logs in fresh", async () => {
     const fetchMock = vi.fn();
     let loginCalls = 0;

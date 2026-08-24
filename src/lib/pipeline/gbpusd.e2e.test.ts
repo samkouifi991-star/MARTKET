@@ -15,20 +15,25 @@ import { buildTrendingCandles } from "@/lib/engines/__fixtures__/candles";
 import type { NormalizedCandle } from "@/services/types";
 
 vi.mock("@/services/market-data/fmp");
+vi.mock("@/services/market-data/market-data-router");
 vi.mock("@/services/market-data/cftc");
 vi.mock("@/services/market-data/fred");
 vi.mock("@/services/market-data/ig");
+vi.mock("@/db/queries/market-data");
+vi.mock("@/db/queries/scores");
 
 import * as fmp from "@/services/market-data/fmp";
+import * as marketData from "@/services/market-data/market-data-router";
 import * as cftc from "@/services/market-data/cftc";
 import * as fred from "@/services/market-data/fred";
 import * as ig from "@/services/market-data/ig";
+import { getLatestStoredPrice, getLatestStoredDailyCandles } from "@/db/queries/market-data";
 import { computeLiveMarketScore } from "./scoring-engine";
 
 const dailyCandles: NormalizedCandle[] = buildTrendingCandles({ bars: 260, startPrice: 1.24, trendPerBar: 0.0012, noise: 0.0008, seed: 55 });
 
 function mockFmpLive() {
-  vi.mocked(fmp.getQuote).mockResolvedValue({
+  vi.mocked(marketData.getQuote).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
     status: "live",
@@ -37,7 +42,7 @@ function mockFmpLive() {
     nextExpectedUpdate: null,
     value: { symbol: "GBPUSD", price: dailyCandles[dailyCandles.length - 1].close, changePct24h: 0.3, timestamp: new Date().toISOString() },
   });
-  vi.mocked(fmp.getDailyCandles).mockResolvedValue({
+  vi.mocked(marketData.getDailyCandles).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
     status: "live",
@@ -46,7 +51,7 @@ function mockFmpLive() {
     nextExpectedUpdate: null,
     value: dailyCandles,
   });
-  vi.mocked(fmp.getIntradayCandles).mockResolvedValue({
+  vi.mocked(marketData.getIntradayCandles).mockResolvedValue({
     provider: "fmp",
     source: "Financial Modeling Prep",
     status: "live",
@@ -96,6 +101,8 @@ function mockCftcLive() {
       direction: "Bullish",
       strength: "Strong",
       netHistory,
+      marketAndExchangeName: "BRITISH POUND STERLING - CHICAGO MERCANTILE EXCHANGE",
+      cftcContractMarketCode: "096742",
     },
   });
 }
@@ -153,8 +160,22 @@ function mockIgUnavailable() {
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetAllMocks();
+  // Default: no last-known-good data stored — tests that want to exercise
+  // the fallback set these explicitly. Without this, a live-call failure
+  // would try to hit a real (unconfigured-in-tests) database instead of
+  // taking the "never had data -> unavailable" path.
+  vi.mocked(getLatestStoredPrice).mockResolvedValue(null);
+  vi.mocked(getLatestStoredDailyCandles).mockResolvedValue(null);
+  // computeLiveMarketScore always calls recordScoreHistory(score).catch(...)
+  // and upsertCurrentScore(score).catch(...) — an auto-mocked fn returns
+  // undefined, and undefined has no .catch(), so these need explicit
+  // resolved-promise mocks or every test throws.
+  const scores = await import("@/db/queries/scores");
+  vi.mocked(scores.recordScoreHistory).mockResolvedValue(undefined);
+  vi.mocked(scores.getScoreHistory).mockResolvedValue([]);
+  vi.mocked(scores.upsertCurrentScore).mockResolvedValue(undefined);
 });
 
 describe("GBPUSD end-to-end live pipeline", () => {
@@ -202,11 +223,62 @@ describe("GBPUSD end-to-end live pipeline", () => {
     expect(score.confidence).toBeGreaterThan(50);
   });
 
+  it("builds score.history from real stored market_scores rows, not a hardcoded single point", async () => {
+    // The actual bug: history was always [{date: now, score: totalScore}]
+    // regardless of how many rows market_scores actually had — the DB read
+    // simply never happened.
+    mockFmpLive();
+    mockCftcLive();
+    mockFredLive();
+    mockIgUnavailable();
+    const scores = await import("@/db/queries/scores");
+    const oldPoint = { computedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(), totalScore: 0.5, bias: "Neutral", confidence: 40 };
+    const recentPoint = { computedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), totalScore: 1.0, bias: "Neutral", confidence: 55 };
+    // getScoreHistory's real query orders newest-first (desc) — the mock
+    // must match that ordering for the source's own .reverse() to be tested
+    // correctly, not just happen to pass on already-sorted input.
+    vi.mocked(scores.getScoreHistory).mockResolvedValue([recentPoint, oldPoint]);
+
+    const score = await computeLiveMarketScore("GBPUSD", "live");
+
+    // Real stored points, re-ordered oldest-first, plus the just-computed
+    // current point appended last.
+    expect(score.history).toHaveLength(3);
+    expect(score.history[0].date).toBe(oldPoint.computedAt);
+    expect(score.history[1].date).toBe(recentPoint.computedAt);
+    expect(score.history[2].score).toBe(score.totalScore);
+
+    // change24h computed from the closest real point at least ~24h old,
+    // not hardcoded to 0.
+    expect(score.change24h).toBe(Number((score.totalScore - oldPoint.totalScore).toFixed(2)));
+  });
+
+  it("does NOT write a market_scores row by default — only an explicit persist:true does", async () => {
+    // The real bug this locks in: computeLiveMarketScore used to call
+    // recordScoreHistory unconditionally, and the market detail page used
+    // to be statically prerendered once per deploy — so every test
+    // deployment silently wrote its own "observation," polluting the score
+    // history chart with build artifacts instead of genuine periodic market
+    // snapshots. Only the scores cron (which passes persist:true) should
+    // ever write history now; a plain page-render computation must not.
+    mockFmpLive();
+    mockCftcLive();
+    mockFredLive();
+    mockIgUnavailable();
+    const scores = await import("@/db/queries/scores");
+
+    await computeLiveMarketScore("GBPUSD", "live");
+    expect(scores.recordScoreHistory).not.toHaveBeenCalled();
+
+    await computeLiveMarketScore("GBPUSD", "live", { persist: true });
+    expect(scores.recordScoreHistory).toHaveBeenCalledTimes(1);
+  });
+
   it("never fabricates a value when every live provider fails — factors go unavailable and confidence drops", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null, error: "simulated outage" };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     vi.mocked(fred.getSeries).mockResolvedValue(down);
@@ -222,32 +294,37 @@ describe("GBPUSD end-to-end live pipeline", () => {
 
   it("in hybrid mode, ordinary markets fall back to clearly-labeled demo data per factor instead of showing unavailable", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     vi.mocked(fred.getSeries).mockResolvedValue(down);
     mockIgUnavailable();
 
-    // EURUSD, not GBPUSD: the reference market has stricter no-fallback
-    // rules (see the next test), so this proves ordinary markets keep the
-    // normal hybrid leniency.
-    const score = await computeLiveMarketScore("EURUSD", "hybrid");
+    // NAS100, not GBPUSD/EURUSD/USDCAD/etc: all 10 configured OANDA FX pairs
+    // are now strict-live symbols (through EURGBP/EURJPY, the final batch),
+    // and every other symbol with a real CFTC mapping and a myfxbook/IG
+    // retail mapping has also been promoted. NAS100 has a real CFTC mapping
+    // ("NASDAQ-100 Consolidated") but is still blocked from promotion by an
+    // unrelated FMP 402 issue, so it stays the ordinary, not-yet-promoted
+    // example that keeps the normal hybrid leniency for institutional too.
+    const score = await computeLiveMarketScore("NAS100", "hybrid");
 
     const nonRetailFactors = score.factors.filter((f) => f.key !== "retailSentiment");
     expect(nonRetailFactors.every((f) => f.freshness === "estimated")).toBe(true);
-    // Retail sentiment has no demo-fallback path here because IG explicitly
-    // has no epic for this market — hybrid must not invent a percentage either.
+    // Retail sentiment has no demo-fallback path here because NAS100 has no
+    // myfxbook/IG/OANDA mapping at all — hybrid must not invent a
+    // percentage either (NOT_APPLICABLE, not merely unavailable).
     const retail = score.factors.find((f) => f.key === "retailSentiment")!;
-    expect(retail.freshness).toBe("unavailable");
+    expect(retail.freshness).toBe("not_applicable");
   });
 
   it("in hybrid mode, GBPUSD (the strict-live reference market) never falls back to demo data — it shows unavailable and confidence drops", async () => {
     const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
-    vi.mocked(fmp.getQuote).mockResolvedValue(down);
-    vi.mocked(fmp.getDailyCandles).mockResolvedValue(down);
-    vi.mocked(fmp.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
     vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
     vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
     vi.mocked(fred.getSeries).mockResolvedValue(down);
@@ -260,5 +337,41 @@ describe("GBPUSD end-to-end live pipeline", () => {
     expect(score.factors.every((f) => f.freshness === "unavailable" || f.freshness === "error")).toBe(true);
     expect(score.factors.every((f) => f.contribution === 0)).toBe(true);
     expect(score.confidence).toBeLessThan(30);
+  });
+
+  it("in hybrid mode, the second-phase batch (EURUSD, USDJPY, XAUUSD, BTCUSD, SPX500) also never falls back to demo data — same strict-live bar as GBPUSD", async () => {
+    const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
+    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
+    vi.mocked(fred.getSeries).mockResolvedValue(down);
+    mockIgUnavailable();
+
+    for (const symbol of ["EURUSD", "USDJPY", "XAUUSD", "BTCUSD", "SPX500"]) {
+      const score = await computeLiveMarketScore(symbol, "hybrid");
+      const applicable = score.factors.filter((f) => f.freshness !== "not_applicable");
+      expect(applicable.every((f) => f.freshness === "unavailable" || f.freshness === "error")).toBe(true);
+      expect(score.factors.every((f) => f.contribution === 0)).toBe(true);
+    }
+  });
+
+  it("in hybrid mode, the third-phase batch (AUDUSD, USDCAD, XAGUSD, DJ30) also never falls back to demo data — same strict-live bar as GBPUSD", async () => {
+    const down = { status: "unavailable" as const, provider: "demo" as const, source: "n/a", fetchedAt: new Date().toISOString(), sourceUpdatedAt: null, nextExpectedUpdate: null, value: null };
+    vi.mocked(marketData.getQuote).mockResolvedValue(down);
+    vi.mocked(marketData.getDailyCandles).mockResolvedValue(down);
+    vi.mocked(marketData.getIntradayCandles).mockResolvedValue(down);
+    vi.mocked(fmp.getForexAndMarketNews).mockResolvedValue(down);
+    vi.mocked(cftc.getInstitutionalPositioning).mockResolvedValue(down);
+    vi.mocked(fred.getSeries).mockResolvedValue(down);
+    mockIgUnavailable();
+
+    for (const symbol of ["AUDUSD", "USDCAD", "XAGUSD", "DJ30"]) {
+      const score = await computeLiveMarketScore(symbol, "hybrid");
+      const applicable = score.factors.filter((f) => f.freshness !== "not_applicable");
+      expect(applicable.every((f) => f.freshness === "unavailable" || f.freshness === "error")).toBe(true);
+      expect(score.factors.every((f) => f.contribution === 0)).toBe(true);
+    }
   });
 });

@@ -8,6 +8,8 @@ import { generateSmartMoney } from "@/lib/demo/smartMoney";
 import { currentMonthStat } from "@/lib/demo/seasonality";
 import { computeMarketScore, factorLabel } from "@/lib/scoring";
 import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";
+import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
+import { getCurrentScore } from "@/db/queries/scores";
 import { buildLiveInvalidationPoints, getLiveMarketDetail, LiveMarketDetail } from "@/lib/pipeline/market-detail";
 import { DATA_MODE, isDemoOnly } from "@/services/data-mode";
 import { NEWS_ARTICLES } from "@/lib/demo/news";
@@ -18,18 +20,28 @@ import { invalidationFactors } from "@/lib/invalidation";
 import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { Card } from "@/components/ui/Card";
+import { AutoRefresh } from "@/components/ui/AutoRefresh";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
 import { factorContributionColorClass, factorSentiment, formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
-import { formatDateTime, formatRelative } from "@/lib/time";
+import { filterToRecentWindow, formatDateTime, formatRelative } from "@/lib/time";
 import { DataFreshness, MarketScore, PriceData } from "@/lib/types";
+import { requireEntitlement } from "@/lib/auth/dal";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 
 export function generateStaticParams() {
   return INSTRUMENTS.map((i) => ({ symbol: i.symbol }));
 }
+
+// Without this, Next prerenders every /markets/[symbol] page exactly once at
+// build time (confirmed via .next/prerender-manifest.json: compute:'static',
+// initialRevalidateSeconds:false) and serves that same frozen HTML to every
+// visitor until the next deploy — defeating the entire storage-first
+// last-known-good architecture, which assumes each visit reads Neon's
+// current state. force-dynamic makes this route render per-request instead.
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = await params;
@@ -38,18 +50,48 @@ export async function generateMetadata({ params }: { params: Promise<{ symbol: s
 }
 
 export default async function MarketDetailPage({ params }: { params: Promise<{ symbol: string }> }) {
+  await requireEntitlement();
   const { symbol } = await params;
   const instrument = getInstrument(symbol);
   if (!instrument) notFound();
 
   const demoMode = isDemoOnly();
 
-  const score: MarketScore = demoMode ? computeMarketScore(instrument) : await computeLiveMarketScore(instrument.symbol, DATA_MODE);
+  // Reads the same canonical current_market_score row Top Setups reads
+  // (see db/queries/scores.ts's getCurrentScore) so the two pages can never
+  // show two different numbers for the same market — they're reading the
+  // same record. Falls back to a fresh live compute only when no row
+  // exists yet for this symbol (e.g. before the scores cron's first run),
+  // and persists that fallback as the bootstrap current row via
+  // updateCurrent so Top Setups isn't left with nothing to read.
+  const score: MarketScore = demoMode
+    ? computeMarketScore(instrument)
+    : (await getCurrentScore(instrument.symbol).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { updateCurrent: true }));
   const live: LiveMarketDetail | null = demoMode ? null : await getLiveMarketDetail(instrument.symbol, DATA_MODE);
 
   const price: PriceData | null = demoMode ? generatePriceData(instrument) : live!.price.data;
   const priceFreshness: DataFreshness = demoMode ? "estimated" : live!.price.freshness;
   const priceSource = demoMode ? "Simulated price engine (demo)" : live!.price.source;
+
+  // The Price Chart and Score History chart both display only the most
+  // recent ~5 months so users can visually compare "what the market did"
+  // against "what the score was doing" over the same window — see
+  // lib/time.ts's RECENT_CHART_WINDOW_DAYS, the single shared convention
+  // every chart on the platform (this page, the landing page) uses.
+  // Presentation-only: price.ema20/sma50/sma100/sma200/rsi14/adx14/roc10
+  // above are still computed from the full stored candle history, never
+  // from this windowed slice, and score.history itself already comes back
+  // from Neon capped at the same window (see db/queries/scores.ts's
+  // SCORE_HISTORY_WINDOW_HOURS) — never fabricated or interpolated.
+  const recentPriceSeries = price ? filterToRecentWindow(price.series) : [];
+  const recentScoreHistory = filterToRecentWindow(score.history);
+
+  // Reference lines (and the tooltip's Bias label) on the Score History
+  // chart must reflect whatever Admin currently has configured — never a
+  // hardcoded ±4/±8 — so changing thresholds in Admin immediately re-frames
+  // this same, unchanged historical data. A DB read failure falls back to
+  // the bootstrap defaults, same as every other reader of this config.
+  const scoringConfig = await resolveActiveScoringConfig();
 
   const related = NEWS_ARTICLES.filter((n) => n.affectedMarkets.includes(instrument.symbol));
   const relatedTickers = instrument.currencies ?? [instrument.symbol];
@@ -71,6 +113,7 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
 
   return (
     <div className="space-y-6">
+      <AutoRefresh intervalSeconds={45} />
       <Link href="/markets" className="inline-flex items-center gap-1 text-xs text-(--text-faint) hover:text-(--text-dim)">
         <ArrowLeft size={13} /> Back to Markets
       </Link>
@@ -93,7 +136,12 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
           )}
         </div>
         <div className="text-xs text-(--text-faint) text-right">
-          Last updated {formatRelative(score.lastUpdated)}
+          {/* The actual data timestamp, not the moment this page happened to
+              render — score.lastUpdated is set fresh on every computation
+              regardless of whether any underlying provider call actually
+              succeeded, which is exactly what made this always read "just
+              now" even during an FMP outage. */}
+          Last updated {formatRelative(demoMode ? score.lastUpdated : (live!.price.lastUpdated ?? score.lastUpdated))}
         </div>
       </div>
 
@@ -139,13 +187,13 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
 
       <div className="grid lg:grid-cols-2 gap-4">
         <Card
-          title="Price chart"
+          title="Price chart (5 months)"
           subtitle={price ? `20 EMA ${formatPrice(price.ema20, instrument.decimals)} · 50 SMA ${formatPrice(price.sma50, instrument.decimals)} · 200 SMA ${formatPrice(price.sma200, instrument.decimals)}` : undefined}
           action={!demoMode ? <DataFreshnessTag freshness={priceFreshness} /> : undefined}
         >
           {price ? (
             <>
-              <PriceChart series={price.series} decimals={instrument.decimals} />
+              <PriceChart series={recentPriceSeries} decimals={instrument.decimals} />
               <div className="grid grid-cols-3 gap-2 mt-3 text-center">
                 <MiniStat label="RSI(14)" value={price.rsi14.toFixed(0)} />
                 <MiniStat label="ADX(14)" value={price.adx14.toFixed(0)} />
@@ -159,8 +207,8 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
           )}
         </Card>
 
-        <Card title="Score history (30 days)" subtitle={`24h change ${formatSigned(score.change24h)}`}>
-          <ScoreHistoryChart history={score.history} />
+        <Card title="Score history (5 months)" subtitle={`24h change ${formatSigned(score.change24h)}`}>
+          <ScoreHistoryChart history={recentScoreHistory} thresholds={scoringConfig.biasThresholds} />
         </Card>
       </div>
 
@@ -251,7 +299,13 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
       <div className="grid lg:grid-cols-2 gap-4">
         <Card
           title="Seasonality"
-          subtitle={demoMode ? `${currentMonthStat(instrument).period} · ${currentMonthStat(instrument).years}-year history` : live!.seasonality.data ? `${live!.seasonality.data.period} · ${live!.seasonality.data.years}-year history` : undefined}
+          subtitle={
+            demoMode
+              ? `${currentMonthStat(instrument).period} · ${currentMonthStat(instrument).years}-year history`
+              : live!.seasonality.data
+                ? `${live!.seasonality.data.period} · ${live!.seasonality.data.sampleDepth?.yearsSpanned ?? live!.seasonality.data.years}-year history`
+                : undefined
+          }
           action={!demoMode ? <DataFreshnessTag freshness={live!.seasonality.freshness} /> : undefined}
         >
           {demoMode ? (
@@ -265,6 +319,12 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
                 <Row label="Best / worst" value={`${formatSignedPct(live!.seasonality.data.bestReturn)} / ${formatSignedPct(live!.seasonality.data.worstReturn)}`} />
                 <Row label="10y average" value={formatSignedPct(live!.seasonality.data.avg10y)} />
                 <Row label="Max drawdown" value={formatSignedPct(live!.seasonality.data.maxDrawdown)} />
+                {live!.seasonality.data.sampleDepth && (
+                  <Row
+                    label="Sample"
+                    value={`${live!.seasonality.data.sampleDepth.observations} candles, ${live!.seasonality.data.sampleDepth.earliestDate.slice(0, 10)} to ${live!.seasonality.data.sampleDepth.latestDate.slice(0, 10)}`}
+                  />
+                )}
               </dl>
               <p className="text-[10px] text-(--text-faint) mt-2">Source: {live!.seasonality.source}</p>
             </>
