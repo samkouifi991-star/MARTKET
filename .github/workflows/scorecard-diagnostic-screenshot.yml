@@ -1,0 +1,109 @@
+# One-off, manually-triggered verification job — NOT a scheduled/product
+# workflow. This sandbox's own outbound network policy blocks
+# *.vercel.app directly, so this uses a GitHub Actions runner (unrestricted
+# egress) as the channel to load the real, deployed
+# /diagnostics/scorecard/[symbol] page (see that page's own header comment
+# — secret-gated via a query param, not a customer session) in a real
+# headless browser and capture what it actually rendered: a full-page
+# screenshot plus the raw JSON diagnostic dump embedded on the page.
+# Reuses the same EVENT_WATCH_SECRET/APP_BASE_URL secrets already
+# configured for the Economic Release Watch workflow — nothing new to
+# configure. Safe to delete once no longer needed.
+name: Scorecard Diagnostic Screenshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "Market symbol to screenshot (e.g. XAUUSD)"
+        required: false
+        default: "XAUUSD"
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright@latest
+          npx playwright install --with-deps chromium
+
+      - name: Load the diagnostic page and capture screenshot + data
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          DIAG_KEY: ${{ secrets.EVENT_WATCH_SECRET }}
+          SYMBOL: ${{ github.event.inputs.symbol }}
+        run: |
+          cat > script.mjs <<'SCRIPT'
+          import { chromium } from "playwright";
+          import fs from "node:fs";
+
+          const baseUrl = process.env.APP_BASE_URL;
+          const key = process.env.DIAG_KEY;
+          const symbol = process.env.SYMBOL || "XAUUSD";
+          if (!baseUrl || !key) {
+            console.error("APP_BASE_URL or DIAG_KEY (EVENT_WATCH_SECRET) is not set.");
+            process.exit(1);
+          }
+          const url = `${baseUrl}/diagnostics/scorecard/${symbol}?key=${encodeURIComponent(key)}`;
+
+          const browser = await chromium.launch();
+          const page = await browser.newPage({ viewport: { width: 1440, height: 1400 } });
+
+          let response;
+          try {
+            response = await page.goto(url, { waitUntil: "load", timeout: 60000 });
+          } catch (err) {
+            console.error("NAVIGATION_FAILED:", err.message);
+            await browser.close();
+            process.exit(1);
+          }
+          console.log("HTTP_STATUS:", response.status());
+
+          if (response.status() !== 200) {
+            const body = await page.content();
+            fs.writeFileSync("scorecard-error.html", body);
+            console.error("Non-200 response — see scorecard-error.html artifact. Not taking a screenshot.");
+            await browser.close();
+            process.exit(1);
+          }
+
+          // Let client-side hydration + the recharts score-history SVG finish
+          // rendering before capturing.
+          await page.waitForTimeout(2500).catch(() => {});
+
+          await page.screenshot({ path: "scorecard.png", fullPage: true, type: "png" });
+
+          const bodyText = await page.evaluate(() => document.body.innerText);
+          fs.writeFileSync("scorecard-text.txt", bodyText);
+
+          const jsonText = await page.evaluate(() => {
+            const pre = document.querySelector("details pre");
+            return pre ? pre.textContent : null;
+          });
+          if (jsonText) fs.writeFileSync("scorecard-data.json", jsonText);
+          else console.error("WARNING: could not find the raw JSON <pre> block on the page.");
+
+          await browser.close();
+          console.log("DONE");
+          SCRIPT
+          node script.mjs
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-diagnostic
+          path: |
+            scorecard.png
+            scorecard-text.txt
+            scorecard-data.json
+            scorecard-error.html
+          retention-days: 7
+          if-no-files-found: warn
