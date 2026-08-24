@@ -13,7 +13,7 @@ import {
   getFredSeriesWithFallback,
   getRetailSentimentFromStorage,
 } from "@/services/market-data/last-known-good";
-import { buildPipelineHealthReport } from "./pipeline-health";
+import { buildPipelineHealthReport, buildStaleDataAlerts, PipelineHealthRow } from "./pipeline-health";
 
 function live(hoursAgo: number) {
   const ts = new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
@@ -86,5 +86,71 @@ describe("buildPipelineHealthReport", () => {
     const rows = await buildPipelineHealthReport();
     const gbpusd = rows.find((r) => r.symbol === "GBPUSD")!;
     expect(gbpusd.scoreComputation.beyondSla).toBe(true);
+  });
+});
+
+function healthField(overrides: Partial<{ status: string; ageHours: number | null; beyondSla: boolean }> = {}) {
+  return { status: "live", ageHours: 2, beyondSla: false, ...overrides };
+}
+
+function healthRow(symbol: string, overrides: Partial<Omit<PipelineHealthRow, "symbol">> = {}): PipelineHealthRow {
+  return {
+    symbol,
+    price: healthField(),
+    dailyCandle: healthField(),
+    h4Candle: healthField(),
+    h1Candle: healthField(),
+    cftcReport: healthField(),
+    retailSentiment: healthField(),
+    macro: healthField(),
+    scoreComputation: healthField(),
+    ...overrides,
+  };
+}
+
+describe("buildStaleDataAlerts (Phase 12) — a pure derivation of buildPipelineHealthReport's own beyondSla flags, never a second classification", () => {
+  it("produces no alerts when every field is within SLA", () => {
+    const rows = [healthRow("GBPUSD")];
+    expect(buildStaleDataAlerts(rows)).toEqual([]);
+  });
+
+  it("produces exactly one alert per beyond-SLA field, naming the real symbol/dataset/status/age", () => {
+    const rows = [healthRow("GBPUSD", { price: healthField({ status: "stale", ageHours: 400, beyondSla: true }) })];
+    const alerts = buildStaleDataAlerts(rows);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toEqual({ symbol: "GBPUSD", dataset: "Price", status: "stale", ageHours: 400 });
+  });
+
+  it("never produces an alert for a field marked not_applicable, even though its own health-table status differs from live", () => {
+    const rows = [healthRow("EURGBP", { cftcReport: healthField({ status: "not_applicable", ageHours: null, beyondSla: false }) })];
+    expect(buildStaleDataAlerts(rows)).toEqual([]);
+  });
+
+  it("sorts a missing dataset (ageHours null — never fetched at all) ahead of an aged-but-present one", () => {
+    const rows = [
+      healthRow("GBPUSD", { price: healthField({ status: "stale", ageHours: 500, beyondSla: true }) }),
+      healthRow("EURUSD", { dailyCandle: healthField({ status: "unavailable", ageHours: null, beyondSla: true }) }),
+    ];
+    const alerts = buildStaleDataAlerts(rows);
+    expect(alerts[0].symbol).toBe("EURUSD");
+    expect(alerts[0].ageHours).toBeNull();
+  });
+
+  it("covers every dataset key that the health table itself covers — an alert never names a dataset the table doesn't have", () => {
+    const rows = [
+      healthRow("GBPUSD", {
+        price: healthField({ status: "stale", ageHours: 100, beyondSla: true }),
+        dailyCandle: healthField({ status: "stale", ageHours: 100, beyondSla: true }),
+        h4Candle: healthField({ status: "stale", ageHours: 100, beyondSla: true }),
+        h1Candle: healthField({ status: "stale", ageHours: 100, beyondSla: true }),
+        cftcReport: healthField({ status: "stale", ageHours: 100, beyondSla: true }),
+        retailSentiment: healthField({ status: "stale", ageHours: 100, beyondSla: true }),
+        macro: healthField({ status: "stale", ageHours: 100, beyondSla: true }),
+        scoreComputation: healthField({ status: "stale", ageHours: 100, beyondSla: true }),
+      }),
+    ];
+    const alerts = buildStaleDataAlerts(rows);
+    expect(alerts).toHaveLength(8);
+    expect(new Set(alerts.map((a) => a.dataset)).size).toBe(8);
   });
 });

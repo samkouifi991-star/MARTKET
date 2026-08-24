@@ -102,3 +102,35 @@ async function buildRow(instrument: Instrument): Promise<PipelineHealthRow> {
 export async function buildPipelineHealthReport(): Promise<PipelineHealthRow[]> {
   return Promise.all(publicInstruments().map(buildRow));
 }
+
+// ---- Automatic stale-data alerting (Phase 12) — admin-only, never
+// customer-facing. A pure derivation of buildPipelineHealthReport()'s own
+// beyondSla flags into a flat, sortable alert list — no separate
+// classification logic, so an alert can never disagree with what the
+// health table itself shows for the same cell. ----
+export type StaleDataAlert = { symbol: string; dataset: string; status: string; ageHours: number | null };
+
+const DATASET_LABELS: Record<Exclude<keyof PipelineHealthRow, "symbol">, string> = {
+  price: "Price",
+  dailyCandle: "Daily candles",
+  h4Candle: "4H candles",
+  h1Candle: "1H candles",
+  cftcReport: "CFTC report",
+  retailSentiment: "Retail sentiment",
+  macro: "Macro (FRED)",
+  scoreComputation: "Score computation",
+};
+
+export function buildStaleDataAlerts(rows: PipelineHealthRow[]): StaleDataAlert[] {
+  const alerts: StaleDataAlert[] = [];
+  for (const row of rows) {
+    for (const [key, label] of Object.entries(DATASET_LABELS) as [Exclude<keyof PipelineHealthRow, "symbol">, string][]) {
+      const field = row[key];
+      if (field.beyondSla) alerts.push({ symbol: row.symbol, dataset: label, status: field.status, ageHours: field.ageHours });
+    }
+  }
+  // Oldest/most-broken first — a market with no data at all (ageHours null)
+  // is at least as urgent as any aged-but-present observation, so those
+  // sort to the top.
+  return alerts.sort((a, b) => (b.ageHours ?? Infinity) - (a.ageHours ?? Infinity));
+}

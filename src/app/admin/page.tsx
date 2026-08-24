@@ -6,7 +6,7 @@ import { AUDIT_LOGS, API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY
 import { AdminClient } from "./AdminClient";
 import { ProviderHealthTable } from "./ProviderHealthTable";
 import { PipelineHealthTable } from "./PipelineHealthTable";
-import { buildPipelineHealthReport, PipelineHealthRow } from "@/lib/pipeline/pipeline-health";
+import { buildPipelineHealthReport, buildStaleDataAlerts, PipelineHealthRow } from "@/lib/pipeline/pipeline-health";
 import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
@@ -55,6 +55,7 @@ export default async function AdminPage() {
   );
   const { rows: providerHealthRows, error: providerHealthError } = await loadProviderHealth();
   const { rows: pipelineHealthRows, error: pipelineHealthError } = await loadPipelineHealth();
+  const staleDataAlerts = buildStaleDataAlerts(pipelineHealthRows);
   const activeScoringConfig = await resolveActiveScoringConfig();
 
   return (
@@ -114,6 +115,34 @@ export default async function AdminPage() {
           <p className="text-sm text-rose-400">Data temporarily unavailable: {providerHealthError}</p>
         ) : (
           <ProviderHealthTable rows={providerHealthRows} />
+        )}
+      </Card>
+
+      <Card
+        title="Stale Data Alerts"
+        subtitle="Admin-only — never shown to customers. Every field beyond its dataset's established SLA, from the same read as the Data Pipeline Health table below."
+      >
+        {DATA_MODE === "demo" ? (
+          <p className="text-sm text-(--text-faint)">Becomes live once DATA_MODE is set to hybrid or live.</p>
+        ) : pipelineHealthError ? (
+          <p className="text-sm text-rose-400">Data temporarily unavailable: {pipelineHealthError}</p>
+        ) : staleDataAlerts.length === 0 ? (
+          <p className="text-sm text-emerald-400">No stale data — every launch market&apos;s pipeline is within SLA.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {staleDataAlerts.map((a, i) => (
+              <li key={`${a.symbol}-${a.dataset}-${i}`} className="flex items-center justify-between text-sm border-b border-(--border) last:border-0 pb-1.5 last:pb-0">
+                <span>
+                  <Link href={`/markets/${a.symbol}`} className="font-medium hover:text-(--accent)">{a.symbol}</Link>
+                  <span className="text-(--text-faint)"> · {a.dataset}</span>
+                </span>
+                <span className="text-xs text-rose-400 font-medium uppercase tracking-wide">
+                  {a.status}
+                  {a.ageHours !== null && ` · ${Math.round(a.ageHours)}h`}
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
       </Card>
 
