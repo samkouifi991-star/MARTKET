@@ -51,7 +51,7 @@ export type InstitutionalCardData = {
 
 export type SmartMoneyCardData = { signal: string; confidence: number; explanation: string };
 
-const MIN_YEARS_FOR_LIVE_SEASONALITY = 3;
+export const MIN_YEARS_FOR_LIVE_SEASONALITY = 3;
 
 async function institutionalCard(symbol: string, mode: DataMode): Promise<CardResult<InstitutionalCardData>> {
   // Storage-first: live CFTC call first, falls back to the last stored
