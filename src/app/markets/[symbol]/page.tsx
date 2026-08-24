@@ -11,6 +11,7 @@ import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";
 import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
 import { getCurrentScore } from "@/db/queries/scores";
 import { buildLiveInvalidationPoints, getLiveMarketDetail, LiveMarketDetail } from "@/lib/pipeline/market-detail";
+import { getCanonicalMarketRows } from "@/lib/pipeline/top-setups";
 import { buildScorecardData } from "@/lib/pipeline/scorecard";
 import { Scorecard } from "@/components/market/Scorecard";
 import { DATA_MODE, isDemoOnly } from "@/services/data-mode";
@@ -110,9 +111,15 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
     ? invalidationFactors(instrument, score, generatePriceData(instrument), generatePositioning(instrument), generateRetailSentiment(instrument))
     : buildLiveInvalidationPoints(instrument, score, live!);
 
-  const others = price ? allMarketRows().filter((r) => r.instrument.symbol !== instrument.symbol) : [];
+  // Previously always compared against allMarketRows() (lib/market-data.ts's
+  // demo-only generator) regardless of DATA_MODE, so a live market's real
+  // price series was being correlated against OTHER markets' fabricated
+  // series — getCanonicalMarketRows() is the same canonical read every
+  // other public surface uses, so live/hybrid mode now correlates real
+  // price series against real price series.
+  const otherRows = price ? (demoMode ? allMarketRows() : await getCanonicalMarketRows()).filter((r) => r.instrument.symbol !== instrument.symbol) : [];
   const correlations = price
-    ? others
+    ? otherRows
         .map((r) => ({ symbol: r.instrument.symbol, name: r.instrument.name, corr: pearsonCorrelation(price.series, r.price.series) }))
         .sort((a, b) => Math.abs(b.corr) - Math.abs(a.corr))
         .slice(0, 6)
@@ -331,7 +338,6 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
           ) : (
             <p className="text-sm text-(--text-faint)">Price data unavailable — correlations can&apos;t be computed right now.</p>
           )}
-          {!demoMode && <p className="text-[10px] text-(--text-faint) mt-2">Compared against sample data for other markets — full cross-market correlation lands once more markets are converted to live data.</p>}
         </Card>
       </div>
 

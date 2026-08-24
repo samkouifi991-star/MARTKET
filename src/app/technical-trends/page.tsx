@@ -1,14 +1,24 @@
 import Link from "next/link";
 import { allMarketRows } from "@/lib/market-data";
+import { getCanonicalMarketRows } from "@/lib/pipeline/top-setups";
+import { isDemoOnly } from "@/services/data-mode";
 import { Card } from "@/components/ui/Card";
 import { formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
 import { requireEntitlement } from "@/lib/auth/dal";
 
 export const metadata = { title: "Technical Trends — Market Intelligence AI" };
+export const dynamic = "force-dynamic";
 
+// Previously always read allMarketRows() (lib/market-data.ts's demo-only,
+// module-level-cached generator) regardless of DATA_MODE — a live/hybrid
+// visitor saw fabricated prices/technicals here even though every other
+// page (Markets, Top Setups, Market Detail) was already reading the real
+// canonical record. getCanonicalMarketRows() is the SAME canonical read
+// those pages use, already filtered to LAUNCH_READY markets.
 export default async function TechnicalTrendsPage() {
   await requireEntitlement();
-  const rows = allMarketRows();
+  const demoMode = isDemoOnly();
+  const rows = demoMode ? allMarketRows() : await getCanonicalMarketRows();
 
   return (
     <div className="space-y-6">

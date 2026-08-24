@@ -1,4 +1,5 @@
 import { allMarketRows } from "@/lib/market-data";
+import { getCanonicalMarketRows } from "@/lib/pipeline/top-setups";
 import { INSTRUMENTS } from "@/lib/instruments";
 import { coverageReasonFor, coverageStatusFor } from "@/services/market-coverage";
 import { AUDIT_LOGS, API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY } from "@/lib/demo/admin";
@@ -9,7 +10,7 @@ import { StatTile } from "@/components/ui/StatTile";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { factorLabel } from "@/lib/scoring";
 import { formatDate, formatRelative } from "@/lib/time";
-import { DATA_MODE } from "@/services/data-mode";
+import { DATA_MODE, isDemoOnly } from "@/services/data-mode";
 import { getProviderHealth, ProviderHealthRow } from "@/db/queries/provider-health";
 import { requireAdmin } from "@/lib/auth/dal";
 import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
@@ -29,7 +30,13 @@ async function loadProviderHealth(): Promise<{ rows: ProviderHealthRow[]; error:
 
 export default async function AdminPage() {
   await requireAdmin();
-  const rows = allMarketRows();
+  // Previously always read allMarketRows() (lib/market-data.ts's demo-only
+  // generator) regardless of DATA_MODE, so this diagnostic always showed
+  // every factor as "estimated" in live/hybrid mode — never the real
+  // per-factor freshness the platform is actually serving. includeAll:true
+  // since this admin view should audit PARTIAL/BLOCKED markets too, not
+  // just the public LAUNCH_READY set.
+  const rows = isDemoOnly() ? allMarketRows() : await getCanonicalMarketRows({ includeAll: true });
   const dataQualityIssues = rows.flatMap((r) =>
     r.score.factors
       .filter((f) => f.freshness !== "live")
