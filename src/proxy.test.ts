@@ -17,6 +17,11 @@ describe("proxy (auth middleware)", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
+  it("lets a session-cookie-free request through for the scorecard diagnostic page — its own EVENT_WATCH_SECRET/CRON_SECRET query-param check happens inside the page, not here", () => {
+    const res = proxy(req("/diagnostics/scorecard/XAUUSD?key=whatever"));
+    expect(res.headers.get("location")).toBeNull();
+  });
+
   it("still redirects an unrelated, session-protected path to /signin when no session cookie is present", () => {
     const res = proxy(req("/dashboard"));
     expect(res.headers.get("location")).toContain("/signin");

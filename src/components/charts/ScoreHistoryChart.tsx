@@ -35,7 +35,7 @@ function ScoreTooltipContent({ active, payload, thresholds }: ScoreTooltipPayloa
  * hardcoded ±4/±8. Changing thresholds in Admin only changes how this
  * chart's existing, unchanged historical scores are labeled/framed — it
  * never rewrites the stored history itself. */
-export function ScoreHistoryChart({ history, thresholds = DEFAULT_BIAS_THRESHOLDS }: { history: ScoreHistoryPoint[]; thresholds?: BiasThreshold[] }) {
+export function ScoreHistoryChart({ history, thresholds = DEFAULT_BIAS_THRESHOLDS, height = 220 }: { history: ScoreHistoryPoint[]; thresholds?: BiasThreshold[]; height?: number }) {
   const data = history.map((p) => ({ ...p, label: formatDate(p.date) }));
 
   const veryBullish = thresholdMin(thresholds, "Very Bullish");
@@ -44,7 +44,7 @@ export function ScoreHistoryChart({ history, thresholds = DEFAULT_BIAS_THRESHOLD
   const veryBearish = thresholdMin(thresholds, "Very Bearish");
 
   return (
-    <ResponsiveContainer width="100%" height={220}>
+    <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
         <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--text-faint)" }} minTickGap={40} axisLine={{ stroke: "var(--border)" }} tickLine={false} />
