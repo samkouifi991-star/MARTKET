@@ -2,7 +2,7 @@
 // sessions/subscriptions tables. Stripe webhooks (app/api/webhooks/stripe/
 // route.ts) are the sole writer of subscription status/period fields; every
 // other write here is auth-flow-driven (signup, session create/destroy).
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, gte, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import { users, sessions, subscriptions } from "../schema";
 
@@ -111,4 +111,40 @@ export async function upsertSubscriptionByStripeCustomerId(data: SubscriptionUps
     .update(subscriptions)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(subscriptions.stripeCustomerId, data.stripeCustomerId));
+}
+
+export type AdminUserActivity = {
+  recentlyActiveUsers24h: number;
+  recentlyActiveUsers7d: number;
+  trialUsers: number;
+  subscriberUsers: number;
+};
+
+// Phase 18 (public-launch demo sweep): the admin dashboard's "Daily active
+// users" / "Trialing / Subscribers" stat tiles used to be hand-picked demo
+// numbers shown unconditionally, regardless of DATA_MODE — real users,
+// sessions and subscriptions have existed since the auth/Stripe milestones.
+// "Recently active" is a real proxy from session creation (login) times —
+// this app has no separate page-view/activity-event log, so it counts
+// distinct users who started a session in the window, not literal DAU.
+// Trial/subscriber counts are exact, read straight from subscriptions.status
+// (Stripe's own vocabulary, never a parallel invented one).
+export async function getAdminUserActivity(): Promise<AdminUserActivity> {
+  const db = getDb();
+  const since24h = new Date(Date.now() - 24 * 3600_000);
+  const since7d = new Date(Date.now() - 7 * 86_400_000);
+
+  const [active24h, active7d, trials, subscribers] = await Promise.all([
+    db.select({ count: sql<number>`count(distinct ${sessions.userId})` }).from(sessions).where(gte(sessions.createdAt, since24h)),
+    db.select({ count: sql<number>`count(distinct ${sessions.userId})` }).from(sessions).where(gte(sessions.createdAt, since7d)),
+    db.select({ count: sql<number>`count(*)` }).from(subscriptions).where(eq(subscriptions.status, "trialing")),
+    db.select({ count: sql<number>`count(*)` }).from(subscriptions).where(eq(subscriptions.status, "active")),
+  ]);
+
+  return {
+    recentlyActiveUsers24h: Number(active24h[0]?.count ?? 0),
+    recentlyActiveUsers7d: Number(active7d[0]?.count ?? 0),
+    trialUsers: Number(trials[0]?.count ?? 0),
+    subscriberUsers: Number(subscribers[0]?.count ?? 0),
+  };
 }

@@ -60,6 +60,23 @@ export async function getScoringConfigurationById(id: number): Promise<ScoringCo
   return row ? toRow(row) : null;
 }
 
+export type ScoringConfigVersionSummary = { id: number; createdBy: string; createdAt: Date; includesV2Settings: boolean };
+
+// Phase 18 (public-launch demo sweep): Admin's "Audit log" card was seeded
+// with hand-picked demo entries shown unconditionally, regardless of
+// DATA_MODE — every real "Save & Version" already writes a new row here
+// (never edits in place, see createScoringConfiguration below), so that
+// history IS the real audit trail; it just wasn't being read back.
+export async function listScoringConfigurationVersions(limit: number): Promise<ScoringConfigVersionSummary[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: scoringConfigurations.id, createdBy: scoringConfigurations.createdBy, createdAt: scoringConfigurations.createdAt, v2Settings: scoringConfigurations.v2Settings })
+    .from(scoringConfigurations)
+    .orderBy(desc(scoringConfigurations.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({ id: r.id, createdBy: r.createdBy, createdAt: r.createdAt, includesV2Settings: r.v2Settings !== null }));
+}
+
 // Deactivates every existing row, then inserts the new one as active — two
 // sequential statements (not a single transaction), matching this
 // project's existing convention for simple sequential writes (see

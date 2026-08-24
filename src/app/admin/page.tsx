@@ -2,7 +2,9 @@ import { allMarketRows } from "@/lib/market-data";
 import { getCanonicalMarketRows } from "@/lib/pipeline/top-setups";
 import { INSTRUMENTS } from "@/lib/instruments";
 import { coverageReasonFor, coverageStatusFor } from "@/services/market-coverage";
-import { AUDIT_LOGS, API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY } from "@/lib/demo/admin";
+import { AUDIT_LOGS, API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY, AuditLogEntry } from "@/lib/demo/admin";
+import { getAdminUserActivity } from "@/db/queries/users";
+import { listScoringConfigurationVersions } from "@/db/queries/scoring-config";
 import { AdminClient } from "./AdminClient";
 import { ProviderHealthTable } from "./ProviderHealthTable";
 import { PipelineHealthTable } from "./PipelineHealthTable";
@@ -58,6 +60,25 @@ export default async function AdminPage() {
   const staleDataAlerts = buildStaleDataAlerts(pipelineHealthRows);
   const activeScoringConfig = await resolveActiveScoringConfig();
 
+  // Phase 18 (public-launch demo sweep): the stat tiles and audit log below
+  // used to be hand-picked demo data shown unconditionally regardless of
+  // DATA_MODE — real users/subscriptions/session and scoring-version
+  // history have existed since the auth/Stripe/scoring-config milestones,
+  // just never read back here. API request/rate-limit counts have no real
+  // equivalent (this product has no customer-facing API-key system
+  // anywhere in the codebase) — demo-only, not shown outside demo mode.
+  const demoMode = isDemoOnly();
+  const userActivity = demoMode ? null : await getAdminUserActivity();
+  const auditLog: AuditLogEntry[] = demoMode
+    ? AUDIT_LOGS
+    : (await listScoringConfigurationVersions(20)).map((v) => ({
+        id: String(v.id),
+        actor: v.createdBy,
+        action: "Saved scoring configuration",
+        detail: v.includesV2Settings ? "V1 weights, bias thresholds, and V2 tuning settings" : "V1 weights and bias thresholds",
+        at: v.createdAt.toISOString(),
+      }));
+
   return (
     <div className="space-y-6">
       <div>
@@ -65,14 +86,21 @@ export default async function AdminPage() {
         <p className="text-sm text-(--text-faint) mt-1">Configure the scoring engine, review data quality, and audit every change. Every weight and threshold edit here is versioned.</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatTile label="Daily active users" value={USER_ACTIVITY.dailyActiveUsers.toLocaleString()} />
-        <StatTile label="Trialing / Subscribers" value={`${USER_ACTIVITY.trialUsers.toLocaleString()} / ${USER_ACTIVITY.subscriberUsers.toLocaleString()}`} />
-        <StatTile label="API requests today" value={API_USAGE.requestsToday.toLocaleString()} sub={`${API_USAGE.activeApiKeys} active keys`} />
-        <StatTile label="Rate limit" value={`${API_USAGE.rateLimitPerMin}/min`} />
-      </div>
+      {demoMode ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatTile label="Daily active users" value={USER_ACTIVITY.dailyActiveUsers.toLocaleString()} />
+          <StatTile label="Trialing / Subscribers" value={`${USER_ACTIVITY.trialUsers.toLocaleString()} / ${USER_ACTIVITY.subscriberUsers.toLocaleString()}`} />
+          <StatTile label="API requests today" value={API_USAGE.requestsToday.toLocaleString()} sub={`${API_USAGE.activeApiKeys} active keys`} />
+          <StatTile label="Rate limit" value={`${API_USAGE.rateLimitPerMin}/min`} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          <StatTile label="Recently active (24h / 7d)" value={`${userActivity!.recentlyActiveUsers24h.toLocaleString()} / ${userActivity!.recentlyActiveUsers7d.toLocaleString()}`} sub="Users with a login session started in the window" />
+          <StatTile label="Trialing / Subscribers" value={`${userActivity!.trialUsers.toLocaleString()} / ${userActivity!.subscriberUsers.toLocaleString()}`} />
+        </div>
+      )}
 
-      <AdminClient initialAuditLog={AUDIT_LOGS} activeScoringConfig={activeScoringConfig} />
+      <AdminClient initialAuditLog={auditLog} activeScoringConfig={activeScoringConfig} />
 
       <Card
         title="Scoring Engine V2 (shadow mode)"
@@ -223,30 +251,40 @@ export default async function AdminPage() {
         )}
       </Card>
 
-      <Card title="Failed data jobs">
-        <div className="space-y-2">
-          {FAILED_JOBS.map((j) => (
-            <div key={j.id} className="text-sm py-1.5 border-b border-(--border) last:border-0">
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{j.job}</span>
-                <span className="text-xs text-(--text-faint)">{formatRelative(j.failedAt)} · {j.retries} retries</span>
-              </div>
-              <p className="text-xs text-rose-400 mt-0.5">{j.error}</p>
+      {demoMode && (
+        <>
+          {/* Phase 18 (public-launch demo sweep): "Failed data jobs" duplicates
+              what the real Provider health / Stale Data Alerts cards above
+              already show honestly, and "System announcements" is purely
+              editorial content with no data source at all — both demo-only,
+              not shown outside demo mode rather than inventing a real feed
+              for either. */}
+          <Card title="Failed data jobs">
+            <div className="space-y-2">
+              {FAILED_JOBS.map((j) => (
+                <div key={j.id} className="text-sm py-1.5 border-b border-(--border) last:border-0">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{j.job}</span>
+                    <span className="text-xs text-(--text-faint)">{formatRelative(j.failedAt)} · {j.retries} retries</span>
+                  </div>
+                  <p className="text-xs text-rose-400 mt-0.5">{j.error}</p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </Card>
+          </Card>
 
-      <Card title="System announcements">
-        <ul className="space-y-2">
-          {SYSTEM_ANNOUNCEMENTS.map((a) => (
-            <li key={a.id} className="text-sm flex items-center justify-between">
-              <span>{a.title}</span>
-              <span className="text-xs text-(--text-faint)">{formatDate(a.publishedAt)}</span>
-            </li>
-          ))}
-        </ul>
-      </Card>
+          <Card title="System announcements">
+            <ul className="space-y-2">
+              {SYSTEM_ANNOUNCEMENTS.map((a) => (
+                <li key={a.id} className="text-sm flex items-center justify-between">
+                  <span>{a.title}</span>
+                  <span className="text-xs text-(--text-faint)">{formatDate(a.publishedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </>
+      )}
     </div>
   );
 }
