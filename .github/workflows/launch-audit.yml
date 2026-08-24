@@ -28,10 +28,13 @@ jobs:
             exit 1
           fi
           echo "BEGIN_AUDIT_JSON"
-          http_status=$(curl -sS -o response.json -w "%{http_code}" \
+          http_status=$(curl -sS -L -D headers.txt -o response.json -w "%{http_code}" \
             -H "Authorization: Bearer ${AUDIT_SECRET}" \
             "${APP_BASE_URL}/api/admin/launch-audit")
           echo "HTTP_STATUS: ${http_status}"
+          echo "BEGIN_HEADERS"
+          cat headers.txt
+          echo "END_HEADERS"
           cat response.json
           echo ""
           echo "END_AUDIT_JSON"
