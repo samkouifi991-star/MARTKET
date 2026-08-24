@@ -306,7 +306,12 @@ export async function getEconomicCalendar(fromISO: string, toISO: string): Promi
         forecast?: number | null;
         impact: string | null;
       };
-      const data = await fmpGet<FmpEvent[] | { events: FmpEvent[] }>("/economics-calendar", { from, to });
+      // FMP's Stable API path is singular ("economic-calendar"), not the
+      // plural "economics-calendar" this previously called — that typo
+      // returned a real 404 in production (never silently swallowed: it
+      // surfaces as this function's own error result, same as any other
+      // FMP failure here).
+      const data = await fmpGet<FmpEvent[] | { events: FmpEvent[] }>("/economic-calendar", { from, to });
       const rows = extractArray<FmpEvent>(data, ["events"]);
 
       const events: NormalizedEconomicEvent[] = rows.map((r, i) => ({
