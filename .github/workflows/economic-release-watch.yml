@@ -28,8 +28,28 @@ jobs:
   watch:
     runs-on: ubuntu-latest
     steps:
+      # Temporary diagnostic form (same URL, same auth header, same secret
+      # names — only the failure mode changed): plain `curl -sf` swallows
+      # both the status code and the response body on any non-2xx, which
+      # made a live 4xx/5xx impossible to tell apart from a network error.
+      # This captures status + body first, prints them (never the secret
+      # itself — only Authorization's value is templated in, never echoed),
+      # and only THEN fails the job if the status wasn't 2xx.
       - name: Call the economic-release watch endpoint
         run: |
-          curl -sf --max-time 60 \
+          response=$(curl -sS --max-time 60 \
             -H "Authorization: Bearer ${{ secrets.EVENT_WATCH_SECRET }}" \
-            "${{ secrets.APP_BASE_URL }}/api/watch/economic-releases"
+            -w "\n%{http_code}" \
+            "${{ secrets.APP_BASE_URL }}/api/watch/economic-releases")
+
+          status=$(echo "$response" | tail -n 1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "HTTP STATUS: $status"
+          echo "RESPONSE BODY:"
+          echo "$body"
+
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            exit 1
+          fi
