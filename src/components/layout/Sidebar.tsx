@@ -61,10 +61,20 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: "Macro",
     items: [
-      { label: "Economic Growth", href: "/economic-growth", icon: BarChart3 },
-      { label: "Inflation", href: "/inflation", icon: Percent },
-      { label: "Labor Market", href: "/labor-market", icon: Briefcase },
-      { label: "Interest Rates", href: "/interest-rates", icon: Landmark },
+      // Phase 18 (public-launch demo sweep): these 4 pages show composite
+      // "surprise scores" per country (Economic Growth/Inflation/Labor) or
+      // meeting-implied hike/hold/cut probabilities and central-bank
+      // statement text (Interest Rates) with no real data source anywhere
+      // in this codebase — the real per-instrument macro reads
+      // (Scorecard's Growth/Inflation/Jobs/Interest Rates sections, wired
+      // to the same economicEvents/FRED data since the Phase 3 macro-state
+      // work) already cover the core scored intelligence surface honestly;
+      // these broader all-country browsers are demo-only pending a real
+      // rebuild, not shown with fabricated numbers. See each page.tsx.
+      { label: "Economic Growth", href: "/economic-growth", icon: BarChart3, demoOnly: true },
+      { label: "Inflation", href: "/inflation", icon: Percent, demoOnly: true },
+      { label: "Labor Market", href: "/labor-market", icon: Briefcase, demoOnly: true },
+      { label: "Interest Rates", href: "/interest-rates", icon: Landmark, demoOnly: true },
       // Phase 18 (public-launch demo sweep): put/call ratios, the VIX proxy,
       // Fear & Greed, and credit-spread readings on this page have no real
       // data source anywhere in this codebase (no provider integration
@@ -86,7 +96,12 @@ const NAV_GROUPS: NavGroup[] = [
     title: "Tools",
     items: [
       { label: "Alerts", href: "/alerts", icon: Bell },
-      { label: "Backtesting", href: "/backtesting", icon: History },
+      // Phase 18 (public-launch demo sweep): every statistic on this page
+      // (win rates, average returns, sample sizes) is RNG-generated, not
+      // computed from real historical scores — while the copy on the page
+      // itself claimed "results reported honestly." Demo-only until a real
+      // backtest can be computed from accumulated real score history.
+      { label: "Backtesting", href: "/backtesting", icon: History, demoOnly: true },
       { label: "AI Analyst", href: "/ai-analyst", icon: Bot },
     ],
   },

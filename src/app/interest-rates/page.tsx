@@ -2,8 +2,10 @@ import { CENTRAL_BANKS } from "@/lib/demo/centralBanks";
 import { Card } from "@/components/ui/Card";
 import { formatDate } from "@/lib/time";
 import { requireEntitlement } from "@/lib/auth/dal";
+import { isDemoOnly } from "@/services/data-mode";
 
 export const metadata = { title: "Interest Rates & Monetary Policy — Market Intelligence AI" };
+export const dynamic = "force-dynamic";
 
 const STANCE_CLASSES: Record<string, string> = {
   Hawkish: "text-rose-400 bg-rose-500/10",
@@ -11,8 +13,29 @@ const STANCE_CLASSES: Record<string, string> = {
   Neutral: "text-slate-300 bg-slate-500/10",
 };
 
+// Phase 18 (public-launch demo sweep): meeting-implied hike/hold/cut
+// probabilities and central-bank statement text have no real data source
+// anywhere in this codebase (no options/futures-implied-probability
+// provider, no statement feed) — demo-only. Real policy rates and yields
+// for the instruments that need them are already shown on each market's
+// Scorecard (Interest Rates section), not shown here with fabricated
+// probabilities/statements.
 export default async function InterestRatesPage() {
   await requireEntitlement();
+  if (!isDemoOnly()) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-xl font-semibold">Interest Rates &amp; Monetary Policy</h1>
+        </div>
+        <Card>
+          <p className="text-sm text-(--text-faint) py-6 text-center">
+            Not available yet — meeting-implied probabilities and statement text have no connected data source. Real policy-rate and yield data for each tracked market is already shown on that market&apos;s Scorecard (Interest Rates section).
+          </p>
+        </Card>
+      </div>
+    );
+  }
   return (
     <div className="space-y-6">
       <div>

@@ -1,12 +1,31 @@
 import { allEconomies } from "@/lib/demo/economies";
 import { EconomicReleaseTable } from "@/components/tables/EconomicReleaseTable";
 import { StatTile } from "@/components/ui/StatTile";
+import { Card } from "@/components/ui/Card";
 import { requireEntitlement } from "@/lib/auth/dal";
+import { isDemoOnly } from "@/services/data-mode";
 
 export const metadata = { title: "Labor Market — Market Intelligence AI" };
+export const dynamic = "force-dynamic";
 
+// Phase 18 (public-launch demo sweep): see economic-growth/page.tsx —
+// same treatment, same reason.
 export default async function LaborMarketPage() {
   await requireEntitlement();
+  if (!isDemoOnly()) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-xl font-semibold">Labor Market</h1>
+        </div>
+        <Card>
+          <p className="text-sm text-(--text-faint) py-6 text-center">
+            Not available yet as a standalone all-country browser. Real labor-market data for each tracked market is already shown on that market&apos;s Scorecard (Jobs Market section).
+          </p>
+        </Card>
+      </div>
+    );
+  }
   const economies = allEconomies();
 
   return (
