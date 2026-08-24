@@ -15,11 +15,14 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 
 // Always reachable with no session: the marketing site, auth entry points,
-// legal pages, and the two integration endpoints that are never called by
-// a logged-in browser (Stripe calls the webhook directly with no cookie at
-// all; the cron routes authenticate via CRON_SECRET instead of a session).
+// legal pages, and the integration endpoints that are never called by a
+// logged-in browser (Stripe calls the webhook directly with no cookie at
+// all; the cron routes authenticate via CRON_SECRET instead of a session;
+// the high-frequency economic-release watch route — see
+// app/api/watch/economic-releases/route.ts — is the same shape, called by
+// GitHub Actions with EVENT_WATCH_SECRET/CRON_SECRET, never a browser).
 const PUBLIC_EXACT = new Set(["/", "/signup", "/signin", "/pricing"]);
-const PUBLIC_PREFIXES = ["/legal", "/api/webhooks/", "/api/cron/"];
+const PUBLIC_PREFIXES = ["/legal", "/api/webhooks/", "/api/cron/", "/api/watch/"];
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_EXACT.has(pathname)) return true;
