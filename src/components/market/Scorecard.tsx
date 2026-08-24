@@ -14,7 +14,7 @@ import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { Card } from "@/components/ui/Card";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
-import { IndicatorRow, IndicatorSection, InterestRatesSection, ScorecardData, SurpriseIndexRow, TechnicalsRow } from "@/lib/pipeline/scorecard";
+import { IndicatorRow, IndicatorSection, InterestRatesSection, ScorecardData, ScoreDriverRow, SurpriseIndexRow, TechnicalsRow } from "@/lib/pipeline/scorecard";
 import { UnavailableState } from "@/components/ui/UnavailableState";
 
 // The uppercase leading word for a not-yet-available section, matching
@@ -131,6 +131,47 @@ function IndicatorSectionView({ section }: { section: IndicatorSection }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// Compact positive/negative driver list — a pure re-sort/re-label of the
+// same score.factors contributions shown elsewhere on this scorecard (see
+// lib/pipeline/scorecard.ts's buildScoreDrivers). No new numbers, no
+// generated text — every contribution/explanation here is the real
+// already-computed one.
+function ScoreDriversView({ drivers }: { drivers: { positive: ScoreDriverRow[]; negative: ScoreDriverRow[] } }) {
+  if (drivers.positive.length === 0 && drivers.negative.length === 0) {
+    return <UnavailableState>UNAVAILABLE — no factor is currently pushing the score in either direction.</UnavailableState>;
+  }
+  return (
+    <div className="grid sm:grid-cols-2 gap-3 text-xs">
+      <div className="space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wide text-emerald-400/80 mb-1">Pushing bullish</div>
+        {drivers.positive.length === 0 ? (
+          <p className="text-(--text-faint)">None</p>
+        ) : (
+          drivers.positive.map((d) => (
+            <div key={d.key} className="flex items-center justify-between gap-2" title={d.explanation}>
+              <span>{d.label}</span>
+              <span className="tabular-nums font-medium text-emerald-400">{formatSigned(d.contribution)}</span>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wide text-rose-400/80 mb-1">Pushing bearish</div>
+        {drivers.negative.length === 0 ? (
+          <p className="text-(--text-faint)">None</p>
+        ) : (
+          drivers.negative.map((d) => (
+            <div key={d.key} className="flex items-center justify-between gap-2" title={d.explanation}>
+              <span>{d.label}</span>
+              <span className="tabular-nums font-medium text-rose-400">{formatSigned(d.contribution)}</span>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -307,6 +348,10 @@ export function Scorecard({
       {/* Right grouped scorecard panel */}
       <Card className="lg:col-span-2" title="Scorecard">
         <div className="space-y-4">
+          <SectionShell title="Why This Score?">
+            <ScoreDriversView drivers={data.scoreDrivers} />
+          </SectionShell>
+
           <SectionShell title="Technicals">
             <TechnicalsRows rows={data.technicals} />
           </SectionShell>

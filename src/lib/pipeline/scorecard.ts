@@ -11,7 +11,7 @@
 // fabricated number. Nothing in this file is called from demo mode.
 import { DataFreshness, Instrument, MarketScore, ScoreFactor, ScoreFactorKey } from "@/lib/types";
 import { FactorSentiment, factorSentiment } from "@/lib/format";
-import { CCY_TO_COUNTRY } from "@/lib/scoring";
+import { CCY_TO_COUNTRY, factorLabel } from "@/lib/scoring";
 import { EconomicIndicatorKey } from "@/services/economic-calendar/indicator-taxonomy";
 import { getLatestEconomicEventByIndicator } from "@/db/queries/market-data";
 import { getRecentReleaseTracking } from "@/db/queries/release-tracking";
@@ -47,6 +47,32 @@ function computeSubScores(factors: ScoreFactor[]): ScorecardSubScores {
     sentimentPositioning: contributionOf(factors, "institutional") + contributionOf(factors, "retailSentiment"),
     fundamentals: contributionOf(factors, "economicGrowth") + contributionOf(factors, "inflation") + contributionOf(factors, "labor") + contributionOf(factors, "interestRates") + contributionOf(factors, "news"),
   };
+}
+
+// ---- "Why this score?" driver attribution (Phase 7) ----
+// Purely a re-sort/re-label of the SAME score.factors contributions already
+// shown elsewhere on the scorecard — no LLM text, no new numbers, no I/O.
+// A factor with an exactly-zero contribution isn't driving the score in
+// either direction, so it's excluded rather than padding the list.
+export type ScoreDriverRow = { key: ScoreFactorKey; label: string; contribution: number; explanation: string; freshness: DataFreshness };
+
+const MAX_DRIVERS_PER_SIDE = 4;
+
+function buildScoreDrivers(factors: ScoreFactor[]): { positive: ScoreDriverRow[]; negative: ScoreDriverRow[] } {
+  const rows = factors
+    .filter((f) => f.contribution !== 0)
+    .map((f): ScoreDriverRow => ({ key: f.key, label: factorLabel(f.key), contribution: f.contribution, explanation: f.explanation, freshness: f.freshness }));
+
+  const positive = rows
+    .filter((r) => r.contribution > 0)
+    .sort((a, b) => b.contribution - a.contribution)
+    .slice(0, MAX_DRIVERS_PER_SIDE);
+  const negative = rows
+    .filter((r) => r.contribution < 0)
+    .sort((a, b) => a.contribution - b.contribution)
+    .slice(0, MAX_DRIVERS_PER_SIDE);
+
+  return { positive, negative };
 }
 
 // ---- Technicals section — derived directly from score.factors, no fetch ----
@@ -309,6 +335,7 @@ async function resolveSurpriseIndexSection(symbol: string): Promise<SurpriseInde
 // ---- Composition ----
 export type ScorecardData = {
   subScores: ScorecardSubScores;
+  scoreDrivers: { positive: ScoreDriverRow[]; negative: ScoreDriverRow[] };
   technicals: TechnicalsRow[];
   institutional: CardResult<InstitutionalCardData>;
   retail: CardResult<NormalizedRetailSentiment>;
@@ -331,6 +358,7 @@ export async function buildScorecardData(instrument: Instrument, score: MarketSc
 
   return {
     subScores: computeSubScores(score.factors),
+    scoreDrivers: buildScoreDrivers(score.factors),
     technicals: buildTechnicalsRows(score.factors),
     // Institutional and Retail are distinct sections/fields — never merged
     // into one "positioning" object — CFTC (institutional) and retail

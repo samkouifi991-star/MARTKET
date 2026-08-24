@@ -304,6 +304,38 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
   });
 });
 
+describe("buildScorecardData — 'Why this score?' driver attribution (Phase 7)", () => {
+  it("splits factors into positive and negative drivers, sorted by contribution magnitude, using the same real contribution numbers already on score.factors", async () => {
+    const score = fixtureScore({ technical: 2.5, institutional: 1.2, seasonality: 0.3, retailSentiment: -3.0, inflation: -0.5, economicGrowth: 0 });
+    const data = await buildScorecardData(GOLD, score, fixtureLiveDetail());
+    expect(data.scoreDrivers.positive.map((d) => d.key)).toEqual(["technical", "institutional", "seasonality"]);
+    expect(data.scoreDrivers.positive[0].contribution).toBe(2.5);
+    expect(data.scoreDrivers.negative.map((d) => d.key)).toEqual(["retailSentiment", "inflation"]);
+    expect(data.scoreDrivers.negative[0].contribution).toBe(-3.0);
+  });
+
+  it("excludes a factor with exactly zero contribution from both lists — it isn't driving the score in either direction", async () => {
+    const score = fixtureScore({ technical: 1, news: 0 });
+    const data = await buildScorecardData(GOLD, score, fixtureLiveDetail());
+    expect(data.scoreDrivers.positive.some((d) => d.key === "news")).toBe(false);
+    expect(data.scoreDrivers.negative.some((d) => d.key === "news")).toBe(false);
+  });
+
+  it("caps each side to at most 4 drivers even when more factors are non-zero", async () => {
+    const score = fixtureScore({ technical: 5, institutional: 4, seasonality: 3, economicGrowth: 2, interestRates: 1 });
+    const data = await buildScorecardData(GOLD, score, fixtureLiveDetail());
+    expect(data.scoreDrivers.positive.length).toBeLessThanOrEqual(4);
+  });
+
+  it("reuses the real factor explanation text verbatim — never generates new copy", async () => {
+    const score = fixtureScore({ technical: 1 });
+    const data = await buildScorecardData(GOLD, score, fixtureLiveDetail());
+    const technicalFactor = score.factors.find((f) => f.key === "technical")!;
+    const driver = data.scoreDrivers.positive.find((d) => d.key === "technical")!;
+    expect(driver.explanation).toBe(technicalFactor.explanation);
+  });
+});
+
 describe("buildScorecardData — Interest Rates section", () => {
   it("uses Gold's real asset-specific driver breakdown, not a generic policy-rate read", async () => {
     vi.mocked(computeGoldMacroRegime).mockResolvedValue({
