@@ -1,0 +1,35 @@
+# High-frequency economic-release watcher (Scoring Engine V2, shadow mode
+# only — see src/app/api/watch/economic-releases/route.ts). Vercel's Hobby
+# plan caps Cron at once daily, so this workflow is the free external
+# scheduler that polls the app roughly every 5 minutes during the trading
+# day instead.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   APP_BASE_URL       e.g. https://your-deployment.vercel.app (no trailing slash)
+#   EVENT_WATCH_SECRET a random secret string, also set as the Vercel env var
+#                      EVENT_WATCH_SECRET (or reuse the existing CRON_SECRET
+#                      value for both — the route accepts either).
+#
+# This workflow only ever calls the one authenticated GET endpoint below —
+# it has no other access to the app or its database, and never touches any
+# V1-facing route.
+name: Economic Release Watch
+
+on:
+  schedule:
+    # GitHub Actions' minimum schedule granularity is 5 minutes; actual
+    # firing can lag by a few minutes under load, which is fine here since
+    # the route's own lookback window (6h) and releaseKey-based idempotency
+    # tolerate a missed or delayed run without creating any duplicate.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the economic-release watch endpoint
+        run: |
+          curl -sf --max-time 60 \
+            -H "Authorization: Bearer ${{ secrets.EVENT_WATCH_SECRET }}" \
+            "${{ secrets.APP_BASE_URL }}/api/watch/economic-releases"
