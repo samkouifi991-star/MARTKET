@@ -3,10 +3,14 @@
 // from outside a browser session (this sandbox has no direct network path
 // to production — see the diagnostics/scorecard/[symbol] page and the
 // scorecard-diagnostic-screenshot GH Actions workflow for the same
-// established pattern). Protected by EVENT_WATCH_SECRET/CRON_SECRET, same
-// as the economic-release watch route — never session-gated only, since
-// this is meant to be called by an external process, not a logged-in admin
-// browsing the app.
+// established pattern). Lives under /api/watch/ — the SAME shape as
+// api/watch/economic-releases (called by GitHub Actions with
+// EVENT_WATCH_SECRET/CRON_SECRET, never a browser) — deliberately not
+// under /api/admin/, since proxy.ts's optimistic session-cookie gate
+// would redirect an unauthenticated (no-cookie) bearer-token request like
+// this one to /signin before it ever reached this handler's own auth
+// check; /api/watch/ is explicitly whitelisted in proxy.ts for exactly
+// this case.
 import { NextRequest, NextResponse } from "next/server";
 import { runLaunchAudit } from "@/lib/pipeline/launch-audit";
 import { demoModeSkip, isDemoMode, unauthorized, verifyEventWatchAuth } from "../../cron/_shared";
