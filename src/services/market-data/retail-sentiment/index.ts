@@ -18,6 +18,16 @@ export type { NormalizedRetailSentiment, RetailSentimentProvider } from "./types
 // primary, but stays wired in rather than deleted in case OANDA and IG are
 // both ever unavailable. None of these being configured/covering a symbol
 // ever blocks the pipeline — the combinator below just moves to the next.
+//
+// Capital.com (retail-sentiment/capital-com-provider.ts) is built and
+// ready — intended priority OANDA -> Capital.com -> IG -> Myfxbook, i.e.
+// secondary, ahead of IG (in practice IG never returns "live" today since
+// every igEpic in symbol-map.ts is still null, so this order is
+// functionally OANDA -> Capital.com -> Myfxbook) — but is deliberately NOT
+// added to the array below yet. Every SymbolMapping.capitalComMarketId is
+// still null; wire it in only after scripts/capital-com-retail-sentiment-verify.ts
+// has confirmed real marketIds + real clientsentiment responses for the
+// symbols it's meant to cover.
 export const RETAIL_SENTIMENT_PROVIDERS: RetailSentimentProvider[] = [oandaProvider, igProvider, myfxbookProvider];
 
 // Freshness tiers for a retail-sentiment observation, driven by the age of

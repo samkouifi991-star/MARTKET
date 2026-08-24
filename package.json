@@ -40,6 +40,7 @@
     "test:commodity-coverage-reconcile": "tsx scripts/commodity-coverage-reconcile.ts",
     "test:retail-sentiment-status-check": "tsx scripts/retail-sentiment-status-check.ts",
     "test:oanda-metals-retail-sentiment-verify": "tsx scripts/oanda-metals-retail-sentiment-verify.ts",
+    "test:capital-com-retail-sentiment-verify": "tsx scripts/capital-com-retail-sentiment-verify.ts",
     "test:fx-retail-sentiment-ui-verify": "tsx scripts/fx-retail-sentiment-ui-verify.ts",
     "test:top-setups-sync-verify": "tsx scripts/top-setups-sync-verify.ts",
     "test:dashboard-sync-verify": "tsx scripts/dashboard-sync-verify.ts",
