@@ -56,6 +56,8 @@ const EXPECTED_TABLES = [
   "factor_scores_v2",
   "scoring_shadow_comparisons",
   "scoring_integrity_errors",
+  "economic_release_tracking",
+  "economic_watch_diagnostics",
 ];
 
 function describeError(err: unknown): string {

@@ -29,7 +29,18 @@ function makeQuery<T>(data: T[]): FakeQuery<T> {
   return promise;
 }
 
-import { getHistoricalEffectiveSurprises, getRecentEventShocks, getRecentSurprisesForCountries, hasEventShockForRelease, recordEventShock, recordReleaseSurprise } from "./economic-releases";
+import {
+  getHistoricalEffectiveSurprises,
+  getRecentDiagnosticCounts,
+  getRecentEventShocks,
+  getRecentSurprisesForCountries,
+  hasDiagnostic,
+  hasEventShockForRelease,
+  hasProcessedReleaseKey,
+  recordEventShock,
+  recordReleaseSurprise,
+  recordWatchDiagnostic,
+} from "./economic-releases";
 
 describe("recordReleaseSurprise", () => {
   beforeEach(() => {
@@ -51,10 +62,11 @@ describe("recordReleaseSurprise", () => {
       effectiveSurprise: 0.1,
       importanceTier: "HIGH",
       eventExternalId: "fmp-US-CPI-1",
+      releaseKey: "fmp:US:cpi:2027-01-01T13:30:00.000Z",
     });
     expect(id).toBe(1);
     const write = insertedValues.find((w) => w.table === "economic_release_surprises");
-    expect(write?.values).toMatchObject({ indicatorKey: "cpi", country: "US", surpriseZ: 1.2, importanceTier: "HIGH" });
+    expect(write?.values).toMatchObject({ indicatorKey: "cpi", country: "US", surpriseZ: 1.2, importanceTier: "HIGH", releaseKey: "fmp:US:cpi:2027-01-01T13:30:00.000Z" });
   });
 });
 
@@ -129,5 +141,47 @@ describe("getRecentSurprisesForCountries", () => {
   it("returns an empty array immediately when given no countries, without querying", async () => {
     selectResults["economic_release_surprises"] = [{ id: 1, indicatorKey: "cpi", country: "US", actual: 0.3, forecast: 0.2, surpriseZ: 1.2, importanceTier: "HIGH", releaseDateTime: new Date() }];
     expect(await getRecentSurprisesForCountries([])).toEqual([]);
+  });
+});
+
+describe("hasProcessedReleaseKey", () => {
+  beforeEach(() => {
+    selectResults = {};
+  });
+
+  it("is true once a releaseKey has a stored surprise row, regardless of the provider's own (possibly unstable) raw id", async () => {
+    selectResults["economic_release_surprises"] = [{ id: 1, releaseKey: "fmp:US:cpi:2027-01-01T13:30:00.000Z" }];
+    expect(await hasProcessedReleaseKey("fmp:US:cpi:2027-01-01T13:30:00.000Z")).toBe(true);
+  });
+
+  it("is false for a releaseKey never recorded", async () => {
+    selectResults["economic_release_surprises"] = [];
+    expect(await hasProcessedReleaseKey("fmp:US:nfp:2027-01-01T13:30:00.000Z")).toBe(false);
+  });
+});
+
+describe("watch diagnostics", () => {
+  beforeEach(() => {
+    insertedValues.length = 0;
+    selectResults = {};
+  });
+
+  it("records a diagnostic with its kind and releaseKey", async () => {
+    await recordWatchDiagnostic({ kind: "missing_forecast", releaseKey: "fmp:US:cpi:2027-01-01T13:30:00.000Z", rawEvent: "CPI m/m", country: "US", detail: null });
+    const write = insertedValues.find((w) => w.table === "economic_watch_diagnostics");
+    expect(write?.values).toMatchObject({ kind: "missing_forecast", releaseKey: "fmp:US:cpi:2027-01-01T13:30:00.000Z" });
+  });
+
+  it("hasDiagnostic is true when a matching row exists, false when none has been recorded yet", async () => {
+    selectResults["economic_watch_diagnostics"] = [{ kind: "missing_forecast", releaseKey: "fmp:US:cpi:2027-01-01T13:30:00.000Z" }];
+    expect(await hasDiagnostic("missing_forecast", "fmp:US:cpi:2027-01-01T13:30:00.000Z")).toBe(true);
+    selectResults["economic_watch_diagnostics"] = [];
+    expect(await hasDiagnostic("missing_forecast", "fmp:US:cpi:2027-01-01T13:30:00.000Z")).toBe(false);
+  });
+
+  it("getRecentDiagnosticCounts groups real rows by kind, defaulting every kind to 0", async () => {
+    selectResults["economic_watch_diagnostics"] = [{ kind: "missing_forecast" }, { kind: "missing_forecast" }, { kind: "normalization_failure" }];
+    const counts = await getRecentDiagnosticCounts();
+    expect(counts).toEqual({ missing_forecast: 2, missing_actual: 0, duplicate_event: 0, normalization_failure: 1, missing_revision: 0 });
   });
 });

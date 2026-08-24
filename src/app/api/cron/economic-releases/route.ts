@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { fmpEconomicCalendarProvider } from "@/services/economic-calendar/fmp-provider";
 import { countryCodeFor } from "@/services/economic-calendar/affected-markets";
 import { updateEconomicEventClassification } from "@/db/queries/market-data";
-import { getHistoricalEffectiveSurprises, hasRecordedSurprise, recordReleaseSurprise } from "@/db/queries/economic-releases";
+import { getHistoricalEffectiveSurprises, hasProcessedReleaseKey, recordReleaseSurprise } from "@/db/queries/economic-releases";
 import { recordProviderCheck } from "@/db/queries/provider-health";
 import { computeEffectiveSurprise, computeHistoricalDistribution, computeRevisionAdjustment, computeSurprise, computeSurpriseZ } from "@/lib/scoring-v2/economic-surprise";
 import { demoModeSkip, isDemoMode, unauthorized, verifyCronAuth } from "../_shared";
@@ -65,13 +65,18 @@ export async function GET(req: NextRequest) {
     // one only ever backfills the V2-only classification columns.
     await updateEconomicEventClassification(release.id, { indicatorKey: release.indicatorKey, importanceTier: release.importanceTier, revisedPrevious: release.revisedPrevious }).catch(() => {});
 
-    if (await hasRecordedSurprise(release.id)) {
+    // NOTE: computed inline for now — src/services/economic-calendar/
+    // release-identity.ts (a following milestone) centralizes this exact
+    // format so both this cron and the high-frequency watch route agree.
+    const country = countryCodeFor(release.country) ?? release.country;
+    const releaseKey = `fmp:${country}:${release.indicatorKey}:${release.dateTime}`;
+
+    if (await hasProcessedReleaseKey(releaseKey)) {
       skippedCount++;
       continue; // already processed on a prior run — idempotent
     }
 
     try {
-      const country = countryCodeFor(release.country) ?? release.country;
       const surprise = computeSurprise(release.actual, release.forecast);
       const revisionAdjustment = computeRevisionAdjustment(release.previous, release.revisedPrevious);
       const effectiveSurprise = computeEffectiveSurprise(surprise, revisionAdjustment);
@@ -96,6 +101,7 @@ export async function GET(req: NextRequest) {
         effectiveSurprise,
         importanceTier: release.importanceTier,
         eventExternalId: release.id,
+        releaseKey,
       });
       detectedCount++;
     } catch {

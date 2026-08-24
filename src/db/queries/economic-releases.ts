@@ -4,7 +4,7 @@
 // score/comparison tables) so each file's concern stays obvious.
 import { and, desc, eq, gte } from "drizzle-orm";
 import { getDb } from "../client";
-import { economicReleaseSurprises, eventShocks } from "../schema";
+import { economicReleaseSurprises, economicWatchDiagnostics, eventShocks } from "../schema";
 import { EconomicIndicatorKey, ImportanceTier } from "@/services/economic-calendar/indicator-taxonomy";
 
 export type ReleaseSurpriseInput = {
@@ -20,6 +20,10 @@ export type ReleaseSurpriseInput = {
   effectiveSurprise: number | null;
   importanceTier: ImportanceTier;
   eventExternalId: string | null;
+  // The real, order-independent dedup identity (see release-identity.ts) —
+  // eventExternalId above is kept only as a best-effort display join back
+  // to economicEvents, never the idempotency key at 5-minute poll cadence.
+  releaseKey: string | null;
 };
 
 export async function recordReleaseSurprise(input: ReleaseSurpriseInput): Promise<number> {
@@ -39,6 +43,7 @@ export async function recordReleaseSurprise(input: ReleaseSurpriseInput): Promis
       effectiveSurprise: input.effectiveSurprise,
       importanceTier: input.importanceTier,
       eventExternalId: input.eventExternalId,
+      releaseKey: input.releaseKey,
     })
     .returning();
   return row.id;
@@ -63,13 +68,15 @@ export async function getHistoricalEffectiveSurprises(indicatorKey: EconomicIndi
     .map((r) => r.effectiveSurprise as number);
 }
 
-/** Idempotency guard for the release-detection cron: a release is only
- * ever surprise-scored and shocked once, no matter how many times the cron
- * subsequently runs and re-fetches the same (by-then-already-actualized)
- * calendar row. */
-export async function hasRecordedSurprise(eventExternalId: string): Promise<boolean> {
+/** Idempotency guard for release detection: a release is only ever
+ * surprise-scored once, no matter how many times a watcher run (daily cron
+ * or the 5-minute GitHub Actions poll) re-fetches the same calendar row.
+ * Keyed by releaseKey (provider+country+indicatorKey+releaseDateTime),
+ * NOT the calendar provider's own raw id — see release-identity.ts's
+ * module comment for why that raw id is unsafe at high poll frequency. */
+export async function hasProcessedReleaseKey(releaseKey: string): Promise<boolean> {
   const db = getDb();
-  const rows = await db.select().from(economicReleaseSurprises).where(eq(economicReleaseSurprises.eventExternalId, eventExternalId)).limit(1);
+  const rows = await db.select().from(economicReleaseSurprises).where(eq(economicReleaseSurprises.releaseKey, releaseKey)).limit(1);
   return rows.length > 0;
 }
 
@@ -146,4 +153,35 @@ export async function getRecentEventShocks(symbol: string, lookbackDays = 30): P
     .from(eventShocks)
     .where(and(eq(eventShocks.symbol, symbol), gte(eventShocks.occurredAt, since)));
   return rows.map((r) => ({ symbol: r.symbol, factorKey: r.factorKey, initialContribution: r.initialContribution, importanceTier: r.importanceTier as ImportanceTier, occurredAt: r.occurredAt.toISOString() }));
+}
+
+export type WatchDiagnosticKind = "missing_forecast" | "missing_actual" | "duplicate_event" | "normalization_failure" | "missing_revision";
+
+export type WatchDiagnosticInput = { kind: WatchDiagnosticKind; releaseKey: string | null; rawEvent: string | null; country: string | null; detail: string | null };
+
+export async function recordWatchDiagnostic(input: WatchDiagnosticInput): Promise<void> {
+  const db = getDb();
+  await db.insert(economicWatchDiagnostics).values({ kind: input.kind, releaseKey: input.releaseKey, rawEvent: input.rawEvent, country: input.country, detail: input.detail });
+}
+
+/** Dedup guard so a persistent anomaly (e.g. a HIGH-impact release still
+ * missing its forecast) isn't re-logged every 5-minute poll — one
+ * diagnostic per releaseKey+kind is enough to be actionable. */
+export async function hasDiagnostic(kind: WatchDiagnosticKind, releaseKey: string): Promise<boolean> {
+  const db = getDb();
+  const rows = await db.select().from(economicWatchDiagnostics).where(and(eq(economicWatchDiagnostics.kind, kind), eq(economicWatchDiagnostics.releaseKey, releaseKey))).limit(1);
+  return rows.length > 0;
+}
+
+export type DiagnosticCounts = Record<WatchDiagnosticKind, number>;
+
+/** Aggregate counts by kind over a lookback window, for the Admin
+ * provider-latency/diagnostics card (requirement #10). */
+export async function getRecentDiagnosticCounts(lookbackDays = 30): Promise<DiagnosticCounts> {
+  const db = getDb();
+  const since = new Date(Date.now() - lookbackDays * 86_400_000);
+  const rows = await db.select().from(economicWatchDiagnostics).where(gte(economicWatchDiagnostics.occurredAt, since));
+  const counts: DiagnosticCounts = { missing_forecast: 0, missing_actual: 0, duplicate_event: 0, normalization_failure: 0, missing_revision: 0 };
+  for (const r of rows) counts[r.kind as WatchDiagnosticKind]++;
+  return counts;
 }

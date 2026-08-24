@@ -371,10 +371,68 @@ export const economicReleaseSurprises = pgTable(
     surpriseZ: doublePrecision("surprise_z"), // null until enough per-indicator history exists to normalize
     effectiveSurprise: doublePrecision("effective_surprise"), // revision-adjusted (see economic-surprise.ts)
     importanceTier: varchar("importance_tier", { length: 8 }).notNull(), // "HIGH" | "MEDIUM" | "LOW"
-    eventExternalId: varchar("event_external_id", { length: 128 }), // ties back to economicEvents.externalId
+    eventExternalId: varchar("event_external_id", { length: 128 }), // best-effort join back to economicEvents.externalId for display only — NOT the dedup key (see releaseKey)
+    // The real, order-independent dedup identity (services/economic-calendar/
+    // release-identity.ts: `${provider}:${country}:${indicatorKey}:${releaseDateTimeISO}`).
+    // eventExternalId alone is unsafe at 5-minute polling cadence because
+    // FMP's raw id is derived from that response's array index, which can
+    // shift between calls. Nullable only so a pre-migration row (none exist
+    // in any real deploy yet) wouldn't violate the unique constraint.
+    releaseKey: varchar("release_key", { length: 160 }),
     computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("economic_release_surprises_indicator_release").on(t.indicatorKey, t.releaseDateTime)]
+  (t) => [index("economic_release_surprises_indicator_release").on(t.indicatorKey, t.releaseDateTime), uniqueIndex("economic_release_surprises_release_key").on(t.releaseKey)]
+);
+
+// The release lifecycle (requirement #3): scheduled -> released -> processed
+// -> revised. Unlike economicReleaseSurprises (which can only exist once
+// `actual` is known), this row is created the moment a release first
+// appears on the calendar — even before it's out — so latency
+// (scheduledAt vs firstDetectedAt) and provider-quality diagnostics can be
+// measured. Keyed by the same releaseKey identity as economicReleaseSurprises.
+export const economicReleaseTracking = pgTable(
+  "economic_release_tracking",
+  {
+    id: serial("id").primaryKey(),
+    releaseKey: varchar("release_key", { length: 160 }).notNull().unique(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    country: varchar("country", { length: 8 }).notNull(),
+    indicatorKey: varchar("indicator_key", { length: 40 }).notNull(),
+    rawEvent: text("raw_event").notNull(), // the provider's free-text event name, for admin drill-down/debugging
+    importanceTier: varchar("importance_tier", { length: 8 }).notNull(),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    state: varchar("state", { length: 16 }).notNull().default("scheduled"), // "scheduled" | "released" | "processed" | "revised"
+    forecast: doublePrecision("forecast"),
+    previous: doublePrecision("previous"),
+    actual: doublePrecision("actual"),
+    revisedPrevious: doublePrecision("revised_previous"),
+    firstDetectedAt: timestamp("first_detected_at", { withTimezone: true }), // when a watcher run first saw `actual` become non-null
+    processedAt: timestamp("processed_at", { withTimezone: true }), // when surprise+shock+targeted recompute completed for this release
+    lastRevisedAt: timestamp("last_revised_at", { withTimezone: true }), // when actual/revisedPrevious changed after already being processed
+    surpriseId: integer("surprise_id").references(() => economicReleaseSurprises.id),
+    affectedMarkets: jsonb("affected_markets").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("economic_release_tracking_state").on(t.state), index("economic_release_tracking_scheduled").on(t.scheduledAt), index("economic_release_tracking_indicator_country").on(t.indicatorKey, t.country)]
+);
+
+// Append-only provider-quality anomaly log (requirement #10) — separate
+// from providerHealth (which tracks up/down per data source) since these
+// are per-RELEASE quality signals: a release with no forecast, a release
+// whose free-text name didn't classify, a release that appeared to repeat.
+export const economicWatchDiagnostics = pgTable(
+  "economic_watch_diagnostics",
+  {
+    id: serial("id").primaryKey(),
+    kind: varchar("kind", { length: 24 }).notNull(), // "missing_forecast" | "missing_actual" | "duplicate_event" | "normalization_failure" | "missing_revision"
+    releaseKey: varchar("release_key", { length: 160 }),
+    rawEvent: text("raw_event"),
+    country: varchar("country", { length: 8 }),
+    detail: text("detail"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("economic_watch_diagnostics_kind_occurred").on(t.kind, t.occurredAt)]
 );
 
 // A temporary score boost/drag from a single economic release. Nothing
