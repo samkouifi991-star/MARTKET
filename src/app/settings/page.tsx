@@ -35,7 +35,7 @@ export default async function SettingsPage() {
 
   let planStatusLine: string;
   if (admin) {
-    planStatusLine = "Admin access (development/testing bypass)";
+    planStatusLine = "Admin access (owner account — subscription not required)";
   } else if (subscription?.status === "trialing" && subscription.trialEndsAt) {
     const days = daysUntil(subscription.trialEndsAt);
     planStatusLine = `Trial ends in ${days} day${days === 1 ? "" : "s"} — ${formatDate(subscription.trialEndsAt.toISOString())}`;
