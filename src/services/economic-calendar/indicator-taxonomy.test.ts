@@ -74,13 +74,18 @@ describe("matchIndicator", () => {
 });
 
 describe("IMPORTANCE_TIER", () => {
-  it("classifies the headline market-moving releases as HIGH", () => {
-    const highImpact: EconomicIndicatorKey[] = ["cpi", "coreCpi", "nfp", "unemploymentRate", "gdp", "fedRateDecision", "fomcStatement", "dotPlot", "powellPressConference"];
+  it("classifies the headline market-moving releases as HIGH, including wages alongside NFP/unemployment (Tier 1)", () => {
+    const highImpact: EconomicIndicatorKey[] = ["cpi", "coreCpi", "nfp", "unemploymentRate", "avgHourlyEarnings", "gdp", "fedRateDecision", "fomcStatement", "dotPlot", "powellPressConference"];
     for (const key of highImpact) expect(IMPORTANCE_TIER[key]).toBe("HIGH");
   });
 
+  it("classifies Tier 2 releases (PPI, PMIs, JOLTS, jobless claims) as MEDIUM, not LOW", () => {
+    const mediumImpact: EconomicIndicatorKey[] = ["ppi", "corePpi", "ismManufacturing", "ismServices", "spGlobalManufacturingPmi", "spGlobalServicesPmi", "jolts", "joblessClaims", "continuingClaims"];
+    for (const key of mediumImpact) expect(IMPORTANCE_TIER[key]).toBe("MEDIUM");
+  });
+
   it("classifies minor/secondary releases as LOW", () => {
-    const lowImpact: EconomicIndicatorKey[] = ["joblessClaims", "continuingClaims", "industrialProduction", "durableGoods", "consumerConfidence", "housingData", "tradeBalance"];
+    const lowImpact: EconomicIndicatorKey[] = ["industrialProduction", "durableGoods", "consumerConfidence", "housingData", "tradeBalance"];
     for (const key of lowImpact) expect(IMPORTANCE_TIER[key]).toBe("LOW");
   });
 

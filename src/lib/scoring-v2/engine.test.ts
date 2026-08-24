@@ -110,6 +110,35 @@ describe("computeMarketScoreV2", () => {
     expect(inflationFactor!.contribution).toBeGreaterThan(0);
   });
 
+  it("groups a same-cycle correlated Labor report (NFP+unemployment+wages) into ONE shock instead of three stacking ones (requirement #12)", async () => {
+    const now = new Date().toISOString();
+    vi.mocked(getRecentSurprisesForCountries).mockResolvedValue([
+      { id: 10, indicatorKey: "nfp", country: "US", actual: 250_000, forecast: 180_000, surpriseZ: 2.0, importanceTier: "HIGH", releaseDateTime: now },
+      { id: 11, indicatorKey: "unemploymentRate", country: "US", actual: 3.9, forecast: 4.1, surpriseZ: 1.5, importanceTier: "HIGH", releaseDateTime: now },
+      { id: 12, indicatorKey: "avgHourlyEarnings", country: "US", actual: 0.5, forecast: 0.3, surpriseZ: 1.0, importanceTier: "HIGH", releaseDateTime: now },
+    ]);
+
+    await computeMarketScoreV2("XAUUSD", "live");
+
+    const calls = vi.mocked(recordEventShock).mock.calls.map((c) => c[0]);
+    const nonZero = calls.filter((c) => c.initialContribution !== 0);
+    const zeroMarkers = calls.filter((c) => c.initialContribution === 0);
+
+    expect(calls).toHaveLength(3); // one real shock + two zero-contribution "consumed" markers
+    expect(nonZero).toHaveLength(1);
+    expect(nonZero[0].sourceReleaseId).toBe(10); // the first member (NFP) is the composite's representative
+    expect(zeroMarkers.map((c) => c.sourceReleaseId).sort()).toEqual([11, 12]);
+  });
+
+  it("does not group unrelated indicators — a lone CPI surprise still produces exactly its own single, non-zero shock (no regression from composite grouping)", async () => {
+    vi.mocked(getRecentSurprisesForCountries).mockResolvedValue([{ id: 42, indicatorKey: "cpi", country: "US", actual: 0.4, forecast: 0.2, surpriseZ: 2.0, importanceTier: "HIGH", releaseDateTime: new Date().toISOString() }]);
+    await computeMarketScoreV2("XAUUSD", "live");
+    expect(recordEventShock).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(recordEventShock).mock.calls[0][0];
+    expect(call.sourceReleaseId).toBe(42);
+    expect(call.initialContribution).not.toBe(0);
+  });
+
   it("never re-processes a surprise that already has a recorded shock for this symbol (idempotency)", async () => {
     vi.mocked(getRecentSurprisesForCountries).mockResolvedValue([{ id: 42, indicatorKey: "cpi", country: "US", actual: 0.4, forecast: 0.2, surpriseZ: 2.0, importanceTier: "HIGH", releaseDateTime: new Date().toISOString() }]);
     vi.mocked(hasEventShockForRelease).mockResolvedValue(true);

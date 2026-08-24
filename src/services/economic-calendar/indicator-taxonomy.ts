@@ -71,9 +71,12 @@ export const IMPORTANCE_TIER: Record<EconomicIndicatorKey, ImportanceTier> = {
   inflationExpectations: "MEDIUM",
   nfp: "HIGH",
   unemploymentRate: "HIGH",
-  avgHourlyEarnings: "MEDIUM",
-  joblessClaims: "LOW",
-  continuingClaims: "LOW",
+  // "wages" is explicitly Tier 1 alongside NFP/unemployment in the labor
+  // report composite (requirement #11) — bumped from MEDIUM.
+  avgHourlyEarnings: "HIGH",
+  // Tier 2 per requirement #11's explicit list — bumped from LOW.
+  joblessClaims: "MEDIUM",
+  continuingClaims: "MEDIUM",
   jolts: "MEDIUM",
   adpEmployment: "MEDIUM",
   gdp: "HIGH",
@@ -83,8 +86,9 @@ export const IMPORTANCE_TIER: Record<EconomicIndicatorKey, ImportanceTier> = {
   durableGoods: "LOW",
   ismManufacturing: "MEDIUM",
   ismServices: "MEDIUM",
-  spGlobalManufacturingPmi: "LOW",
-  spGlobalServicesPmi: "LOW",
+  // Tier 2's "PMIs" per requirement #11 — bumped from LOW.
+  spGlobalManufacturingPmi: "MEDIUM",
+  spGlobalServicesPmi: "MEDIUM",
   fedRateDecision: "HIGH",
   fomcStatement: "HIGH",
   dotPlot: "HIGH",

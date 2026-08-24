@@ -27,9 +27,10 @@ export function affectedMarketsFor(country: string): string[] {
   const currency = COUNTRY_TO_CURRENCY[country];
   if (!currency) return [];
   const markets = INSTRUMENTS.filter((i) => i.currencies?.includes(currency)).map((i) => i.symbol);
-  // USD releases also move gold, silver and the major indices — a stronger
-  // structural link than the generic currency-pair match above.
-  if (currency === "USD") markets.push("XAUUSD", "XAGUSD", "SPX500", "NAS100", "DJ30", "RUT2000");
+  // USD releases also move gold, silver, the major indices, and crypto (via
+  // liquidity/real-yield/risk-appetite regime effects, not a currency pair)
+  // — a stronger structural link than the generic currency-pair match above.
+  if (currency === "USD") markets.push("XAUUSD", "XAGUSD", "SPX500", "NAS100", "DJ30", "RUT2000", "BTCUSD", "ETHUSD");
   return Array.from(new Set(markets));
 }
 

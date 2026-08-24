@@ -20,7 +20,7 @@
 // scoring_shadow_comparisons tables — never V1's tables. No user-facing
 // page reads anything this file writes.
 import { getInstrument } from "@/lib/instruments";
-import { Bias, ScoreFactor, ScoreFactorKey } from "@/lib/types";
+import { Bias, Instrument, ScoreFactor, ScoreFactorKey } from "@/lib/types";
 import { DataMode } from "@/services/data-mode";
 import { CCY_TO_COUNTRY } from "@/lib/scoring";
 import { resolveTechnicalFactor } from "@/lib/pipeline/technical";
@@ -45,7 +45,8 @@ import {
   upsertCurrentScoreV2,
 } from "@/db/queries/scoring-v2";
 import { getRecentEventShocks, getRecentSurprisesForCountries, hasEventShockForRelease, recordEventShock, RecentSurpriseRow } from "@/db/queries/economic-releases";
-import { indicatorCategory } from "@/services/economic-calendar/indicator-taxonomy";
+import { EconomicIndicatorKey, indicatorCategory } from "@/services/economic-calendar/indicator-taxonomy";
+import { groupCorrelatedSignals } from "./correlation";
 import { FACTOR_FAMILY, FamilyContribution, applyFamilyCaps, FamilyKey } from "./factor-families";
 import { classifyBiasWithHysteresis } from "./hysteresis";
 import { selectSmoothingAlpha, smoothedScore } from "./smoothing";
@@ -100,12 +101,56 @@ function relevantCountries(symbol: string): string[] {
 
 type NewShockDetection = { factorKey: string | null; contribution: number; importanceTier: RecentSurpriseRow["importanceTier"] };
 
+/** The shared per-surprise asset-interpretation dispatch (requirement #5) —
+ * factored out of detectAndRecordNewShocks so it can be called once per
+ * INDEPENDENT signal, whether that signal is a single ungrouped surprise or
+ * a correlation-composite's averaged z-score (requirement #12). Mirrors
+ * the exact rate-decision dispatch is handled by the caller separately,
+ * since a rate decision is never part of a correlation composite. */
+function dispatchSurpriseShock(
+  indicatorKey: EconomicIndicatorKey,
+  surpriseZ: number,
+  country: string,
+  polarityClass: MacroPolarityClass,
+  instrument: Instrument,
+  regime: MacroRegime
+): { contribution: number | null; factorKey: string | null } {
+  const category = indicatorCategory(indicatorKey);
+  if (polarityClass === "PreciousMetals") {
+    const contribution = computeGoldSurpriseShock(indicatorKey, surpriseZ);
+    const factorKey = category === "inflation" ? "inflation" : category === "growthLabor" ? "economicGrowth" : null;
+    return { contribution, factorKey };
+  }
+  if (polarityClass === "FX" && instrument.currencies) {
+    const baseCountry = CCY_TO_COUNTRY[instrument.currencies[0]];
+    // relative-economics shocks apply to the total score, not one V1 factor slot
+    return { contribution: computeFxRelativeSurpriseShockOneSided(surpriseZ, country === baseCountry), factorKey: null };
+  }
+  if (polarityClass === "EquityIndices") {
+    if (category === "inflation") return { contribution: computeIndicesInflationShock(surpriseZ), factorKey: "inflation" };
+    if (category === "growthLabor") return { contribution: computeIndicesGrowthShock(surpriseZ, regime), factorKey: "economicGrowth" };
+  }
+  if (polarityClass === "Crypto" && category === "growthLabor") {
+    return { contribution: computeCryptoGrowthLaborShock(surpriseZ), factorKey: "economicGrowth" };
+  }
+  return { contribution: null, factorKey: null };
+}
+
 /** Translates any not-yet-shocked recent surprise relevant to this symbol
  * into a signed contribution via the appropriate asset-interpretation
  * module, records it (idempotent — see hasEventShockForRelease), and
  * returns what was newly created this cycle (used to decide the
  * smoothing alpha and whether this cycle counts as a "HIGH impact event"
- * for history-persistence purposes). */
+ * for history-persistence purposes).
+ *
+ * Correlation-aware (requirement #12): same-cycle correlated releases
+ * (NFP+unemployment+wages, CPI+CoreCPI, ...) are grouped via
+ * correlation.ts's groupCorrelatedSignals into ONE averaged signal before
+ * dispatch, so a single macro story never produces two or three
+ * independent, stacking shocks. The composite's non-representative members
+ * are "consumed" with a zero-contribution marker shock (still referencing
+ * their own sourceReleaseId) so hasEventShockForRelease correctly treats
+ * them as handled on the next cycle, without adding any phantom score. */
 async function detectAndRecordNewShocks(symbol: string, polarityClass: MacroPolarityClass, regime: MacroRegime, maxContribution: number): Promise<NewShockDetection[]> {
   const instrument = getInstrument(symbol);
   if (!instrument) return [];
@@ -113,42 +158,66 @@ async function detectAndRecordNewShocks(symbol: string, polarityClass: MacroPola
   const surprises = await getRecentSurprisesForCountries(countries);
   const newlyCreated: NewShockDetection[] = [];
 
+  const unshocked: RecentSurpriseRow[] = [];
   for (const surprise of surprises) {
-    if (await hasEventShockForRelease(symbol, surprise.id)) continue;
+    if (!(await hasEventShockForRelease(symbol, surprise.id))) unshocked.push(surprise);
+  }
 
-    let contribution: number | null = null;
-    let factorKey: string | null = null;
-    const category = indicatorCategory(surprise.indicatorKey);
+  const clamp = (v: number) => Math.max(-maxContribution, Math.min(maxContribution, v));
+  const createShock = async (sourceReleaseId: number, factorKey: string | null, contribution: number, importanceTier: RecentSurpriseRow["importanceTier"]) => {
+    await recordEventShock({ symbol, factorKey, sourceReleaseId, initialContribution: contribution, importanceTier });
+  };
 
-    if (category === "rateDecision" && surprise.forecast !== null) {
-      const generic = computeRateDecisionShock(surprise.actual, surprise.forecast);
-      contribution = polarityClass === "PreciousMetals" ? goldRateDecisionShock(generic) : generic;
-      factorKey = "interestRates";
-    } else if (surprise.surpriseZ !== null) {
-      if (polarityClass === "PreciousMetals") {
-        contribution = computeGoldSurpriseShock(surprise.indicatorKey, surprise.surpriseZ);
-        factorKey = category === "inflation" ? "inflation" : category === "growthLabor" ? "economicGrowth" : null;
-      } else if (polarityClass === "FX" && instrument.currencies) {
-        const baseCountry = CCY_TO_COUNTRY[instrument.currencies[0]];
-        contribution = computeFxRelativeSurpriseShockOneSided(surprise.surpriseZ, surprise.country === baseCountry);
-        factorKey = null; // relative-economics shocks apply to the total score, not one V1 factor slot
-      } else if (polarityClass === "EquityIndices") {
-        if (category === "inflation") {
-          contribution = computeIndicesInflationShock(surprise.surpriseZ);
-          factorKey = "inflation";
-        } else if (category === "growthLabor") {
-          contribution = computeIndicesGrowthShock(surprise.surpriseZ, regime);
-          factorKey = "economicGrowth";
-        }
-      } else if (polarityClass === "Crypto" && category === "growthLabor") {
-        contribution = computeCryptoGrowthLaborShock(surprise.surpriseZ);
-        factorKey = "economicGrowth";
-      }
+  // A rate decision (actual vs expected policy rate) is never part of a
+  // correlation composite and keeps its own dedicated dispatch, unchanged.
+  const rateDecisions = unshocked.filter((s) => indicatorCategory(s.indicatorKey) === "rateDecision" && s.forecast !== null);
+  for (const surprise of rateDecisions) {
+    const generic = computeRateDecisionShock(surprise.actual, surprise.forecast!);
+    const contribution = polarityClass === "PreciousMetals" ? goldRateDecisionShock(generic) : generic;
+    if (contribution === 0) continue;
+    const clamped = clamp(contribution);
+    await createShock(surprise.id, "interestRates", clamped, surprise.importanceTier);
+    newlyCreated.push({ factorKey: "interestRates", contribution: clamped, importanceTier: surprise.importanceTier });
+  }
+
+  // Everything else with a real surpriseZ (including, deliberately, a rate
+  // decision that had no forecast to compute a decision-specific shock
+  // from — same fallback behavior as before this refactor) is eligible for
+  // correlation grouping. Deduped to the single most-recent occurrence per
+  // indicator for grouping purposes — a rare second, older, still-unshocked
+  // release of the same indicator (a backlog case) falls through to the
+  // ungrouped per-surprise path below rather than being silently dropped.
+  const rateDecisionHandledIds = new Set(rateDecisions.map((s) => s.id));
+  const genericCandidates = unshocked.filter((s) => !rateDecisionHandledIds.has(s.id) && s.surpriseZ !== null);
+  const representativeByIndicator = new Map<string, RecentSurpriseRow>();
+  const extraDuplicates: RecentSurpriseRow[] = [];
+  for (const s of genericCandidates) {
+    if (representativeByIndicator.has(s.indicatorKey)) extraDuplicates.push(s);
+    else representativeByIndicator.set(s.indicatorKey, s);
+  }
+
+  const { grouped, ungrouped } = groupCorrelatedSignals(Array.from(representativeByIndicator.values()).map((s) => ({ indicatorKey: s.indicatorKey, effectiveSurpriseZ: s.surpriseZ! })));
+
+  for (const composite of grouped) {
+    const representative = representativeByIndicator.get(composite.members[0])!;
+    const { contribution, factorKey } = dispatchSurpriseShock(representative.indicatorKey, composite.effectiveSurpriseZ, representative.country, polarityClass, instrument, regime);
+    if (contribution !== null && contribution !== 0) {
+      const clamped = clamp(contribution);
+      await createShock(representative.id, factorKey, clamped, representative.importanceTier);
+      newlyCreated.push({ factorKey, contribution: clamped, importanceTier: representative.importanceTier });
     }
+    for (const memberKey of composite.members.slice(1)) {
+      const member = representativeByIndicator.get(memberKey)!;
+      await createShock(member.id, null, 0, member.importanceTier);
+    }
+  }
 
+  const ungroupedSingles = [...ungrouped.map((u) => representativeByIndicator.get(u.indicatorKey)!), ...extraDuplicates];
+  for (const surprise of ungroupedSingles) {
+    const { contribution, factorKey } = dispatchSurpriseShock(surprise.indicatorKey, surprise.surpriseZ!, surprise.country, polarityClass, instrument, regime);
     if (contribution === null || contribution === 0) continue;
-    const clamped = Math.max(-maxContribution, Math.min(maxContribution, contribution));
-    await recordEventShock({ symbol, factorKey, sourceReleaseId: surprise.id, initialContribution: clamped, importanceTier: surprise.importanceTier });
+    const clamped = clamp(contribution);
+    await createShock(surprise.id, factorKey, clamped, surprise.importanceTier);
     newlyCreated.push({ factorKey, contribution: clamped, importanceTier: surprise.importanceTier });
   }
 
