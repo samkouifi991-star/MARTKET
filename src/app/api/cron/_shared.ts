@@ -36,7 +36,47 @@ export function isDemoMode(): boolean {
   return DATA_MODE === "demo";
 }
 
-type JobResult = { symbol?: string; ok: boolean; error?: string };
+export type IngestionErrorCode = "RATE_LIMITED" | "PLAN_BLOCKED" | "AUTH" | "PROVIDER" | "DB_WRITE_FAILED" | "UNSUPPORTED_GRANULARITY" | "SUCCESS";
+
+type JobResult = { symbol?: string; ok: boolean; error?: string; code: IngestionErrorCode };
+
+// Ingestion diagnostic (production-freshness incident) — classifies a raw
+// error string (from either a provider Provenance.error or a DB write
+// failure) into the exact buckets requested for the recovery report,
+// instead of collapsing every failure into one generic "unavailable"/
+// "error" bucket. Pattern-matched against the specific, already-existing
+// error message text each provider module produces (fmp.ts's
+// rateLimitMessage/plan-limited text, oanda-market-data.ts's raw HTTP
+// status text) — no provider module changed, this only reads what they
+// already say. dbWrite() below is what actually produces the
+// DB_WRITE_FAILED prefix; everything else here is provider/fetch-side.
+export function classifyIngestionError(rawMessage: string | undefined): IngestionErrorCode {
+  if (!rawMessage) return "SUCCESS";
+  const msg = rawMessage.toLowerCase();
+  if (msg.startsWith("db_write_failed:")) return "DB_WRITE_FAILED";
+  if (msg.includes("429") || msg.includes("rate limit") || msg.includes("too many requests")) return "RATE_LIMITED";
+  if (msg.includes("402") || msg.includes("payment required") || msg.includes("plan does not include") || msg.includes("provider plan")) return "PLAN_BLOCKED";
+  if (msg.includes("401") || msg.includes("unauthorized") || msg.includes("invalid api key") || msg.includes("invalid token") || msg.includes("not configured")) return "AUTH";
+  if ((msg.includes("no confirmed") && (msg.includes("h1") || msg.includes("h4") || msg.includes("intraday") || msg.includes("granularity"))) || msg.includes("unsupported granularity")) {
+    return "UNSUPPORTED_GRANULARITY";
+  }
+  if (/\b5\d\d\b/.test(msg) || msg.includes("fetch failed") || msg.includes("request failed") || msg.includes("econnreset") || msg.includes("timeout")) return "PROVIDER";
+  return "PROVIDER";
+}
+
+/** Wraps a DB write so a failure there is distinguishable from a provider
+ * fetch failure in the same per-symbol closure — both currently land in
+ * the same try/catch (fetch-then-write), so without this a Neon error and
+ * an OANDA/FMP error look identical in the JobResult. Never changes
+ * whether the symbol counts as failed, only what the error says. */
+export async function dbWrite<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`DB_WRITE_FAILED: ${message}`);
+  }
+}
 
 export async function runJobForEachSymbol<T>(
   provider: string,
@@ -48,11 +88,12 @@ export async function runJobForEachSymbol<T>(
     const t0 = Date.now();
     try {
       await fn(symbol);
-      results.push({ symbol, ok: true });
+      results.push({ symbol, ok: true, code: "SUCCESS" });
       await recordProviderCheck({ provider, ok: true, latencyMs: Date.now() - t0 }).catch(() => {});
     } catch (err) {
-      results.push({ symbol, ok: false, error: err instanceof Error ? err.message : String(err) });
-      await recordProviderCheck({ provider, ok: false, latencyMs: Date.now() - t0, error: err instanceof Error ? err.message : String(err) }).catch(() => {});
+      const message = err instanceof Error ? err.message : String(err);
+      results.push({ symbol, ok: false, error: message, code: classifyIngestionError(message) });
+      await recordProviderCheck({ provider, ok: false, latencyMs: Date.now() - t0, error: message }).catch(() => {});
     }
   }
   const okCount = results.filter((r) => r.ok).length;

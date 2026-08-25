@@ -19,7 +19,7 @@ import { INSTRUMENTS } from "@/lib/instruments";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
 import { insertRetailSentiment } from "@/db/queries/market-data";
-import { demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronAuth } from "../_shared";
+import { dbWrite, demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronAuth } from "../_shared";
 
 export async function GET(req: NextRequest) {
   if (!verifyCronAuth(req)) return unauthorized();
@@ -33,15 +33,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ job: "retail-sentiment", okCount: 0, failCount: 0, note: "No instruments have retail-sentiment coverage yet" });
   }
 
-  const { okCount, failCount } = await runJobForEachSymbol("retail-sentiment", symbols, async (symbol) => {
+  const t0 = Date.now();
+  const providerBySymbol: Record<string, string> = {};
+  const { results, okCount, failCount } = await runJobForEachSymbol("retail-sentiment", symbols, async (symbol) => {
     const sentiment = await retailSentiment.getRetailSentiment(symbol);
     if (!sentiment.value) throw new Error(sentiment.error ?? "Retail sentiment unavailable");
+    providerBySymbol[symbol] = sentiment.provider;
     // Store the real status the provider reported (currently always "live"
     // for Myfxbook/IG — neither has an intrinsic staleness concept — but
     // this stays correct if a future provider adds one), not a hardcoded
     // "live" regardless of what actually came back.
-    await insertRetailSentiment(symbol, sentiment.value.pctLong, sentiment.value.pctShort, sentiment.status, sentiment.provider, sentiment.source, sentiment.sourceUpdatedAt);
+    await dbWrite(() => insertRetailSentiment(symbol, sentiment.value!.pctLong, sentiment.value!.pctShort, sentiment.status, sentiment.provider, sentiment.source, sentiment.sourceUpdatedAt));
   });
 
-  return NextResponse.json({ job: "retail-sentiment", okCount, failCount });
+  return NextResponse.json({
+    job: "retail-sentiment",
+    okCount,
+    failCount,
+    durationMs: Date.now() - t0,
+    rowsWritten: okCount,
+    results: results.map((r) => ({ ...r, provider: providerBySymbol[r.symbol!] ?? null })),
+  });
 }

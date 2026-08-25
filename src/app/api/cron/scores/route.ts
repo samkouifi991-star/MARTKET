@@ -17,11 +17,13 @@ import { INSTRUMENTS } from "@/lib/instruments";
 import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";
 import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
 import { DATA_MODE } from "@/services/data-mode";
-import { demoModeSkip, isDemoMode, unauthorized, verifyCronAuth } from "../_shared";
+import { classifyIngestionError, demoModeSkip, isDemoMode, unauthorized, verifyCronAuth } from "../_shared";
 
 export async function GET(req: NextRequest) {
   if (!verifyCronAuth(req)) return unauthorized();
   if (isDemoMode()) return demoModeSkip();
+
+  const t0 = Date.now();
 
   // Resolved once for the whole run — every instrument this cron scores
   // shares one consistent snapshot of the active Admin-configured weights/
@@ -31,7 +33,7 @@ export async function GET(req: NextRequest) {
 
   let okCount = 0;
   let failCount = 0;
-  const failures: { symbol: string; error: string }[] = [];
+  const failures: { symbol: string; error: string; code: ReturnType<typeof classifyIngestionError> }[] = [];
 
   for (const instrument of INSTRUMENTS) {
     try {
@@ -39,9 +41,10 @@ export async function GET(req: NextRequest) {
       okCount++;
     } catch (err) {
       failCount++;
-      failures.push({ symbol: instrument.symbol, error: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      failures.push({ symbol: instrument.symbol, error: message, code: classifyIngestionError(message) });
     }
   }
 
-  return NextResponse.json({ job: "scores", okCount, failCount, failures });
+  return NextResponse.json({ job: "scores", okCount, failCount, durationMs: Date.now() - t0, rowsWritten: okCount, failures });
 }

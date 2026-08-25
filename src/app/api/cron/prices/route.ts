@@ -6,22 +6,35 @@ import { NextRequest, NextResponse } from "next/server";
 import { INSTRUMENTS } from "@/lib/instruments";
 import * as marketData from "@/services/market-data/market-data-router";
 import { upsertMarketPrice } from "@/db/queries/market-data";
-import { demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronAuth } from "../_shared";
+import { dbWrite, demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronAuth } from "../_shared";
 
 export async function GET(req: NextRequest) {
   if (!verifyCronAuth(req)) return unauthorized();
   if (isDemoMode()) return demoModeSkip();
+
+  const t0 = Date.now();
+  // Per-symbol provider actually used (OANDA vs FMP) — diagnostic only,
+  // never read by anything downstream.
+  const providerBySymbol: Record<string, string> = {};
 
   // Health-tracking key stays "fmp:quote" (unchanged) — gbpusd-validation.ts's
   // admin page reads provider_health by this exact literal key; it names the
   // quote-fetching job, not literally "always FMP" (the job itself now
   // routes per-symbol, see market-data-router.ts). Renaming it is a
   // separate, deliberate change, not a side effect of this one.
-  const { okCount, failCount } = await runJobForEachSymbol("fmp:quote", INSTRUMENTS.map((i) => i.symbol), async (symbol) => {
+  const { results, okCount, failCount } = await runJobForEachSymbol("fmp:quote", INSTRUMENTS.map((i) => i.symbol), async (symbol) => {
     const quote = await marketData.getQuote(symbol);
     if (quote.status !== "live" || !quote.value) throw new Error(quote.error ?? "quote unavailable");
-    await upsertMarketPrice(symbol, quote.value, quote.provider);
+    providerBySymbol[symbol] = quote.provider;
+    await dbWrite(() => upsertMarketPrice(symbol, quote.value!, quote.provider));
   });
 
-  return NextResponse.json({ job: "prices", okCount, failCount });
+  return NextResponse.json({
+    job: "prices",
+    okCount,
+    failCount,
+    durationMs: Date.now() - t0,
+    rowsWritten: okCount, // 1 upserted price row per successful symbol
+    results: results.map((r) => ({ ...r, provider: providerBySymbol[r.symbol!] ?? null })),
+  });
 }
