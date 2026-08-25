@@ -5,13 +5,15 @@
 // they share a vendor. Nothing outside this file should construct an OANDA
 // pricing/candles URL.
 //
-// VERIFY BEFORE LIVE: this sandbox cannot reach api-fxpractice.oanda.com,
-// so the response shapes below are this project's best-documented
-// understanding of OANDA v20's Pricing and Candles endpoints
-// (developer.oanda.com), not an independently confirmed live response —
-// same caveat already applied to retail-sentiment/oanda.ts and myfxbook.ts.
-// scripts/oanda-fx-market-data-verify.ts is the controlled first real test;
-// correct the field names below if a real response doesn't match.
+// Wired into the live pipeline as the primary provider for the 10
+// configured FX pairs (see market-data-router.ts), FMP as fallback. The
+// response shapes below matched a real, independently confirmed
+// production OANDA v20 response the first time this module ran in
+// production — scripts/oanda-fx-market-data-verify.ts was the controlled
+// first real test before that promotion; this sandbox itself still
+// cannot reach api-fxpractice.oanda.com directly, so any further field-
+// shape questions must be verified against real production behavior
+// (see the ingestion-diagnostic GitHub Actions workflow), not guessed.
 //
 // Endpoints used:
 //   GET /v3/instruments/{instrument}/candles?granularity=D|H1|H4 — candles.
@@ -21,10 +23,6 @@
 //     what a specific account is actually quoted); requires
 //     OANDA_ACCOUNT_ID. If unset, getQuote reports unavailable but the
 //     candle functions below keep working independently.
-//
-// Not wired into the live pipeline yet — see
-// scripts/oanda-fx-market-data-verify.ts for the controlled coverage test
-// this module exists to support before any promotion decision.
 import { getSymbolMapping } from "./symbol-map";
 import { errorResult, NormalizedCandle, NormalizedQuote, Provenance, unavailable } from "../types";
 
