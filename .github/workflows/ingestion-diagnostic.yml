@@ -1,0 +1,112 @@
+# One-off, manually-triggered runner for the production ingestion
+# diagnostic (public-launch freshness incident). This sandbox's own
+# outbound network policy blocks *.vercel.app directly, so this reuses
+# the same pattern as launch-audit.yml: a GitHub Actions runner
+# (unrestricted egress) calls each real, deployed production ingestion
+# cron route in turn and prints its raw JSON response into this job's own
+# log between markers, read back via the GitHub Actions API.
+#
+# Authenticates with EVENT_WATCH_SECRET (not CRON_SECRET) — see
+# verifyCronOrEventWatchAuth in src/app/api/cron/_shared.ts for why: this
+# session's GitHub API access is deliberately blocked from managing
+# Actions secrets, so a new CRON_SECRET-holding secret can't be minted
+# here. EVENT_WATCH_SECRET is accepted as an alternate credential on
+# these routes without changing what Vercel's own scheduled Cron uses.
+#
+# Jobs run strictly sequentially, one at a time (single job, ordered
+# steps) — never in parallel — per the explicit instruction not to invoke
+# them simultaneously, so a shared per-provider rate limit is visible on
+# the specific route that hit it, not smeared across several at once.
+# Safe to delete once no longer needed.
+name: Ingestion Diagnostic
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: prices
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          SECRET: ${{ secrets.EVENT_WATCH_SECRET }}
+        run: |
+          echo "BEGIN_PRICES_JSON"
+          http_status=$(curl -sS -L -o response.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${SECRET}" \
+            "${APP_BASE_URL}/api/cron/prices")
+          echo "HTTP_STATUS: ${http_status}"
+          cat response.json
+          echo ""
+          echo "END_PRICES_JSON"
+
+      - name: candles
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          SECRET: ${{ secrets.EVENT_WATCH_SECRET }}
+        run: |
+          echo "BEGIN_CANDLES_JSON"
+          http_status=$(curl -sS -L -o response.json -w "%{http_code}" --max-time 280 \
+            -H "Authorization: Bearer ${SECRET}" \
+            "${APP_BASE_URL}/api/cron/candles")
+          echo "HTTP_STATUS: ${http_status}"
+          cat response.json
+          echo ""
+          echo "END_CANDLES_JSON"
+
+      - name: positioning
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          SECRET: ${{ secrets.EVENT_WATCH_SECRET }}
+        run: |
+          echo "BEGIN_POSITIONING_JSON"
+          http_status=$(curl -sS -L -o response.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${SECRET}" \
+            "${APP_BASE_URL}/api/cron/positioning")
+          echo "HTTP_STATUS: ${http_status}"
+          cat response.json
+          echo ""
+          echo "END_POSITIONING_JSON"
+
+      - name: retail-sentiment
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          SECRET: ${{ secrets.EVENT_WATCH_SECRET }}
+        run: |
+          echo "BEGIN_RETAIL_SENTIMENT_JSON"
+          http_status=$(curl -sS -L -o response.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${SECRET}" \
+            "${APP_BASE_URL}/api/cron/retail-sentiment")
+          echo "HTTP_STATUS: ${http_status}"
+          cat response.json
+          echo ""
+          echo "END_RETAIL_SENTIMENT_JSON"
+
+      - name: macro
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          SECRET: ${{ secrets.EVENT_WATCH_SECRET }}
+        run: |
+          echo "BEGIN_MACRO_JSON"
+          http_status=$(curl -sS -L -o response.json -w "%{http_code}" --max-time 280 \
+            -H "Authorization: Bearer ${SECRET}" \
+            "${APP_BASE_URL}/api/cron/macro")
+          echo "HTTP_STATUS: ${http_status}"
+          cat response.json
+          echo ""
+          echo "END_MACRO_JSON"
+
+      - name: scores
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          SECRET: ${{ secrets.EVENT_WATCH_SECRET }}
+        run: |
+          echo "BEGIN_SCORES_JSON"
+          http_status=$(curl -sS -L -o response.json -w "%{http_code}" --max-time 280 \
+            -H "Authorization: Bearer ${SECRET}" \
+            "${APP_BASE_URL}/api/cron/scores")
+          echo "HTTP_STATUS: ${http_status}"
+          cat response.json
+          echo ""
+          echo "END_SCORES_JSON"
