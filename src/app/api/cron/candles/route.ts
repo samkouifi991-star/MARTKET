@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { INSTRUMENTS } from "@/lib/instruments";
 import * as marketData from "@/services/market-data/market-data-router";
 import { upsertCandles } from "@/db/queries/market-data";
-import { dbWrite, demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronOrEventWatchAuth } from "../_shared";
+import { dbWrite, demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronAuth } from "../_shared";
 
 // Ingestion diagnostic (production-freshness incident, H1/H4 trace): for
 // each granularity, records per-symbol provider used and candle-row count
@@ -45,7 +45,7 @@ async function runGranularity(
 }
 
 export async function GET(req: NextRequest) {
-  if (!verifyCronOrEventWatchAuth(req)) return unauthorized();
+  if (!verifyCronAuth(req)) return unauthorized();
   if (isDemoMode()) return demoModeSkip();
 
   const symbols = INSTRUMENTS.map((i) => i.symbol);

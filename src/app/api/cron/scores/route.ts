@@ -17,10 +17,10 @@ import { INSTRUMENTS } from "@/lib/instruments";
 import { computeLiveMarketScore } from "@/lib/pipeline/scoring-engine";
 import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
 import { DATA_MODE } from "@/services/data-mode";
-import { classifyIngestionError, demoModeSkip, isDemoMode, unauthorized, verifyCronOrEventWatchAuth } from "../_shared";
+import { classifyIngestionError, demoModeSkip, isDemoMode, unauthorized, verifyCronAuth } from "../_shared";
 
 export async function GET(req: NextRequest) {
-  if (!verifyCronOrEventWatchAuth(req)) return unauthorized();
+  if (!verifyCronAuth(req)) return unauthorized();
   if (isDemoMode()) return demoModeSkip();
 
   const t0 = Date.now();

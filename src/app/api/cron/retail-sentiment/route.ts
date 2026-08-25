@@ -19,10 +19,10 @@ import { INSTRUMENTS } from "@/lib/instruments";
 import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import * as retailSentiment from "@/services/market-data/retail-sentiment";
 import { insertRetailSentiment } from "@/db/queries/market-data";
-import { dbWrite, demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronOrEventWatchAuth } from "../_shared";
+import { dbWrite, demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronAuth } from "../_shared";
 
 export async function GET(req: NextRequest) {
-  if (!verifyCronOrEventWatchAuth(req)) return unauthorized();
+  if (!verifyCronAuth(req)) return unauthorized();
   if (isDemoMode()) return demoModeSkip();
 
   const symbols = INSTRUMENTS.filter((i) => {
