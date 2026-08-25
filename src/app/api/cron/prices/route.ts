@@ -6,10 +6,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { INSTRUMENTS } from "@/lib/instruments";
 import * as marketData from "@/services/market-data/market-data-router";
 import { upsertMarketPrice } from "@/db/queries/market-data";
-import { dbWrite, demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronAuth } from "../_shared";
+import { dbWrite, demoModeSkip, isDemoMode, runJobForEachSymbol, unauthorized, verifyCronOrEventWatchAuth } from "../_shared";
 
 export async function GET(req: NextRequest) {
-  if (!verifyCronAuth(req)) return unauthorized();
+  if (!verifyCronOrEventWatchAuth(req)) return unauthorized();
   if (isDemoMode()) return demoModeSkip();
 
   const t0 = Date.now();

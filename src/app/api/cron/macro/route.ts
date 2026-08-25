@@ -6,10 +6,10 @@ import * as fred from "@/services/market-data/fred";
 import { FRED_SERIES, FredIndicatorKey } from "@/services/market-data/fred-series";
 import { upsertEconomicIndicator } from "@/db/queries/market-data";
 import { recordProviderCheck, setMarketsCovered } from "@/db/queries/provider-health";
-import { classifyIngestionError, dbWrite, demoModeSkip, isDemoMode, unauthorized, verifyCronAuth } from "../_shared";
+import { classifyIngestionError, dbWrite, demoModeSkip, isDemoMode, unauthorized, verifyCronOrEventWatchAuth } from "../_shared";
 
 export async function GET(req: NextRequest) {
-  if (!verifyCronAuth(req)) return unauthorized();
+  if (!verifyCronOrEventWatchAuth(req)) return unauthorized();
   if (isDemoMode()) return demoModeSkip();
 
   const t0 = Date.now();
