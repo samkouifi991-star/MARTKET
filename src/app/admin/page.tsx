@@ -114,6 +114,18 @@ export default async function AdminPage() {
       </Card>
 
       <Card
+        title="Incoming Data (Zapier)"
+        subtitle="Every economic-release/news call the email → Zapier → webhook pipeline has received"
+        action={<Link href="/admin/incoming-data" className="text-xs text-(--accent) hover:underline">Open →</Link>}
+      >
+        <p className="text-sm text-(--text-faint)">
+          {DATA_MODE === "demo"
+            ? "Becomes callable once DATA_MODE is set to hybrid or live."
+            : "Shows what Zapier actually sent — accepted, deduped, or rejected — for troubleshooting the Forex Factory email ingestion replacing FMP's economic calendar/news."}
+        </p>
+      </Card>
+
+      <Card
         title="GBPUSD dependency-chain validation"
         subtitle="Live reference market — every provider/dataset behind the GBPUSD score, checked individually"
         action={<Link href="/admin/gbpusd-validation" className="text-xs text-(--accent) hover:underline">Open validation page →</Link>}

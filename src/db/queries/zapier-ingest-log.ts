@@ -50,6 +50,11 @@ export type ZapierIngestLogRow = {
   newsArticleId: number | null;
   recomputedMarkets: string[];
   errorDetail: string | null;
+  // The exact body Zapier sent — the Admin Incoming Data page reads
+  // event/headline/currency/impact straight from this rather than
+  // joining economic_events/news_articles, since the log already carries
+  // everything those columns would show.
+  rawPayload: unknown;
 };
 
 export async function getRecentZapierIngestLog(limit = 100): Promise<ZapierIngestLogRow[]> {
@@ -65,6 +70,7 @@ export async function getRecentZapierIngestLog(limit = 100): Promise<ZapierInges
     newsArticleId: r.newsArticleId,
     recomputedMarkets: r.recomputedMarkets,
     errorDetail: r.errorDetail,
+    rawPayload: r.rawPayload,
   }));
 }
 
