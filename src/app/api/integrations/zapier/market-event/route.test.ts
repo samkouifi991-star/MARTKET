@@ -5,16 +5,20 @@ vi.mock("@/lib/scoring-v2/recompute");
 vi.mock("@/db/queries/market-data");
 vi.mock("@/db/queries/zapier-ingest-log");
 vi.mock("@/db/queries/rate-limit");
+vi.mock("@/db/queries/economic-releases");
+vi.mock("@/lib/engines/llm-news-classifier");
 vi.mock("../../../cron/_shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../cron/_shared")>();
   return { ...actual, isDemoMode: vi.fn(() => false) };
 });
 
 import { processReleases } from "@/lib/scoring-v2/release-watch";
-import { recomputeAffectedMarketsForCountries } from "@/lib/scoring-v2/recompute";
-import { upsertEconomicEventFromZapier } from "@/db/queries/market-data";
+import { recomputeAffectedMarketsForCountries, recomputeSymbols } from "@/lib/scoring-v2/recompute";
+import { upsertEconomicEventFromZapier, insertNewsArticleFromZapier, updateNewsArticleClassification } from "@/db/queries/market-data";
 import { logZapierIngest } from "@/db/queries/zapier-ingest-log";
 import { recordAuthAttempt } from "@/db/queries/rate-limit";
+import { recordEventShock } from "@/db/queries/economic-releases";
+import { classifyNewsWithLLM } from "@/lib/engines/llm-news-classifier";
 import { isDemoMode } from "../../../cron/_shared";
 import { NextRequest } from "next/server";
 import { POST } from "./route";
@@ -36,6 +40,14 @@ const economicEventPayload = {
   previous: "0.1%",
 };
 
+const newsPayload = {
+  type: "news",
+  headline: "Fed signals rates may remain higher for longer",
+  summary: "The Fed hinted at extended tightening.",
+  source: "ForexFactory",
+  publishedAt: "2027-01-15T13:30:00.000Z",
+};
+
 describe("POST /api/integrations/zapier/market-event", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -52,6 +64,21 @@ describe("POST /api/integrations/zapier/market-event", () => {
       failCount: 0,
     });
     vi.mocked(recomputeAffectedMarketsForCountries).mockResolvedValue(["EURUSD", "GBPUSD"]);
+    vi.mocked(insertNewsArticleFromZapier).mockResolvedValue(7);
+    vi.mocked(updateNewsArticleClassification).mockResolvedValue(undefined);
+    vi.mocked(recordEventShock).mockResolvedValue(undefined);
+    vi.mocked(recomputeSymbols).mockResolvedValue(["EURUSD"]);
+    vi.mocked(classifyNewsWithLLM).mockResolvedValue({
+      affectedMarkets: ["EURUSD"],
+      interpretation: "Bullish",
+      importance: 80,
+      confidence: 80,
+      geopoliticalRelevance: 10,
+      monetaryPolicyRelevance: 80,
+      riskSentiment: "RiskOff",
+      reason: "Fed hinted at tightening per headline.",
+      model: "claude-opus-5",
+    });
   });
 
   it("rejects a request with no bearer token, touching neither the DB nor rate limiter", async () => {
@@ -122,5 +149,59 @@ describe("POST /api/integrations/zapier/market-event", () => {
     const res = await POST(req(economicEventPayload, { secret: "test-zapier-secret" }));
     expect(res.status).toBe(200);
     expect(recomputeAffectedMarketsForCountries).not.toHaveBeenCalled();
+  });
+
+  describe("news payloads", () => {
+    it("dry-run: classifies but writes nothing", async () => {
+      const res = await POST(req(newsPayload, { secret: "test-zapier-secret", dryRun: true }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.dryRun).toBe(true);
+      expect(insertNewsArticleFromZapier).not.toHaveBeenCalled();
+      expect(classifyNewsWithLLM).toHaveBeenCalled();
+    });
+
+    it("classifies and records a shock for high-relevance news with affected markets", async () => {
+      const res = await POST(req(newsPayload, { secret: "test-zapier-secret" }));
+      expect(res.status).toBe(200);
+      expect(insertNewsArticleFromZapier).toHaveBeenCalled();
+      expect(updateNewsArticleClassification).toHaveBeenCalledWith(7, expect.objectContaining({ classifierModel: "claude-opus-5" }));
+      expect(recordEventShock).toHaveBeenCalledWith(expect.objectContaining({ symbol: "EURUSD", sourceReleaseId: null, factorKey: null }));
+      const body = await res.json();
+      expect(body.recomputedMarkets).toEqual(["EURUSD"]);
+    });
+
+    it("skips classification entirely for a duplicate delivery (cost control)", async () => {
+      vi.mocked(insertNewsArticleFromZapier).mockResolvedValue(null);
+      const res = await POST(req(newsPayload, { secret: "test-zapier-secret" }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.duplicate).toBe(true);
+      expect(classifyNewsWithLLM).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the keyword classifier when the LLM throws, and records classifierModel:null", async () => {
+      vi.mocked(classifyNewsWithLLM).mockRejectedValue(new Error("API down"));
+      const res = await POST(req(newsPayload, { secret: "test-zapier-secret" }));
+      expect(res.status).toBe(200);
+      expect(updateNewsArticleClassification).toHaveBeenCalledWith(7, expect.objectContaining({ classifierModel: null }));
+    });
+
+    it("never records a shock for low-relevance news", async () => {
+      vi.mocked(classifyNewsWithLLM).mockResolvedValue({
+        affectedMarkets: ["EURUSD"],
+        interpretation: "Bullish",
+        importance: 50,
+        confidence: 50,
+        geopoliticalRelevance: 5,
+        monetaryPolicyRelevance: 5,
+        riskSentiment: "Neutral",
+        reason: "Low relevance",
+        model: "claude-opus-5",
+      });
+      const res = await POST(req(newsPayload, { secret: "test-zapier-secret" }));
+      expect(res.status).toBe(200);
+      expect(recordEventShock).not.toHaveBeenCalled();
+    });
   });
 });
