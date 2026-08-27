@@ -26,7 +26,10 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 // via a URL query param instead of a session — see that page's own header
 // comment. Never linked from the product UI.
 const PUBLIC_EXACT = new Set(["/", "/signup", "/signin", "/pricing"]);
-const PUBLIC_PREFIXES = ["/legal", "/api/webhooks/", "/api/cron/", "/api/watch/", "/diagnostics/"];
+// /api/integrations/ is the same shape as /api/webhooks/ — the Zapier
+// ingestion webhook authenticates via its own ZAPIER_INGEST_SECRET
+// (app/api/integrations/_shared.ts), never a session.
+const PUBLIC_PREFIXES = ["/legal", "/api/webhooks/", "/api/cron/", "/api/watch/", "/api/integrations/", "/diagnostics/"];
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_EXACT.has(pathname)) return true;

@@ -62,7 +62,8 @@
     "react-dom": "19.2.4",
     "recharts": "^3.10.1",
     "server-only": "^0.0.1",
-    "stripe": "^22.5.0"
+    "stripe": "^22.5.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -115,6 +115,79 @@ export async function upsertEconomicEvent(event: NormalizedEconomicEvent, affect
     });
 }
 
+export type ZapierEconomicEventInput = {
+  externalId: string; // same value passed as EconomicRelease.id into processReleases, so its enrichment join lands on this row
+  country: string; // short code (CCY_TO_COUNTRY space, e.g. "US") when resolved, else the raw currency string
+  event: string;
+  dateTime: string; // ISO
+  impact: "Low" | "Medium" | "High" | null;
+  actual: { raw: string | null; value: number | null };
+  previous: { raw: string | null; value: number | null };
+  forecast: { raw: string | null; value: number | null };
+  revisedPrevious: { raw: string | null; value: number | null };
+  indicatorKey: EconomicIndicatorKey | null;
+  importanceTier: "HIGH" | "MEDIUM" | "LOW" | null;
+  category: string;
+  affectedMarkets: string[];
+};
+
+/** The Zapier ingestion pipeline's writer of the base economic_events row
+ * — replaces the FMP calendar cron's upsertEconomicEvent as primary
+ * writer for newly-arriving releases (that cron's own call site and
+ * behavior are untouched, so a rollback needs no code changes beyond
+ * re-enabling its cron schedule). Always writes the row, even when
+ * indicatorKey couldn't be classified (category stays "other",
+ * processingStatus "unclassified") — every incoming release is visible
+ * in the Calendar/Admin UI whether or not it's ever surprise-scored.
+ * receivedAt is set only in the insert values, never in the conflict-
+ * update set, so it survives revisions as the true first-seen time. */
+export async function upsertEconomicEventFromZapier(input: ZapierEconomicEventInput): Promise<number> {
+  const db = getDb();
+  const rows = await db
+    .insert(economicEvents)
+    .values({
+      externalId: input.externalId,
+      country: input.country,
+      event: input.event,
+      dateTime: new Date(input.dateTime),
+      impact: input.impact,
+      actual: input.actual.value,
+      previous: input.previous.value,
+      forecast: input.forecast.value,
+      actualRaw: input.actual.raw,
+      previousRaw: input.previous.raw,
+      forecastRaw: input.forecast.raw,
+      revisedPrevious: input.revisedPrevious.value,
+      revisedPreviousRaw: input.revisedPrevious.raw,
+      indicatorKey: input.indicatorKey,
+      importanceTier: input.importanceTier,
+      category: input.category,
+      processingStatus: input.indicatorKey ? "classified" : "unclassified",
+      provider: "zapier-forexfactory",
+      affectedMarkets: input.affectedMarkets,
+      receivedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: economicEvents.externalId,
+      set: {
+        actual: input.actual.value,
+        previous: input.previous.value,
+        forecast: input.forecast.value,
+        actualRaw: input.actual.raw,
+        previousRaw: input.previous.raw,
+        forecastRaw: input.forecast.raw,
+        revisedPrevious: input.revisedPrevious.value,
+        revisedPreviousRaw: input.revisedPrevious.raw,
+        impact: input.impact,
+        category: input.category,
+        processingStatus: input.indicatorKey ? "classified" : "unclassified",
+        fetchedAt: new Date(),
+      },
+    })
+    .returning({ id: economicEvents.id });
+  return rows[0].id;
+}
+
 /** Backfills the V2-only classification columns (indicatorKey,
  * importanceTier, revisedPrevious) onto an already-upserted economic_events
  * row — kept as its own function, separate from upsertEconomicEvent above,
@@ -174,6 +247,76 @@ export async function insertNewsArticle(article: NormalizedNewsArticle, analysis
       reason: analysis.reason,
     })
     .onConflictDoNothing({ target: newsArticles.url });
+}
+
+/** The Zapier ingestion pipeline's news writer. Inserted BEFORE
+ * classification runs, with a placeholder interpretation/importance/
+ * confidence/reason — updateNewsArticleClassification fills in the real
+ * values once classifyNewsWithLLM (or its keyword fallback) returns.
+ * Returns null on a duplicate delivery (onConflictDoNothing on
+ * dedupKey), so callers can skip the classification call entirely for a
+ * cost-control win on Zapier retries. */
+export async function insertNewsArticleFromZapier(article: {
+  headline: string;
+  source: string;
+  url: string | null;
+  publishedAt: string;
+  dedupKey: string;
+}): Promise<number | null> {
+  const db = getDb();
+  const rows = await db
+    .insert(newsArticles)
+    .values({
+      headline: article.headline,
+      source: article.source,
+      url: article.url,
+      publishedAt: new Date(article.publishedAt),
+      affectedMarkets: [],
+      interpretation: "Unclear",
+      importance: 0,
+      confidence: 0,
+      reason: "Awaiting classification.",
+      provider: "zapier-forexfactory",
+      dedupKey: article.dedupKey,
+    })
+    .onConflictDoNothing({ target: newsArticles.dedupKey })
+    .returning({ id: newsArticles.id });
+  return rows[0]?.id ?? null;
+}
+
+/** Fills in the real classification (LLM or keyword-fallback) onto a row
+ * insertNewsArticleFromZapier already created. classifierModel is null
+ * when the keyword fallback ran (LLM unavailable/errored) — kept visible
+ * on the Admin Incoming Data page. */
+export async function updateNewsArticleClassification(
+  id: number,
+  classification: {
+    affectedMarkets: string[];
+    interpretation: string;
+    importance: number;
+    confidence: number;
+    reason: string;
+    geopoliticalRelevance: number | null;
+    monetaryPolicyRelevance: number | null;
+    riskSentiment: string | null;
+    classifierModel: string | null;
+  }
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(newsArticles)
+    .set({
+      affectedMarkets: classification.affectedMarkets,
+      interpretation: classification.interpretation,
+      importance: classification.importance,
+      confidence: classification.confidence,
+      reason: classification.reason,
+      geopoliticalRelevance: classification.geopoliticalRelevance,
+      monetaryPolicyRelevance: classification.monetaryPolicyRelevance,
+      riskSentiment: classification.riskSentiment,
+      classifierModel: classification.classifierModel,
+    })
+    .where(eq(newsArticles.id, id));
 }
 
 export type StoredCalendarEvent = {
