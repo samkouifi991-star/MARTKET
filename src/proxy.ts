@@ -25,7 +25,7 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 // (app/diagnostics/**) that check their own EVENT_WATCH_SECRET/CRON_SECRET
 // via a URL query param instead of a session — see that page's own header
 // comment. Never linked from the product UI.
-const PUBLIC_EXACT = new Set(["/", "/signup", "/signin", "/pricing"]);
+const PUBLIC_EXACT = new Set(["/", "/signup", "/signin", "/pricing", "/features"]);
 // /api/integrations/ is the same shape as /api/webhooks/ — the Zapier
 // ingestion webhook authenticates via its own ZAPIER_INGEST_SECRET
 // (app/api/integrations/_shared.ts), never a session.

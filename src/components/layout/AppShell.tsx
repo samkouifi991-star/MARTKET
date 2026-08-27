@@ -14,7 +14,7 @@ export type SessionUser = { id: number; email: string; name: string | null };
 // Sidebar/Topbar. Kept as simple prefix matches (not a route group) so the
 // existing app pages didn't need to move on disk for this — see proxy.ts
 // for the equivalent public/protected split used for redirects.
-const MARKETING_PREFIXES = ["/signup", "/signin", "/pricing", "/legal", "/paywall"];
+const MARKETING_PREFIXES = ["/signup", "/signin", "/pricing", "/legal", "/paywall", "/features"];
 
 function isMarketingPath(pathname: string): boolean {
   return pathname === "/" || MARKETING_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

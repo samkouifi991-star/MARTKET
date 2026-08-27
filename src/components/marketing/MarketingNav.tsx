@@ -14,6 +14,7 @@ export function MarketingNav({ user }: { user: { email: string } | null }) {
 
         <nav className="hidden md:flex items-center gap-5 text-sm text-(--text-dim)">
           <Link href="/#product" className="hover:text-(--text)">Product</Link>
+          <Link href="/features" className="hover:text-(--text)">Features</Link>
           <Link href="/#how-it-works" className="hover:text-(--text)">How It Works</Link>
           <Link href="/#markets" className="hover:text-(--text)">Markets</Link>
           <Link href="/pricing" className="hover:text-(--text)">Pricing</Link>
