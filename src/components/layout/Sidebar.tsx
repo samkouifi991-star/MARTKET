@@ -19,6 +19,7 @@ import {
   Landmark,
   Coins,
   ArrowLeftRight,
+  Repeat,
   SlidersHorizontal,
   Newspaper,
   CalendarDays,
@@ -66,6 +67,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Economic Strength", href: "/economic-strength", icon: Coins },
       { label: "Economic Heatmap", href: "/economic-heatmap", icon: Grid3x3 },
+      { label: "Carry Trade Scanner", href: "/carry-trade", icon: Repeat },
       // Phase 18 (public-launch demo sweep): these 4 pages show composite
       // "surprise scores" per country (Economic Growth/Inflation/Labor) or
       // meeting-implied hike/hold/cut probabilities and central-bank
