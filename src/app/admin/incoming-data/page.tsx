@@ -94,6 +94,7 @@ export default async function IncomingDataPage() {
               <thead>
                 <tr className="text-left text-xs text-(--text-faint) border-b border-(--border)">
                   <th className="py-2 pr-3 font-medium">Received</th>
+                  <th className="py-2 pr-3 font-medium">Channel</th>
                   <th className="py-2 pr-3 font-medium">Type</th>
                   <th className="py-2 pr-3 font-medium">Source</th>
                   <th className="py-2 pr-3 font-medium">Event / Headline</th>
@@ -109,6 +110,7 @@ export default async function IncomingDataPage() {
                 {rows.map((row) => (
                   <tr key={row.id} className="border-b border-(--border) last:border-0 align-top">
                     <td className="py-2 pr-3 text-xs text-(--text-faint) whitespace-nowrap">{formatRelative(row.receivedAt)}</td>
+                    <td className="py-2 pr-3 text-xs">{row.channel === "manual" ? "Manual (Admin)" : "Zapier"}</td>
                     <td className="py-2 pr-3">{row.payloadType}</td>
                     <td className="py-2 pr-3 text-(--text-faint)">{rawField(row, "source")}</td>
                     <td className="py-2 pr-3 max-w-xs truncate" title={rawField(row, "event", "headline")}>

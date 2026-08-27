@@ -129,6 +129,9 @@ export type ZapierEconomicEventInput = {
   importanceTier: "HIGH" | "MEDIUM" | "LOW" | null;
   category: string;
   affectedMarkets: string[];
+  /** Display provenance only — "manual-admin" | "zapier-forexfactory" —
+   * independent of externalId's dedup identity (see release-identity.ts). */
+  provider: string;
 };
 
 /** The Zapier ingestion pipeline's writer of the base economic_events row
@@ -163,7 +166,7 @@ export async function upsertEconomicEventFromZapier(input: ZapierEconomicEventIn
       importanceTier: input.importanceTier,
       category: input.category,
       processingStatus: input.indicatorKey ? "classified" : "unclassified",
-      provider: "zapier-forexfactory",
+      provider: input.provider,
       affectedMarkets: input.affectedMarkets,
       receivedAt: new Date(),
     })
@@ -262,6 +265,8 @@ export async function insertNewsArticleFromZapier(article: {
   url: string | null;
   publishedAt: string;
   dedupKey: string;
+  /** Display provenance only — "manual-admin" | "zapier-forexfactory". */
+  provider: string;
 }): Promise<number | null> {
   const db = getDb();
   const rows = await db
@@ -276,7 +281,7 @@ export async function insertNewsArticleFromZapier(article: {
       importance: 0,
       confidence: 0,
       reason: "Awaiting classification.",
-      provider: "zapier-forexfactory",
+      provider: article.provider,
       dedupKey: article.dedupKey,
     })
     .onConflictDoNothing({ target: newsArticles.dedupKey })

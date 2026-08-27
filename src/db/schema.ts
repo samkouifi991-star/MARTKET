@@ -217,6 +217,12 @@ export const zapierIngestLog = pgTable(
     id: serial("id").primaryKey(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
     payloadType: varchar("payload_type", { length: 16 }).notNull(), // "economic_event" | "news" | "unknown"
+    // Which entry point actually submitted this — "manual" (Admin data-entry
+    // form) or "zapier" (the email/Zapier webhook). Both channels call the
+    // same canonical ingestion functions (src/lib/ingestion/); this column
+    // is provenance only, never used for dedup (see release-identity.ts's
+    // channel-agnostic provider namespace).
+    channel: varchar("channel", { length: 16 }).notNull().default("zapier"),
     rawPayload: jsonb("raw_payload").notNull(), // exact, unmodified body Zapier sent
     dedupKey: varchar("dedup_key", { length: 160 }), // releaseKey or news dedupKey; null if validation failed first
     outcome: varchar("outcome", { length: 24 }).notNull(),

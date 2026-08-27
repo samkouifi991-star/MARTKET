@@ -14,6 +14,15 @@
 // that remains V1's join key for economicEvents.externalId, untouched.
 import { EconomicIndicatorKey } from "./indicator-taxonomy";
 
+// Channel-agnostic dedup namespace for the manual-entry + email/Zapier
+// ingestion paths — deliberately NOT "zapier-forexfactory" (a channel name),
+// so a manually-entered release and a later Zapier-delivered revision of
+// the SAME real release resolve to the identical releaseKey/externalId and
+// UPDATE one row instead of creating a duplicate. Which channel actually
+// wrote a given row is tracked separately (economic_events.provider,
+// zapier_ingest_log.channel) — never folded into this identity key.
+export const FOREX_FACTORY_PROVIDER_NAMESPACE = "forex-factory";
+
 export function releaseKeyFor(provider: string, country: string, indicatorKey: EconomicIndicatorKey, releaseDateTimeISO: string): string {
   return `${provider}:${country}:${indicatorKey}:${releaseDateTimeISO}`;
 }

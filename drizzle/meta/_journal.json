@@ -71,6 +71,13 @@
       "when": 1787795636350,
       "tag": "0009_friendly_thena",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787848035798,
+      "tag": "0010_wonderful_the_executioner",
+      "breakpoints": true
     }
   ]
 }

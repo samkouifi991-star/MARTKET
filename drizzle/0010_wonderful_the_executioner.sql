@@ -1,0 +1,1 @@
+ALTER TABLE "zapier_ingest_log" ADD COLUMN "channel" varchar(16) DEFAULT 'zapier' NOT NULL;

@@ -22,6 +22,10 @@ export async function logZapierIngest(entry: {
   rawPayload: unknown;
   dedupKey: string | null;
   outcome: ZapierIngestOutcome;
+  /** Which entry point submitted this — "manual" (Admin data-entry form) or
+   * "zapier" (the email/Zapier webhook). Defaults to "zapier" since that
+   * was this log's only writer before manual entry existed. */
+  channel?: "manual" | "zapier";
   economicEventId?: number | null;
   newsArticleId?: number | null;
   recomputedMarkets?: string[];
@@ -30,6 +34,7 @@ export async function logZapierIngest(entry: {
   const db = getDb();
   await db.insert(zapierIngestLog).values({
     payloadType: entry.payloadType,
+    channel: entry.channel ?? "zapier",
     rawPayload: entry.rawPayload as object,
     dedupKey: entry.dedupKey,
     outcome: entry.outcome,
@@ -44,6 +49,7 @@ export type ZapierIngestLogRow = {
   id: number;
   receivedAt: string;
   payloadType: string;
+  channel: string;
   outcome: string;
   dedupKey: string | null;
   economicEventId: number | null;
@@ -64,6 +70,7 @@ export async function getRecentZapierIngestLog(limit = 100): Promise<ZapierInges
     id: r.id,
     receivedAt: r.receivedAt.toISOString(),
     payloadType: r.payloadType,
+    channel: r.channel,
     outcome: r.outcome,
     dedupKey: r.dedupKey,
     economicEventId: r.economicEventId,
