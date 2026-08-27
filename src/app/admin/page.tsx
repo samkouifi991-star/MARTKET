@@ -114,6 +114,18 @@ export default async function AdminPage() {
       </Card>
 
       <Card
+        title="Manual Data Entry"
+        subtitle="Hand-key a Forex Factory economic release or news event — same pipeline as the Zapier webhook"
+        action={<Link href="/admin/data-entry" className="text-xs text-(--accent) hover:underline">Open →</Link>}
+      >
+        <p className="text-sm text-(--text-faint)">
+          {DATA_MODE === "demo"
+            ? "Becomes callable once DATA_MODE is set to hybrid or live."
+            : "Validates, normalizes, calculates the economic surprise, and recomputes affected markets automatically — you never calculate the surprise yourself."}
+        </p>
+      </Card>
+
+      <Card
         title="Incoming Data (Zapier)"
         subtitle="Every economic-release/news call the email → Zapier → webhook pipeline has received"
         action={<Link href="/admin/incoming-data" className="text-xs text-(--accent) hover:underline">Open →</Link>}
