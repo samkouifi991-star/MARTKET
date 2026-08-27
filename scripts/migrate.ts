@@ -58,6 +58,8 @@ const EXPECTED_TABLES = [
   "scoring_integrity_errors",
   "economic_release_tracking",
   "economic_watch_diagnostics",
+  // Email/Zapier ingestion (replaces FMP economic-calendar/news deps).
+  "zapier_ingest_log",
 ];
 
 function describeError(err: unknown): string {

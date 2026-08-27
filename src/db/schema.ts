@@ -129,6 +129,30 @@ export const economicEvents = pgTable(
     indicatorKey: varchar("indicator_key", { length: 40 }),
     revisedPrevious: doublePrecision("revised_previous"),
     importanceTier: varchar("importance_tier", { length: 8 }), // "HIGH" | "MEDIUM" | "LOW" | null
+    // ---- Email/Zapier ingestion additions (nullable — never backfilled
+    // for old FMP-sourced rows). Raw strings preserve exactly what the
+    // source sent ("3.2%", "320K", "-15K") alongside the already-existing
+    // parsed numeric columns above, so a normalization bug is visibly
+    // diagnosable instead of silently lossy. See lib/normalization/
+    // numeric-string.ts.
+    actualRaw: varchar("actual_raw", { length: 32 }),
+    previousRaw: varchar("previous_raw", { length: 32 }),
+    forecastRaw: varchar("forecast_raw", { length: 32 }),
+    revisedPreviousRaw: varchar("revised_previous_raw", { length: 32 }),
+    // Broader DISPLAY-only categorizer (10 buckets) for the Calendar/Admin
+    // UI — deliberately separate from indicator-taxonomy.ts's 4-bucket
+    // indicatorCategory(), which feeds V2's scoring dispatch and must
+    // never change as part of this migration. See
+    // services/economic-calendar/display-category.ts.
+    category: varchar("category", { length: 24 }),
+    // "classified" once indicatorKey resolved, "unclassified" otherwise —
+    // an event with no taxonomy match is still stored (visible in
+    // Calendar/Admin) but never surprise-scored.
+    processingStatus: varchar("processing_status", { length: 16 }).notNull().default("unclassified"),
+    // Set only on first insert (excluded from the upsert's conflict-update
+    // set) so it survives revisions as the true first-seen time, distinct
+    // from fetchedAt (last-write time).
+    receivedAt: timestamp("received_at", { withTimezone: true }),
   },
   (t) => [
     index("economic_events_date_time").on(t.dateTime),
@@ -138,6 +162,8 @@ export const economicEvents = pgTable(
     // date_time index alone would mean a full-table scan filtered by
     // country+indicatorKey on every visit.
     index("economic_events_country_indicator_datetime").on(t.country, t.indicatorKey, t.dateTime),
+    // Backs the Admin Incoming Data page's most-recent-first listing.
+    index("economic_events_received_at").on(t.receivedAt),
   ]
 );
 
@@ -148,7 +174,11 @@ export const newsArticles = pgTable(
     id: serial("id").primaryKey(),
     headline: text("headline").notNull(),
     source: varchar("source", { length: 128 }).notNull(),
-    url: text("url").notNull().unique(),
+    // Nullable now — email-forwarded news (Zapier/Forex Factory) often has
+    // no canonical URL. Postgres allows multiple NULLs under UNIQUE, so
+    // real URLs still dedupe exactly as before; dedupKey below is the
+    // real dedup mechanism for URL-less rows.
+    url: text("url").unique(),
     publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
     affectedMarkets: jsonb("affected_markets").$type<string[]>().notNull().default([]),
     interpretation: varchar("interpretation", { length: 16 }).notNull(), // "Bullish" | "Bearish" | "Mixed" | "Neutral" | "Unclear"
@@ -158,8 +188,51 @@ export const newsArticles = pgTable(
     reason: text("reason").notNull(),
     provider: varchar("provider", { length: 32 }).notNull().default("fmp"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    // ---- Email/Zapier ingestion additions (nullable — never backfilled
+    // for legacy FMP rows) ----
+    // url ?? sha256(normalizedHeadline+source+publishedAt-rounded-to-minute)
+    // — see lib/normalization/dedup-key.ts. The real dedup key once url
+    // may be absent.
+    dedupKey: varchar("dedup_key", { length: 160 }).unique(),
+    geopoliticalRelevance: integer("geopolitical_relevance"), // 0-100, null = not LLM-classified
+    monetaryPolicyRelevance: integer("monetary_policy_relevance"), // 0-100
+    riskSentiment: varchar("risk_sentiment", { length: 16 }), // "RiskOn" | "RiskOff" | "Neutral" | null
+    // Which classifier actually produced interpretation/importance/
+    // confidence for this row — null means the legacy keyword heuristic
+    // (news-classifier.ts) ran, not the LLM. Auditable if the model/prompt
+    // version ever changes.
+    classifierModel: varchar("classifier_model", { length: 64 }),
   },
   (t) => [index("news_articles_published_at").on(t.publishedAt)]
+);
+
+// ---- Zapier ingestion audit log — one row per inbound call, including
+// rejected/invalid ones, so the email/Zapier integration is fully
+// traceable from the Admin "Incoming Data" page without needing to read
+// server logs. Never the source of truth for economic_events/newsArticles
+// themselves — those tables stay authoritative; this is provenance only.
+export const zapierIngestLog = pgTable(
+  "zapier_ingest_log",
+  {
+    id: serial("id").primaryKey(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    payloadType: varchar("payload_type", { length: 16 }).notNull(), // "economic_event" | "news" | "unknown"
+    rawPayload: jsonb("raw_payload").notNull(), // exact, unmodified body Zapier sent
+    dedupKey: varchar("dedup_key", { length: 160 }), // releaseKey or news dedupKey; null if validation failed first
+    outcome: varchar("outcome", { length: 24 }).notNull(),
+    // "accepted_new" | "accepted_duplicate" | "accepted_revision" |
+    // "accepted_unclassified" | "rejected_invalid_payload" |
+    // "rejected_unauthorized" | "rejected_rate_limited" | "dry_run" | "error"
+    economicEventId: integer("economic_event_id").references(() => economicEvents.id),
+    newsArticleId: integer("news_article_id").references(() => newsArticles.id),
+    recomputedMarkets: jsonb("recomputed_markets").$type<string[]>().notNull().default([]),
+    errorDetail: text("error_detail"),
+  },
+  (t) => [
+    index("zapier_ingest_log_received_at").on(t.receivedAt),
+    index("zapier_ingest_log_outcome").on(t.outcome),
+    index("zapier_ingest_log_dedup_key").on(t.dedupKey),
+  ]
 );
 
 // ---- Scoring configuration versions — the single source of truth for

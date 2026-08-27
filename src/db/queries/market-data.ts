@@ -237,13 +237,19 @@ export type StoredNewsArticle = {
   id: number;
   headline: string;
   source: string;
-  url: string;
+  url: string | null; // null for email/Zapier-sourced news with no canonical URL
   publishedAt: string;
   affectedMarkets: string[];
   interpretation: string;
   importance: number;
   confidence: number;
   reason: string;
+  // Zapier/LLM-classification additions — undefined for legacy FMP rows
+  // that predate these columns (never backfilled).
+  geopoliticalRelevance?: number | null;
+  monetaryPolicyRelevance?: number | null;
+  riskSentiment?: string | null;
+  classifierModel?: string | null;
 };
 
 // Storage-first read for the general (non-symbol-scoped) news feed — the
@@ -266,6 +272,10 @@ export async function getRecentNews(limit: number): Promise<StoredNewsArticle[]>
     importance: r.importance,
     confidence: r.confidence,
     reason: r.reason,
+    geopoliticalRelevance: r.geopoliticalRelevance,
+    monetaryPolicyRelevance: r.monetaryPolicyRelevance,
+    riskSentiment: r.riskSentiment,
+    classifierModel: r.classifierModel,
   }));
 }
 

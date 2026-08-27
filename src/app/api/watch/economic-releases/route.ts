@@ -17,11 +17,10 @@
 // No V1 table, route, or score is ever touched here.
 import { NextRequest, NextResponse } from "next/server";
 import { fmpEconomicCalendarProvider } from "@/services/economic-calendar/fmp-provider";
-import { affectedMarketsFor } from "@/services/economic-calendar/affected-markets";
 import { processReleases } from "@/lib/scoring-v2/release-watch";
-import { computeMarketScoreV2 } from "@/lib/scoring-v2/engine";
+import { recomputeAffectedMarketsForCountries } from "@/lib/scoring-v2/recompute";
 import { recordProviderCheck } from "@/db/queries/provider-health";
-import { DATA_MODE, isDemoOnly, strictLiveSymbolList } from "@/services/data-mode";
+import { isDemoOnly } from "@/services/data-mode";
 // Shared with the daily cron's auth/demo-mode helpers — a watch route
 // triggered by an external scheduler is the same kind of authenticated
 // background job as a Vercel cron route, just with a different trigger.
@@ -51,20 +50,11 @@ export async function GET(req: NextRequest) {
 
   // Requirement #1: only the markets a newly-processed release's country
   // actually affects, intersected with what V2 covers at all — never every
-  // strict-live market just because SOMETHING happened this cycle.
-  const liveSymbols = new Set(strictLiveSymbolList());
-  const countriesThisRun = new Set(processed.map((p) => p.country));
-  const symbolsToRecompute = new Set<string>();
-  for (const country of countriesThisRun) {
-    for (const symbol of affectedMarketsFor(country)) {
-      if (liveSymbols.has(symbol)) symbolsToRecompute.add(symbol);
-    }
-  }
-
-  const recomputeResults = await Promise.allSettled(
-    Array.from(symbolsToRecompute).map((symbol) => computeMarketScoreV2(symbol, DATA_MODE, { storageOnly: true, persist: true }))
-  );
-  const recomputedMarkets = Array.from(symbolsToRecompute).filter((_, i) => recomputeResults[i].status === "fulfilled");
+  // strict-live market just because SOMETHING happened this cycle. Shared
+  // with the Zapier webhook (lib/scoring-v2/recompute.ts) so this policy
+  // can never drift between entry points.
+  const countriesThisRun = Array.from(new Set(processed.map((p) => p.country)));
+  const recomputedMarkets = await recomputeAffectedMarketsForCountries(countriesThisRun);
 
   await recordProviderCheck({ provider: "fmp:economic-releases-watch", ok: failCount === 0, latencyMs: Date.now() - t0 }).catch(() => {});
   return NextResponse.json({

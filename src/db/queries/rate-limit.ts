@@ -6,7 +6,7 @@ import { and, eq, gt, lt } from "drizzle-orm";
 import { getDb } from "../client";
 import { authAttempts } from "../schema";
 
-export type AuthAction = "signin" | "signup";
+export type AuthAction = "signin" | "signup" | "zapier_ingest";
 
 // Prune anything older than the largest window any caller uses, on every
 // write — keeps the table bounded without a separate cleanup cron. 24h
