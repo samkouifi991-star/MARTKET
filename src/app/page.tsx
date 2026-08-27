@@ -1,13 +1,17 @@
 import Link from "next/link";
 import { getLandingPreview } from "@/lib/pipeline/landing";
+import { getLandingFeaturePreviews } from "@/lib/pipeline/landing-previews";
 import { verifySession } from "@/lib/auth/dal";
+import { isDemoOnly } from "@/services/data-mode";
 import { MarketingNav } from "@/components/marketing/MarketingNav";
 import { MarketingFooter } from "@/components/marketing/MarketingFooter";
 import { PricingCard } from "@/components/marketing/PricingCard";
+import { LandingFeatureTabs, LandingTabPanel } from "@/components/marketing/LandingFeatureTabs";
 import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { BiasBadge } from "@/components/ui/BiasBadge";
+import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
 import { AutoRefresh } from "@/components/ui/AutoRefresh";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
@@ -19,6 +23,7 @@ import { MarketRow } from "@/lib/market-data";
 import { filterToRecentWindow, RECENT_CHART_WINDOW_DAYS } from "@/lib/time";
 import {
   Activity,
+  ArrowLeftRight,
   BarChart3,
   Bell,
   Building2,
@@ -26,9 +31,11 @@ import {
   CheckCircle2,
   Coins,
   Gauge,
+  Grid3x3,
   LineChart,
   ListChecks,
   Newspaper,
+  ShieldAlert,
   ShieldCheck,
   Star,
   TrendingUp,
@@ -130,6 +137,14 @@ export default async function LandingPage() {
   const sessionUser = await verifySession();
   const user = sessionUser ? { email: sessionUser.email } : null;
   const { rows, featured, smartMoney, biasThresholds } = await getLandingPreview();
+  // Phase 13 (platform redesign): the new "More ways to see the market"
+  // tabbed section below reads real Forex Scorecard/Economic Heatmap/
+  // Economic Surprise/Institutional/Geopolitical Risk data — every one of
+  // those pipeline functions requires a real DATABASE_URL, unlike
+  // getLandingPreview's rows above (which already has its own demo-mode
+  // fallback baked in via getCanonicalMarketRows). Skipped entirely in
+  // demo mode rather than throwing.
+  const featurePreviews = isDemoOnly() ? null : await getLandingFeaturePreviews(rows);
 
   // Same canonical current scores Top Setups ranks by — 3 strongest
   // bullish and 3 strongest bearish, visually separated, capped at 6 rows
@@ -184,6 +199,8 @@ export default async function LandingPage() {
     Commodities: rows.filter((r) => r.instrument.assetClass === "Commodities" && isStrictLiveSymbol(r.instrument.symbol)).length,
     Crypto: rows.filter((r) => r.instrument.assetClass === "Crypto" && isStrictLiveSymbol(r.instrument.symbol)).length,
   };
+
+  const featurePanels: LandingTabPanel[] = buildFeaturePanels(featurePreviews);
 
   return (
     <div className="min-h-dvh flex flex-col">
@@ -282,6 +299,40 @@ export default async function LandingPage() {
             </div>
           </div>
         </section>
+
+        {/* Explore Market Intelligence Features */}
+        <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-16">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-semibold">Explore Market Intelligence Features</h2>
+            <p className="mt-2 text-(--text-dim) max-w-2xl mx-auto text-sm sm:text-base">
+              One transparent scoring system, broken into the tools that make it useful day to day.
+            </p>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <FeatureTeaser icon={<ArrowLeftRight size={16} />} title="Forex Scorecard" href="/forex-scorecard" />
+            <FeatureTeaser icon={<Coins size={16} />} title="Economic Strength" href="/economic-strength" />
+            <FeatureTeaser icon={<Grid3x3 size={16} />} title="Economic Heatmap" href="/economic-heatmap" />
+            <FeatureTeaser icon={<ShieldAlert size={16} />} title="Geopolitical Risk" href="/geopolitical-risk" />
+          </div>
+          <div className="text-center mt-5">
+            <Link href="/features" className="text-sm text-(--accent) hover:underline">
+              View all features →
+            </Link>
+          </div>
+        </section>
+
+        {/* More ways to see the market — compact tabbed previews */}
+        {featurePanels.length > 0 && (
+          <section className="border-t border-(--border) bg-(--bg-elevated)">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16">
+              <div className="text-center mb-6">
+                <h2 className="text-2xl font-semibold">More ways to see the market</h2>
+                <p className="mt-2 text-(--text-dim) max-w-2xl mx-auto text-sm sm:text-base">Real, live previews — pulled from the same data every authenticated page reads.</p>
+              </div>
+              <LandingFeatureTabs panels={featurePanels} />
+            </div>
+          </section>
+        )}
 
         {/* Historical depth: price + score history, zoomed to the recent reversal */}
         <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-16">
@@ -557,4 +608,158 @@ function Faq({ q, a }: { q: string; a: string }) {
       <dd className="text-sm text-(--text-dim) mt-1">{a}</dd>
     </div>
   );
+}
+
+function FeatureTeaser({ icon, title, href }: { icon: React.ReactNode; title: string; href: string }) {
+  return (
+    <Link href={href} className="card p-4 hover:border-(--border-strong) transition-colors flex items-center gap-3">
+      <span className="grid place-items-center w-9 h-9 rounded-lg bg-(--accent-soft) text-(--accent) shrink-0">{icon}</span>
+      <span className="font-medium text-sm">{title}</span>
+    </Link>
+  );
+}
+
+function Unavailable({ text = "Temporarily unavailable." }: { text?: string }) {
+  return <p className="text-sm text-(--text-faint) py-6 text-center">{text}</p>;
+}
+
+// Builds the 5 "More ways to see the market" tab panels from real pipeline
+// data (Phases 4-8) — returns [] in demo mode (previews is null) or when a
+// panel's own data source produced nothing, so the section header above
+// hides itself rather than showing an empty shell.
+function buildFeaturePanels(previews: Awaited<ReturnType<typeof getLandingFeaturePreviews>> | null): LandingTabPanel[] {
+  if (!previews) return [];
+
+  const panels: LandingTabPanel[] = [];
+
+  panels.push({
+    key: "forex",
+    label: "Forex Scorecard",
+    content: !previews.forexScorecard || previews.forexScorecard.length === 0 ? (
+      <Unavailable />
+    ) : (
+      <div className="space-y-2 max-w-md mx-auto">
+        {previews.forexScorecard.map((sc) => (
+          <Link key={sc.symbol} href={`/forex-scorecard/${sc.symbol}`} className="card p-3 flex items-center justify-between hover:border-(--border-strong) transition-colors">
+            <span className="font-medium text-sm">{sc.base}/{sc.quote}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-(--text-faint)">Strength Δ {sc.strengthDifferential !== null ? formatSigned(sc.strengthDifferential, 0) : "N/A"}</span>
+              {sc.finalBias && <BiasBadge bias={sc.finalBias} size="sm" />}
+            </div>
+          </Link>
+        ))}
+        <p className="text-center text-xs text-(--text-faint) pt-1">
+          <Link href="/forex-scorecard" className="text-(--accent) hover:underline">View all pairs →</Link>
+        </p>
+      </div>
+    ),
+  });
+
+  panels.push({
+    key: "heatmap",
+    label: "Economic Heatmap",
+    content: !previews.economicHeatmap ? (
+      <Unavailable />
+    ) : (
+      <div className="max-w-lg mx-auto">
+        <p className="text-xs text-(--text-faint) text-center mb-3">Growth score, real FRED data</p>
+        <div className="flex flex-wrap justify-center gap-2">
+          {previews.economicHeatmap.currencies.map((c) => {
+            const cell = previews.economicHeatmap!.rows.find((r) => r.factor === "Growth")!.cells[c];
+            return (
+              <div key={c} className="rounded-lg border border-(--border) px-3 py-2 text-center min-w-[64px]">
+                <div className="text-[11px] font-semibold">{c}</div>
+                <div className={`text-sm tabular-nums font-medium ${cell.value === null ? "text-(--text-faint)" : cell.value > 0 ? "text-emerald-400" : cell.value < 0 ? "text-rose-400" : ""}`}>
+                  {cell.value !== null ? cell.value.toFixed(1) : "N/A"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-center text-xs text-(--text-faint) pt-4">
+          <Link href="/economic-heatmap" className="text-(--accent) hover:underline">View full heatmap →</Link>
+        </p>
+      </div>
+    ),
+  });
+
+  panels.push({
+    key: "surprise",
+    label: "Economic Surprise",
+    content: !previews.topSurprises || previews.topSurprises.length === 0 ? (
+      <Unavailable text="No recent high-magnitude surprises on record." />
+    ) : (
+      <div className="space-y-2 max-w-md mx-auto">
+        {previews.topSurprises.map((s) => (
+          <div key={s.id} className="card p-3 flex items-center justify-between">
+            <div>
+              <span className="font-medium text-sm">{s.country}</span>
+              <span className="text-xs text-(--text-faint) ml-2">{s.indicatorKey}</span>
+            </div>
+            <span className={`text-sm tabular-nums font-semibold ${(s.surpriseZ ?? 0) > 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              Z {formatSigned(s.surpriseZ ?? 0, 2)}
+            </span>
+          </div>
+        ))}
+        <p className="text-center text-xs text-(--text-faint) pt-1">
+          <Link href="/economic-calendar" className="text-(--accent) hover:underline">View economic calendar →</Link>
+        </p>
+      </div>
+    ),
+  });
+
+  panels.push({
+    key: "institutional",
+    label: "Institutional Positioning",
+    content: !previews.institutional || previews.institutional.length === 0 ? (
+      <Unavailable text="No strong institutional-positioning signal currently on record." />
+    ) : (
+      <div className="space-y-2 max-w-md mx-auto">
+        {previews.institutional.map((r) => (
+          <Link key={r.symbol} href={`/markets/${r.symbol}`} className="card p-3 flex items-center justify-between hover:border-(--border-strong) transition-colors">
+            <div>
+              <span className="font-medium text-sm">{r.symbol}</span>
+              <span className="text-xs text-(--text-faint) ml-2">{r.name}</span>
+            </div>
+            <span className={`text-sm tabular-nums font-semibold ${r.contribution > 0 ? "text-emerald-400" : "text-rose-400"}`}>{formatSigned(r.contribution)}</span>
+          </Link>
+        ))}
+        <p className="text-center text-xs text-(--text-faint) pt-1">
+          <Link href="/institutional" className="text-(--accent) hover:underline">View institutional positioning →</Link>
+        </p>
+      </div>
+    ),
+  });
+
+  panels.push({
+    key: "geopolitical",
+    label: "Geopolitical Risk",
+    content: !previews.geopoliticalRisk ? (
+      <Unavailable />
+    ) : (
+      <div className="max-w-md mx-auto text-center">
+        <div className="flex items-center justify-center gap-3">
+          <span className="text-2xl font-semibold tabular-nums">{previews.geopoliticalRisk.score}</span>
+          <RiskLevelBadge level={previews.geopoliticalRisk.level} />
+        </div>
+        {previews.geopoliticalRisk.events.length > 0 ? (
+          <div className="mt-4 space-y-2 text-left">
+            {previews.geopoliticalRisk.events.slice(0, 2).map((e) => (
+              <div key={e.id} className="card p-3">
+                <p className="text-sm font-medium leading-snug">{e.headline}</p>
+                <p className="text-xs text-(--text-faint) mt-1">{e.region}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-(--text-faint) mt-4">No high-relevance geopolitical news currently on record.</p>
+        )}
+        <p className="text-center text-xs text-(--text-faint) pt-4">
+          <Link href="/geopolitical-risk" className="text-(--accent) hover:underline">View geopolitical risk tracker →</Link>
+        </p>
+      </div>
+    ),
+  });
+
+  return panels;
 }
