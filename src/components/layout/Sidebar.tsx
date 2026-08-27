@@ -65,6 +65,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: "Macro",
     items: [
       { label: "Economic Strength", href: "/economic-strength", icon: Coins },
+      { label: "Economic Heatmap", href: "/economic-heatmap", icon: Grid3x3 },
       // Phase 18 (public-launch demo sweep): these 4 pages show composite
       // "surprise scores" per country (Economic Growth/Inflation/Labor) or
       // meeting-implied hike/hold/cut probabilities and central-bank

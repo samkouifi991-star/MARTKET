@@ -31,7 +31,7 @@ function worseFreshness(a: DataFreshness | null, b: DataFreshness): DataFreshnes
 // policy-rate reads into a per-currency composite — reusing these fetchers
 // rather than re-implementing FRED-series fetching a second time.
 export const GROWTH_INDICATORS: FredIndicatorKey[] = ["realGdp", "gdpGrowth", "industrialProduction", "retailSales"];
-const INFLATION_INDICATORS: FredIndicatorKey[] = ["cpi", "coreCpi", "pce", "corePce", "ppi"];
+export const INFLATION_INDICATORS: FredIndicatorKey[] = ["cpi", "coreCpi", "pce", "corePce", "ppi"];
 export const LABOR_INDICATORS: FredIndicatorKey[] = ["unemploymentRate", "payrolls", "initialClaims", "wageGrowth", "laborParticipation"];
 
 function clamp(v: number, min = -10, max = 10): number {
