@@ -26,17 +26,21 @@ function worseFreshness(a: DataFreshness | null, b: DataFreshness): DataFreshnes
   return (FRESHNESS_SEVERITY[b] ?? 0) > (FRESHNESS_SEVERITY[a] ?? 0) ? b : a;
 }
 
-const GROWTH_INDICATORS: FredIndicatorKey[] = ["realGdp", "gdpGrowth", "industrialProduction", "retailSales"];
+// Exported for lib/pipeline/economic-strength.ts (Phase 4 of the platform
+// redesign), which composes the same per-country growth/labor scores and
+// policy-rate reads into a per-currency composite — reusing these fetchers
+// rather than re-implementing FRED-series fetching a second time.
+export const GROWTH_INDICATORS: FredIndicatorKey[] = ["realGdp", "gdpGrowth", "industrialProduction", "retailSales"];
 const INFLATION_INDICATORS: FredIndicatorKey[] = ["cpi", "coreCpi", "pce", "corePce", "ppi"];
-const LABOR_INDICATORS: FredIndicatorKey[] = ["unemploymentRate", "payrolls", "initialClaims", "wageGrowth", "laborParticipation"];
+export const LABOR_INDICATORS: FredIndicatorKey[] = ["unemploymentRate", "payrolls", "initialClaims", "wageGrowth", "laborParticipation"];
 
 function clamp(v: number, min = -10, max = 10): number {
   return Math.max(min, Math.min(max, v));
 }
 
-type CountryMacroScoresWithFreshness = CountryMacroScores & { freshness: DataFreshness | null };
+export type CountryMacroScoresWithFreshness = CountryMacroScores & { freshness: DataFreshness | null };
 
-async function fetchCountryScores(country: string, indicators: FredIndicatorKey[], storageOnly: boolean): Promise<CountryMacroScoresWithFreshness> {
+export async function fetchCountryScores(country: string, indicators: FredIndicatorKey[], storageOnly: boolean): Promise<CountryMacroScoresWithFreshness> {
   const results = await Promise.all(indicators.map((key) => getFredSeriesWithFallback(country, key, 24, storageOnly)));
   const seriesByIndicator: Partial<Record<FredIndicatorKey, FredSeriesPoint[]>> = {};
   let freshness: DataFreshness | null = null;
@@ -235,7 +239,7 @@ export async function resolveInterestRatesFactor(symbol: string, mode: DataMode,
   };
 }
 
-async function fetchLatestRates(country: string, storageOnly: boolean): Promise<{ policyRate: number | null; trend: number; freshness: DataFreshness }> {
+export async function fetchLatestRates(country: string, storageOnly: boolean): Promise<{ policyRate: number | null; trend: number; freshness: DataFreshness }> {
   const result = await getFredSeriesWithFallback(country, "policyRate", 6, storageOnly);
   if ((result.status !== "live" && result.status !== "delayed" && result.status !== "stale") || !result.value || result.value.length === 0) {
     return { policyRate: null, trend: 0, freshness: "unavailable" };
