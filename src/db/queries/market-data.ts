@@ -8,7 +8,7 @@
 // last-known-good.ts): when a live provider call fails, the display/scoring
 // pipeline needs to read back exactly what was last actually stored, not
 // just append to it.
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import { marketPrices, marketCandles, institutionalPositioning, retailSentiment, economicIndicators, economicEvents, newsArticles } from "../schema";
 import { FredSeriesPoint, NormalizedCandle, NormalizedEconomicEvent, NormalizedNewsArticle, NormalizedQuote } from "@/services/types";
@@ -304,6 +304,7 @@ export async function updateNewsArticleClassification(
     geopoliticalRelevance: number | null;
     monetaryPolicyRelevance: number | null;
     riskSentiment: string | null;
+    riskCategory: string | null;
     classifierModel: string | null;
   }
 ): Promise<void> {
@@ -319,6 +320,7 @@ export async function updateNewsArticleClassification(
       geopoliticalRelevance: classification.geopoliticalRelevance,
       monetaryPolicyRelevance: classification.monetaryPolicyRelevance,
       riskSentiment: classification.riskSentiment,
+      riskCategory: classification.riskCategory,
       classifierModel: classification.classifierModel,
     })
     .where(eq(newsArticles.id, id));
@@ -412,6 +414,7 @@ export type StoredNewsArticle = {
   geopoliticalRelevance?: number | null;
   monetaryPolicyRelevance?: number | null;
   riskSentiment?: string | null;
+  riskCategory?: string | null;
   classifierModel?: string | null;
 };
 
@@ -438,6 +441,45 @@ export async function getRecentNews(limit: number): Promise<StoredNewsArticle[]>
     geopoliticalRelevance: r.geopoliticalRelevance,
     monetaryPolicyRelevance: r.monetaryPolicyRelevance,
     riskSentiment: r.riskSentiment,
+    riskCategory: r.riskCategory,
+    classifierModel: r.classifierModel,
+  }));
+}
+
+/** Storage-first read for the Geopolitical Risk Tracker (Phase 8) — every
+ * recent article whose geopolitical OR monetary-policy relevance clears
+ * minRelevance, regardless of interpretation/riskSentiment (a HIGH-risk
+ * item can be RiskOn or RiskOff). getRecentNews's simple "most recent N"
+ * doesn't filter on relevance at all, so this is a distinct query rather
+ * than a client-side filter over a possibly-truncated recent-N list. */
+export async function getHighGeopoliticalRelevanceNews(minRelevance: number, limit: number): Promise<StoredNewsArticle[]> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(newsArticles)
+    .where(
+      or(
+        and(isNotNull(newsArticles.geopoliticalRelevance), gte(newsArticles.geopoliticalRelevance, minRelevance)),
+        and(isNotNull(newsArticles.monetaryPolicyRelevance), gte(newsArticles.monetaryPolicyRelevance, minRelevance))
+      )
+    )
+    .orderBy(desc(newsArticles.publishedAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    headline: r.headline,
+    source: r.source,
+    url: r.url,
+    publishedAt: r.publishedAt.toISOString(),
+    affectedMarkets: r.affectedMarkets,
+    interpretation: r.interpretation,
+    importance: r.importance,
+    confidence: r.confidence,
+    reason: r.reason,
+    geopoliticalRelevance: r.geopoliticalRelevance,
+    monetaryPolicyRelevance: r.monetaryPolicyRelevance,
+    riskSentiment: r.riskSentiment,
+    riskCategory: r.riskCategory,
     classifierModel: r.classifierModel,
   }));
 }

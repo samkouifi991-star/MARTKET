@@ -71,7 +71,7 @@ export async function ingestNews(payload: NewsPayload, options: IngestNewsOption
     classification = await classifyNewsWithLLM({ headline: payload.headline, summary: payload.summary, source: payload.source });
   } catch {
     const fallback = classifyHeadline(payload.headline);
-    classification = { ...fallback, affectedMarkets: [], geopoliticalRelevance: 0, monetaryPolicyRelevance: 0, riskSentiment: "Neutral", reason: "Keyword fallback — LLM classification unavailable.", model: null };
+    classification = { ...fallback, affectedMarkets: [], geopoliticalRelevance: 0, monetaryPolicyRelevance: 0, riskSentiment: "Neutral", riskCategory: "other", reason: "Keyword fallback — LLM classification unavailable.", model: null };
   }
 
   await updateNewsArticleClassification(insertedId, {
@@ -83,6 +83,7 @@ export async function ingestNews(payload: NewsPayload, options: IngestNewsOption
     geopoliticalRelevance: classification.geopoliticalRelevance,
     monetaryPolicyRelevance: classification.monetaryPolicyRelevance,
     riskSentiment: classification.riskSentiment,
+    riskCategory: classification.riskCategory,
     classifierModel: classification.model,
   });
 

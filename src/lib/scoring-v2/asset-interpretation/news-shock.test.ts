@@ -11,6 +11,7 @@ function classification(overrides: Partial<LlmNewsClassification> = {}): LlmNews
     geopoliticalRelevance: 70,
     monetaryPolicyRelevance: 20,
     riskSentiment: "RiskOff",
+    riskCategory: "other",
     reason: "test fixture",
     ...overrides,
   };

@@ -24,6 +24,10 @@ const LlmNewsClassificationSchema = z.object({
   geopoliticalRelevance: z.number().min(0).max(100),
   monetaryPolicyRelevance: z.number().min(0).max(100),
   riskSentiment: z.enum(["RiskOn", "RiskOff", "Neutral"]),
+  // Feeds the Geopolitical Risk Tracker's sub-scores — "other" for
+  // anything that doesn't fit one of the 6 named categories, never guessed
+  // into a specific one.
+  riskCategory: z.enum(["war", "sanctions", "tariffs", "election", "energy", "central_bank", "other"]),
   reason: z.string(),
 });
 
@@ -36,6 +40,7 @@ const SYSTEM_PROMPT = [
   "You classify financial news headlines forwarded from Forex Factory email alerts.",
   "Use ONLY the headline, summary, and source text given to you below. Never invent facts, prices, market moves, or context not present in that text.",
   "affectedMarkets must be internal trading symbols only (e.g. EURUSD, XAUUSD, SPX500, BTCUSD) that the text plausibly affects — leave it empty if you cannot tell.",
+  "riskCategory must be the single best-fitting category from war, sanctions, tariffs, election, energy, central_bank, or other — use other whenever no specific category clearly fits, never force-fit an unrelated one.",
   "If the text is ambiguous or lacks enough information for a field, choose the most neutral/uncertain value (Unclear/Neutral, low confidence, low relevance) rather than guessing.",
   "reason must be a one-sentence grounding citation back to specific words in the given text.",
 ].join(" ");

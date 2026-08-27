@@ -1,0 +1,1 @@
+ALTER TABLE "news_articles" ADD COLUMN "risk_category" varchar(16);

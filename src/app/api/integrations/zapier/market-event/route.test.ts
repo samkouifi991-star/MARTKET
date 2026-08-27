@@ -76,6 +76,7 @@ describe("POST /api/integrations/zapier/market-event", () => {
       geopoliticalRelevance: 10,
       monetaryPolicyRelevance: 80,
       riskSentiment: "RiskOff",
+      riskCategory: "central_bank",
       reason: "Fed hinted at tightening per headline.",
       model: "claude-opus-5",
     });
@@ -196,6 +197,7 @@ describe("POST /api/integrations/zapier/market-event", () => {
         geopoliticalRelevance: 5,
         monetaryPolicyRelevance: 5,
         riskSentiment: "Neutral",
+        riskCategory: "other",
         reason: "Low relevance",
         model: "claude-opus-5",
       });

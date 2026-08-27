@@ -197,6 +197,13 @@ export const newsArticles = pgTable(
     geopoliticalRelevance: integer("geopolitical_relevance"), // 0-100, null = not LLM-classified
     monetaryPolicyRelevance: integer("monetary_policy_relevance"), // 0-100
     riskSentiment: varchar("risk_sentiment", { length: 16 }), // "RiskOn" | "RiskOff" | "Neutral" | null
+    // "war" | "sanctions" | "tariffs" | "election" | "energy" |
+    // "central_bank" | "other" | null (not LLM-classified / keyword
+    // fallback ran) — feeds the Geopolitical Risk Tracker's sub-scores
+    // (see lib/pipeline/geopolitical-risk.ts). Same LLM call as the other
+    // classification fields, just a richer structured output — never a
+    // second classification pass.
+    riskCategory: varchar("risk_category", { length: 16 }),
     // Which classifier actually produced interpretation/importance/
     // confidence for this row — null means the legacy keyword heuristic
     // (news-classifier.ts) ran, not the LLM. Auditable if the model/prompt

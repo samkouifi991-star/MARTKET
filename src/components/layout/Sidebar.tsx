@@ -20,6 +20,7 @@ import {
   Coins,
   ArrowLeftRight,
   Repeat,
+  ShieldAlert,
   SlidersHorizontal,
   Newspaper,
   CalendarDays,
@@ -94,6 +95,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: "Intelligence",
     items: [
       { label: "News Intelligence", href: "/news", icon: Newspaper },
+      { label: "Geopolitical Risk", href: "/geopolitical-risk", icon: ShieldAlert },
       { label: "Economic Calendar", href: "/economic-calendar", icon: CalendarDays },
       { label: "Market Heatmap", href: "/heatmap", icon: Grid3x3 },
       { label: "Risk Gauge", href: "/risk-gauge", icon: Gauge },
