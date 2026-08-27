@@ -20,7 +20,7 @@ function isMarketingPath(pathname: string): boolean {
   return pathname === "/" || MARKETING_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-export function AppShell({ children, dataMode, user }: { children: React.ReactNode; dataMode: DataMode; user: SessionUser | null }) {
+export function AppShell({ children, dataMode, user, isAdmin }: { children: React.ReactNode; dataMode: DataMode; user: SessionUser | null; isAdmin: boolean }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
 
@@ -28,7 +28,7 @@ export function AppShell({ children, dataMode, user }: { children: React.ReactNo
 
   return (
     <div className="flex min-h-dvh">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} dataMode={dataMode} />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} dataMode={dataMode} isAdmin={isAdmin} />
       <div className="flex-1 min-w-0 flex flex-col">
         <Topbar onMenu={() => setSidebarOpen(true)} dataMode={dataMode} user={user} />
         <main className="flex-1 min-w-0 px-4 sm:px-6 py-6 max-w-[1600px] w-full mx-auto">{children}</main>

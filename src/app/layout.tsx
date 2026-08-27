@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/layout/AppShell";
 import { DATA_MODE } from "@/services/data-mode";
-import { verifySession } from "@/lib/auth/dal";
+import { verifySession, isAdminUser } from "@/lib/auth/dal";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,6 +42,11 @@ export default async function RootLayout({
   // subset ever crosses into the client-side AppShell — never passwordHash.
   const sessionUser = await verifySession();
   const user = sessionUser ? { id: sessionUser.id, email: sessionUser.email, name: sessionUser.name } : null;
+  // Sidebar's Admin nav group needs to know this to hide itself from
+  // non-admin users — every /admin/* page still independently re-checks
+  // via requireAdmin() server-side, so this is a UI convenience, not the
+  // security boundary.
+  const isAdmin = isAdminUser(sessionUser ?? undefined);
 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
@@ -49,7 +54,7 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>
-        <AppShell dataMode={DATA_MODE} user={user}>
+        <AppShell dataMode={DATA_MODE} user={user} isAdmin={isAdmin}>
           {children}
         </AppShell>
       </body>

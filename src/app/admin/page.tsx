@@ -2,13 +2,9 @@ import { allMarketRows } from "@/lib/market-data";
 import { getCanonicalMarketRows } from "@/lib/pipeline/top-setups";
 import { INSTRUMENTS } from "@/lib/instruments";
 import { coverageReasonFor, coverageStatusFor } from "@/services/market-coverage";
-import { AUDIT_LOGS, API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY, AuditLogEntry } from "@/lib/demo/admin";
+import { API_USAGE, FAILED_JOBS, SYSTEM_ANNOUNCEMENTS, USER_ACTIVITY } from "@/lib/demo/admin";
 import { getAdminUserActivity } from "@/db/queries/users";
-import { listScoringConfigurationVersions } from "@/db/queries/scoring-config";
-import { AdminClient } from "./AdminClient";
 import { ProviderHealthTable } from "./ProviderHealthTable";
-import { PipelineHealthTable } from "./PipelineHealthTable";
-import { buildPipelineHealthReport, buildStaleDataAlerts, PipelineHealthRow } from "@/lib/pipeline/pipeline-health";
 import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
 import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
@@ -17,7 +13,6 @@ import { formatDate, formatRelative } from "@/lib/time";
 import { DATA_MODE, isDemoOnly } from "@/services/data-mode";
 import { getProviderHealth, ProviderHealthRow } from "@/db/queries/provider-health";
 import { requireAdmin } from "@/lib/auth/dal";
-import { resolveActiveScoringConfig } from "@/lib/pipeline/scoring-config";
 import Link from "next/link";
 
 export const metadata = { title: "Admin — Market Intelligence AI" };
@@ -27,15 +22,6 @@ async function loadProviderHealth(): Promise<{ rows: ProviderHealthRow[]; error:
   if (DATA_MODE === "demo") return { rows: [], error: null };
   try {
     return { rows: await getProviderHealth(), error: null };
-  } catch (err) {
-    return { rows: [], error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-async function loadPipelineHealth(): Promise<{ rows: PipelineHealthRow[]; error: string | null }> {
-  if (DATA_MODE === "demo") return { rows: [], error: null };
-  try {
-    return { rows: await buildPipelineHealthReport(), error: null };
   } catch (err) {
     return { rows: [], error: err instanceof Error ? err.message : String(err) };
   }
@@ -56,28 +42,16 @@ export default async function AdminPage() {
       .map((f) => ({ symbol: r.instrument.symbol, factor: f }))
   );
   const { rows: providerHealthRows, error: providerHealthError } = await loadProviderHealth();
-  const { rows: pipelineHealthRows, error: pipelineHealthError } = await loadPipelineHealth();
-  const staleDataAlerts = buildStaleDataAlerts(pipelineHealthRows);
-  const activeScoringConfig = await resolveActiveScoringConfig();
 
-  // Phase 18 (public-launch demo sweep): the stat tiles and audit log below
-  // used to be hand-picked demo data shown unconditionally regardless of
-  // DATA_MODE — real users/subscriptions/session and scoring-version
-  // history have existed since the auth/Stripe/scoring-config milestones,
-  // just never read back here. API request/rate-limit counts have no real
-  // equivalent (this product has no customer-facing API-key system
-  // anywhere in the codebase) — demo-only, not shown outside demo mode.
+  // Phase 18 (public-launch demo sweep): the stat tiles below used to be
+  // hand-picked demo data shown unconditionally regardless of DATA_MODE —
+  // real users/subscriptions/session history has existed since the
+  // auth/Stripe milestones, just never read back here. API request/
+  // rate-limit counts have no real equivalent (this product has no
+  // customer-facing API-key system anywhere in the codebase) —
+  // demo-only, not shown outside demo mode.
   const demoMode = isDemoOnly();
   const userActivity = demoMode ? null : await getAdminUserActivity();
-  const auditLog: AuditLogEntry[] = demoMode
-    ? AUDIT_LOGS
-    : (await listScoringConfigurationVersions(20)).map((v) => ({
-        id: String(v.id),
-        actor: v.createdBy,
-        action: "Saved scoring configuration",
-        detail: v.includesV2Settings ? "V1 weights, bias thresholds, and V2 tuning settings" : "V1 weights and bias thresholds",
-        at: v.createdAt.toISOString(),
-      }));
 
   return (
     <div className="space-y-6">
@@ -100,7 +74,13 @@ export default async function AdminPage() {
         </div>
       )}
 
-      <AdminClient initialAuditLog={auditLog} activeScoringConfig={activeScoringConfig} />
+      <Card
+        title="Scoring Configuration"
+        subtitle="Factor weights, bias thresholds, and Scoring Engine V2 tuning — every edit is versioned"
+        action={<Link href="/admin/scoring-configuration" className="text-xs text-(--accent) hover:underline">Open →</Link>}
+      >
+        <p className="text-sm text-(--text-faint)">Save & Version the scoring model, or re-run all calculations against the current configuration.</p>
+      </Card>
 
       <Card
         title="Scoring Engine V2 (shadow mode)"
@@ -171,48 +151,13 @@ export default async function AdminPage() {
       </Card>
 
       <Card
-        title="Stale Data Alerts"
-        subtitle="Admin-only — never shown to customers. Every field beyond its dataset's established SLA, from the same read as the Data Pipeline Health table below."
+        title="Pipeline Health"
+        subtitle="Per-market dataset freshness against SLA, and stale-data alerts"
+        action={<Link href="/admin/pipeline-health" className="text-xs text-(--accent) hover:underline">Open →</Link>}
       >
-        {DATA_MODE === "demo" ? (
-          <p className="text-sm text-(--text-faint)">Becomes live once DATA_MODE is set to hybrid or live.</p>
-        ) : pipelineHealthError ? (
-          <p className="text-sm text-rose-400">Data temporarily unavailable: {pipelineHealthError}</p>
-        ) : staleDataAlerts.length === 0 ? (
-          <p className="text-sm text-emerald-400">No stale data — every launch market&apos;s pipeline is within SLA.</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {staleDataAlerts.map((a, i) => (
-              <li key={`${a.symbol}-${a.dataset}-${i}`} className="flex items-center justify-between text-sm border-b border-(--border) last:border-0 pb-1.5 last:pb-0">
-                <span>
-                  <Link href={`/markets/${a.symbol}`} className="font-medium hover:text-(--accent)">{a.symbol}</Link>
-                  <span className="text-(--text-faint)"> · {a.dataset}</span>
-                </span>
-                <span className="text-xs text-rose-400 font-medium uppercase tracking-wide">
-                  {a.status}
-                  {a.ageHours !== null && ` · ${Math.round(a.ageHours)}h`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <Card
-        title="Data Pipeline Health"
-        subtitle={
-          DATA_MODE === "demo"
-            ? "Becomes live once DATA_MODE is set to hybrid or live"
-            : "Per-market freshness age for every dataset feeding the score — highlighted cells are beyond that dataset's own established SLA"
-        }
-      >
-        {DATA_MODE === "demo" ? (
-          <p className="text-sm text-(--text-faint)">Pipeline health is populated by the scheduled ingestion jobs once DATA_MODE is hybrid or live. Currently running in demo mode — nothing to show.</p>
-        ) : pipelineHealthError ? (
-          <p className="text-sm text-rose-400">Data temporarily unavailable: {pipelineHealthError}</p>
-        ) : (
-          <PipelineHealthTable rows={pipelineHealthRows} />
-        )}
+        <p className="text-sm text-(--text-faint)">
+          {DATA_MODE === "demo" ? "Becomes live once DATA_MODE is set to hybrid or live." : "Per-market freshness age for every dataset feeding the score, highlighted where beyond that dataset's own established SLA."}
+        </p>
       </Card>
 
       <Card title="Market coverage" subtitle="LAUNCH_READY markets are the only ones shown on public surfaces (Markets, Top Setups, Dashboard rankings, Search, Watchlists, landing page) — PARTIAL/BLOCKED stay visible here only">

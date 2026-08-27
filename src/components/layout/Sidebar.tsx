@@ -31,24 +31,31 @@ import {
   Bot,
   Settings,
   ShieldCheck,
+  PenSquare,
+  Inbox,
+  Activity,
   X,
 } from "lucide-react";
 
 type NavItem = { label: string; href: string; icon: React.ComponentType<{ size?: number; className?: string }>; demoOnly?: boolean };
-type NavGroup = { title: string; items: NavItem[] };
+type NavGroup = { title: string; items: NavItem[]; adminOnly?: boolean };
 
+// Reorganized per the platform-redesign IA (Phase 10): Intelligence /
+// Positioning / Economics / Risk & Events / Markets group every feature
+// page around how a user actually thinks about it, rather than the flat
+// build-order grouping this used to have. Admin is its own gated group —
+// see isAdmin filtering below.
 const NAV_GROUPS: NavGroup[] = [
   {
-    title: "Overview",
+    title: "Intelligence",
     items: [
       { label: "Dashboard", href: "/", icon: LayoutDashboard },
       { label: "Top Setups", href: "/top-setups", icon: ListOrdered },
-      { label: "Markets", href: "/markets", icon: LineChart },
-      { label: "Watchlists", href: "/watchlists", icon: Star },
+      { label: "Forex Scorecard", href: "/forex-scorecard", icon: ArrowLeftRight },
     ],
   },
   {
-    title: "Positioning & Flow",
+    title: "Positioning",
     items: [
       { label: "Institutional Positioning", href: "/institutional", icon: Building2 },
       { label: "Retail Sentiment", href: "/retail-sentiment", icon: Users },
@@ -56,49 +63,34 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "Analysis",
-    items: [
-      { label: "Forex Scorecard", href: "/forex-scorecard", icon: ArrowLeftRight },
-      { label: "Technical Trends", href: "/technical-trends", icon: TrendingUp },
-      { label: "Seasonality", href: "/seasonality", icon: CalendarClock },
-    ],
-  },
-  {
-    title: "Macro",
+    title: "Economics",
     items: [
       { label: "Economic Strength", href: "/economic-strength", icon: Coins },
       { label: "Economic Heatmap", href: "/economic-heatmap", icon: Grid3x3 },
+      { label: "Growth", href: "/economic-growth", icon: BarChart3 },
+      { label: "Inflation", href: "/inflation", icon: Percent },
+      { label: "Labor", href: "/labor-market", icon: Briefcase },
+      { label: "Interest Rates", href: "/interest-rates", icon: Landmark },
       { label: "Carry Trade Scanner", href: "/carry-trade", icon: Repeat },
-      // Phase 18 (public-launch demo sweep): these 4 pages show composite
-      // "surprise scores" per country (Economic Growth/Inflation/Labor) or
-      // meeting-implied hike/hold/cut probabilities and central-bank
-      // statement text (Interest Rates) with no real data source anywhere
-      // in this codebase — the real per-instrument macro reads
-      // (Scorecard's Growth/Inflation/Jobs/Interest Rates sections, wired
-      // to the same economicEvents/FRED data since the Phase 3 macro-state
-      // work) already cover the core scored intelligence surface honestly;
-      // these broader all-country browsers are demo-only pending a real
-      // rebuild, not shown with fabricated numbers. See each page.tsx.
-      { label: "Economic Growth", href: "/economic-growth", icon: BarChart3, demoOnly: true },
-      { label: "Inflation", href: "/inflation", icon: Percent, demoOnly: true },
-      { label: "Labor Market", href: "/labor-market", icon: Briefcase, demoOnly: true },
-      { label: "Interest Rates", href: "/interest-rates", icon: Landmark, demoOnly: true },
-      // Phase 18 (public-launch demo sweep): put/call ratios, the VIX proxy,
-      // Fear & Greed, and credit-spread readings on this page have no real
-      // data source anywhere in this codebase (no provider integration
-      // exists for any of them) — demo-only, hidden from nav outside demo
-      // mode rather than shown with fabricated numbers. See page.tsx.
-      { label: "Options Sentiment", href: "/options-sentiment", icon: SlidersHorizontal, demoOnly: true },
     ],
   },
   {
-    title: "Intelligence",
+    title: "Risk & Events",
     items: [
       { label: "News Intelligence", href: "/news", icon: Newspaper },
       { label: "Geopolitical Risk", href: "/geopolitical-risk", icon: ShieldAlert },
       { label: "Economic Calendar", href: "/economic-calendar", icon: CalendarDays },
-      { label: "Market Heatmap", href: "/heatmap", icon: Grid3x3 },
       { label: "Risk Gauge", href: "/risk-gauge", icon: Gauge },
+    ],
+  },
+  {
+    title: "Markets",
+    items: [
+      { label: "Markets", href: "/markets", icon: LineChart },
+      { label: "Market Heatmap", href: "/heatmap", icon: Grid3x3 },
+      { label: "Watchlists", href: "/watchlists", icon: Star },
+      { label: "Technical Trends", href: "/technical-trends", icon: TrendingUp },
+      { label: "Seasonality", href: "/seasonality", icon: CalendarClock },
     ],
   },
   {
@@ -107,23 +99,39 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Alerts", href: "/alerts", icon: Bell },
       // Phase 18 (public-launch demo sweep): every statistic on this page
       // (win rates, average returns, sample sizes) is RNG-generated, not
-      // computed from real historical scores — while the copy on the page
-      // itself claimed "results reported honestly." Demo-only until a real
+      // computed from real historical scores. Demo-only until a real
       // backtest can be computed from accumulated real score history.
       { label: "Backtesting", href: "/backtesting", icon: History, demoOnly: true },
       { label: "AI Analyst", href: "/ai-analyst", icon: Bot },
+      // Phase 18 (public-launch demo sweep): put/call ratios, the VIX proxy,
+      // Fear & Greed, and credit-spread readings have no real data source
+      // anywhere in this codebase — demo-only, hidden from nav outside
+      // demo mode rather than shown with fabricated numbers. See page.tsx.
+      { label: "Options Sentiment", href: "/options-sentiment", icon: SlidersHorizontal, demoOnly: true },
+    ],
+  },
+  {
+    // Hidden from every non-admin user (see isAdmin filtering below) — was
+    // previously rendered unconditionally for any logged-in user, a real
+    // gap fixed in Phase 10 even though every /admin/* page already
+    // independently re-checks via requireAdmin() server-side.
+    title: "Admin",
+    adminOnly: true,
+    items: [
+      { label: "Admin Home", href: "/admin", icon: ShieldCheck },
+      { label: "Data Entry", href: "/admin/data-entry", icon: PenSquare },
+      { label: "Incoming Data", href: "/admin/incoming-data", icon: Inbox },
+      { label: "Pipeline Health", href: "/admin/pipeline-health", icon: Activity },
+      { label: "Scoring Configuration", href: "/admin/scoring-configuration", icon: SlidersHorizontal },
     ],
   },
   {
     title: "Account",
-    items: [
-      { label: "Settings", href: "/settings", icon: Settings },
-      { label: "Admin", href: "/admin", icon: ShieldCheck },
-    ],
+    items: [{ label: "Settings", href: "/settings", icon: Settings }],
   },
 ];
 
-export function Sidebar({ open, onClose, dataMode }: { open: boolean; onClose: () => void; dataMode: DataMode }) {
+export function Sidebar({ open, onClose, dataMode, isAdmin }: { open: boolean; onClose: () => void; dataMode: DataMode; isAdmin: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -147,7 +155,7 @@ export function Sidebar({ open, onClose, dataMode }: { open: boolean; onClose: (
         </div>
 
         <nav className="px-3 py-4 space-y-5">
-          {NAV_GROUPS.map((group) => (
+          {NAV_GROUPS.filter((group) => !group.adminOnly || isAdmin).map((group) => (
             <div key={group.title}>
               <div className="px-2 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-(--text-faint)">
                 {group.title}

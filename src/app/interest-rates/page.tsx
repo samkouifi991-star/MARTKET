@@ -1,87 +1,60 @@
-import { CENTRAL_BANKS } from "@/lib/demo/centralBanks";
-import { Card } from "@/components/ui/Card";
-import { formatDate } from "@/lib/time";
+// Un-gated in Phase 10 (platform redesign) — the OLD fabricated content
+// here (meeting-implied hike/hold/cut probabilities, central-bank
+// statement text) had no real data source and stays removed; this page
+// now shows the real policy rate + trend per currency
+// (fetchLatestRates, macro.ts) that already feeds the Economic Strength
+// Index and Forex Scorecard's rate-differential rows.
 import { requireEntitlement } from "@/lib/auth/dal";
 import { isDemoOnly } from "@/services/data-mode";
+import { CCY_TO_COUNTRY } from "@/lib/scoring";
+import { fetchLatestRates } from "@/lib/pipeline/macro";
+import { StatTile } from "@/components/ui/StatTile";
+import { Card } from "@/components/ui/Card";
 
 export const metadata = { title: "Interest Rates & Monetary Policy — Market Intelligence AI" };
 export const dynamic = "force-dynamic";
 
-const STANCE_CLASSES: Record<string, string> = {
-  Hawkish: "text-rose-400 bg-rose-500/10",
-  Dovish: "text-emerald-400 bg-emerald-500/10",
-  Neutral: "text-slate-300 bg-slate-500/10",
-};
-
-// Phase 18 (public-launch demo sweep): meeting-implied hike/hold/cut
-// probabilities and central-bank statement text have no real data source
-// anywhere in this codebase (no options/futures-implied-probability
-// provider, no statement feed) — demo-only. Real policy rates and yields
-// for the instruments that need them are already shown on each market's
-// Scorecard (Interest Rates section), not shown here with fabricated
-// probabilities/statements.
 export default async function InterestRatesPage() {
   await requireEntitlement();
-  if (!isDemoOnly()) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-xl font-semibold">Interest Rates &amp; Monetary Policy</h1>
-        </div>
-        <Card>
-          <p className="text-sm text-(--text-faint) py-6 text-center">
-            Not available yet — meeting-implied probabilities and statement text have no connected data source. Real policy-rate and yield data for each tracked market is already shown on that market&apos;s Scorecard (Interest Rates section).
-          </p>
-        </Card>
-      </div>
-    );
-  }
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Interest Rates &amp; Monetary Policy</h1>
         <p className="text-sm text-(--text-faint) mt-1">
-          Policy rates, meeting-implied probabilities, and yield curves for every major central bank. For currency pairs, the rate differential between the two currencies drives the interest-rate factor; for equities and metals, real yields and rate expectations are used instead.
+          Real policy rates and recent trend direction (FRED) for the 8 tracked currencies. For currency pairs, the rate differential between the two currencies drives the interest-rate factor — see the Forex Scorecard and Carry Trade Scanner.
         </p>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4">
-        {CENTRAL_BANKS.map((cb) => (
-          <Card key={cb.code} title={`${cb.name} (${cb.currency})`} action={<span className={`text-[11px] rounded-full px-2 py-0.5 font-medium ${STANCE_CLASSES[cb.stance]}`}>{cb.stance}</span>}>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm mb-3">
-              <Metric label="Current rate" value={`${cb.currentRate}%`} />
-              <Metric label="Previous rate" value={`${cb.previousRate}%`} />
-              <Metric label="Next meeting" value={formatDate(cb.nextMeeting)} />
-              <Metric label="Yield curve slope" value={`${cb.yieldCurveSlope > 0 ? "+" : ""}${cb.yieldCurveSlope}pt`} />
-              <Metric label="2yr yield" value={`${cb.yield2y}%`} />
-              <Metric label="10yr yield" value={`${cb.yield10y}%`} />
-            </div>
-            <div className="mb-3">
-              <div className="text-[11px] text-(--text-faint) mb-1">Meeting-implied probability</div>
-              <div className="flex h-2 rounded-full overflow-hidden bg-(--border)">
-                <div className="bg-rose-400" style={{ width: `${cb.probHike}%` }} title={`Hike ${cb.probHike}%`} />
-                <div className="bg-slate-400" style={{ width: `${cb.probHold}%` }} title={`Hold ${cb.probHold}%`} />
-                <div className="bg-emerald-400" style={{ width: `${cb.probCut}%` }} title={`Cut ${cb.probCut}%`} />
-              </div>
-              <div className="flex justify-between text-[10px] text-(--text-faint) mt-1">
-                <span>Hike {cb.probHike}%</span>
-                <span>Hold {cb.probHold}%</span>
-                <span>Cut {cb.probCut}%</span>
-              </div>
-            </div>
-            <p className="text-xs text-(--text-dim) leading-relaxed border-t border-(--border) pt-2">{cb.lastStatement}</p>
-          </Card>
-        ))}
-      </div>
+      {isDemoOnly() ? (
+        <Card>
+          <p className="text-sm text-(--text-faint)">Becomes live once DATA_MODE is set to hybrid or live.</p>
+        </Card>
+      ) : (
+        <RatesGrid />
+      )}
     </div>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+async function RatesGrid() {
+  const currencies = Object.keys(CCY_TO_COUNTRY);
+  const rates = await Promise.all(currencies.map((c) => fetchLatestRates(CCY_TO_COUNTRY[c], true)));
+
   return (
-    <div>
-      <div className="text-[11px] text-(--text-faint)">{label}</div>
-      <div className="font-medium tabular-nums">{value}</div>
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {currencies.map((currency, i) => {
+        const rate = rates[i];
+        const trendLabel = rate.policyRate === null ? undefined : rate.trend > 0 ? "Trending higher" : rate.trend < 0 ? "Trending lower" : "Holding steady";
+        return (
+          <StatTile
+            key={currency}
+            label={currency}
+            value={rate.policyRate !== null ? `${rate.policyRate}%` : "N/A"}
+            sub={trendLabel}
+          />
+        );
+      })}
     </div>
   );
 }

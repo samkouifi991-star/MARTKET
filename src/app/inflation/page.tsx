@@ -1,42 +1,23 @@
-import { allEconomies } from "@/lib/demo/economies";
-import { EconomicReleaseTable } from "@/components/tables/EconomicReleaseTable";
-import { StatTile } from "@/components/ui/StatTile";
-import { Card } from "@/components/ui/Card";
+// Un-gated in Phase 10 (platform redesign) — see economic-growth/page.tsx
+// for the same treatment/reasoning. Reads the real per-currency inflation
+// score the Economic Heatmap (Phase 6) already computes from FRED data.
 import { requireEntitlement } from "@/lib/auth/dal";
 import { isDemoOnly } from "@/services/data-mode";
+import { buildEconomicHeatmap } from "@/lib/pipeline/economic-heatmap";
+import { StatTile } from "@/components/ui/StatTile";
+import { Card } from "@/components/ui/Card";
 
 export const metadata = { title: "Inflation — Market Intelligence AI" };
 export const dynamic = "force-dynamic";
 
-// Phase 18 (public-launch demo sweep): see economic-growth/page.tsx —
-// same treatment, same reason (invented composite "surprise score" with no
-// real equivalent; real per-instrument inflation reads already live on
-// each market's Scorecard).
 export default async function InflationPage() {
   await requireEntitlement();
-  if (!isDemoOnly()) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-xl font-semibold">Inflation</h1>
-        </div>
-        <Card>
-          <p className="text-sm text-(--text-faint) py-6 text-center">
-            Not available yet as a standalone all-country browser. Real inflation data for each tracked market is already shown on that market&apos;s Scorecard (Inflation section).
-          </p>
-        </Card>
-      </div>
-    );
-  }
-  const economies = allEconomies();
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Inflation</h1>
-        <p className="text-sm text-(--text-faint) mt-1">
-          CPI, core CPI, PPI, and wage growth for every tracked economy.
-        </p>
+        <p className="text-sm text-(--text-faint) mt-1">CPI, core CPI, PCE, core PCE, and PPI for the 8 tracked currencies — the same FRED-driven inflation score used in the Economic Heatmap and Economic Strength Index.</p>
       </div>
 
       <Card title="Inflation is scored differently per asset class">
@@ -55,30 +36,40 @@ export default async function InflationPage() {
           </div>
           <div>
             <div className="font-medium mb-1">Gold &amp; precious metals</div>
-            <p className="text-(--text-faint) text-xs leading-relaxed">
-              Evaluated jointly with real yields, dollar strength, and rate expectations — never from inflation alone.
-            </p>
+            <p className="text-(--text-faint) text-xs leading-relaxed">Evaluated jointly with real yields, dollar strength, and rate expectations — never from inflation alone.</p>
           </div>
         </div>
       </Card>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {economies.map((e) => (
-          <StatTile
-            key={e.country.code}
-            label={e.country.name}
-            value={e.inflationTrend}
-            sub={`Surprise score ${e.inflationScore > 0 ? "+" : ""}${e.inflationScore.toFixed(1)}`}
-            valueClassName={e.inflationTrend === "Rising" ? "text-amber-400" : e.inflationTrend === "Falling" ? "text-sky-400" : ""}
-          />
-        ))}
-      </div>
+      {isDemoOnly() ? (
+        <Card>
+          <p className="text-sm text-(--text-faint)">Becomes live once DATA_MODE is set to hybrid or live.</p>
+        </Card>
+      ) : (
+        <InflationGrid />
+      )}
+    </div>
+  );
+}
 
-      <div className="space-y-4">
-        {economies.map((e) => (
-          <EconomicReleaseTable key={e.country.code} country={e.country.name} releases={e.inflation} />
-        ))}
-      </div>
+async function InflationGrid() {
+  const data = await buildEconomicHeatmap(true);
+  const row = data.rows.find((r) => r.factor === "Inflation")!;
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {data.currencies.map((currency) => {
+        const cell = row.cells[currency];
+        return (
+          <StatTile
+            key={currency}
+            label={currency}
+            value={cell.value !== null ? `${cell.value > 0 ? "+" : ""}${cell.value.toFixed(1)}` : "N/A"}
+            sub={cell.label ?? "Unavailable"}
+            valueClassName={cell.value === null ? "" : cell.value > 0 ? "text-emerald-400" : cell.value < 0 ? "text-rose-400" : ""}
+          />
+        );
+      })}
     </div>
   );
 }
