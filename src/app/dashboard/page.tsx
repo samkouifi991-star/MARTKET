@@ -100,8 +100,8 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid lg:grid-cols-3 gap-4">
-        <Card title="Strongest bullish conditions" action={<Link href="/top-setups" className="text-xs text-(--accent) hover:underline">View all →</Link>} className="lg:col-span-1">
-          <ul className="space-y-2.5">
+        <Card title="Strongest bullish conditions" action={<Link href="/top-setups" className="text-xs text-(--accent) hover:underline">View all →</Link>} className="lg:col-span-1 p-3 sm:p-4">
+          <ul className="space-y-2">
             {topBullish.map((r) => (
               <li key={r.instrument.symbol}>
                 <Link href={`/markets/${r.instrument.symbol}`} className="flex items-center justify-between text-sm hover:text-(--accent)">
@@ -117,8 +117,8 @@ export default async function DashboardPage() {
           </ul>
         </Card>
 
-        <Card title="Strongest bearish conditions" action={<Link href="/top-setups" className="text-xs text-(--accent) hover:underline">View all →</Link>}>
-          <ul className="space-y-2.5">
+        <Card title="Strongest bearish conditions" action={<Link href="/top-setups" className="text-xs text-(--accent) hover:underline">View all →</Link>} className="p-3 sm:p-4">
+          <ul className="space-y-2">
             {topBearish.map((r) => (
               <li key={r.instrument.symbol}>
                 <Link href={`/markets/${r.instrument.symbol}`} className="flex items-center justify-between text-sm hover:text-(--accent)">
@@ -134,7 +134,7 @@ export default async function DashboardPage() {
           </ul>
         </Card>
 
-        <Card title="Risk-On / Risk-Off Gauge" action={<Link href="/risk-gauge" className="text-xs text-(--accent) hover:underline">Details →</Link>}>
+        <Card title="Risk-On / Risk-Off Gauge" action={<Link href="/risk-gauge" className="text-xs text-(--accent) hover:underline">Details →</Link>} className="p-3 sm:p-4">
           {risk ? (
             <>
               <div className="flex items-center gap-4">
@@ -160,8 +160,8 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <Card title="High-importance news" action={<Link href="/news" className="text-xs text-(--accent) hover:underline">View all →</Link>}>
-          <ul className="space-y-3">
+        <Card title="High-importance news" action={<Link href="/news" className="text-xs text-(--accent) hover:underline">View all →</Link>} className="p-3 sm:p-4">
+          <ul className="space-y-2">
             {topNews.map((n) => (
               <li key={n.id} className="text-sm">
                 <div className="flex items-start justify-between gap-2">
@@ -186,8 +186,8 @@ export default async function DashboardPage() {
           </ul>
         </Card>
 
-        <Card title="Upcoming high-impact events" action={<Link href="/economic-calendar" className="text-xs text-(--accent) hover:underline">Calendar →</Link>}>
-          <ul className="space-y-3">
+        <Card title="Upcoming high-impact events" action={<Link href="/economic-calendar" className="text-xs text-(--accent) hover:underline">Calendar →</Link>} className="p-3 sm:p-4">
+          <ul className="space-y-2">
             {events.map((e) => (
               <li key={e.id} className="text-sm flex items-start justify-between gap-2">
                 <div>
@@ -203,7 +203,7 @@ export default async function DashboardPage() {
       </div>
 
       {divergences.length > 0 && (
-        <Card title="Smart money signals" action={<Link href="/smart-money" className="text-xs text-(--accent) hover:underline">View all →</Link>}>
+        <Card title="Smart money signals" action={<Link href="/smart-money" className="text-xs text-(--accent) hover:underline">View all →</Link>} className="p-3 sm:p-4">
           <div className="grid sm:grid-cols-3 gap-3">
             {divergences.map((d) => (
               <Link
