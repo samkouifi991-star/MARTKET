@@ -18,6 +18,7 @@ import {
   Briefcase,
   Landmark,
   Coins,
+  ArrowLeftRight,
   SlidersHorizontal,
   Newspaper,
   CalendarDays,
@@ -55,6 +56,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: "Analysis",
     items: [
+      { label: "Forex Scorecard", href: "/forex-scorecard", icon: ArrowLeftRight },
       { label: "Technical Trends", href: "/technical-trends", icon: TrendingUp },
       { label: "Seasonality", href: "/seasonality", icon: CalendarClock },
     ],

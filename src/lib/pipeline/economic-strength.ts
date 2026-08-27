@@ -71,7 +71,11 @@ function worseFreshness(a: DataFreshness, b: DataFreshness): DataFreshness {
   return (severity[b] ?? 0) > (severity[a] ?? 0) ? b : a;
 }
 
-function surpriseRollupFor(country: string, rows: RecentSurpriseRow[]): number | null {
+/** Exported for lib/pipeline/forex-scorecard.ts, which needs each side of
+ * an FX pair's own surprise rollup independently (to compute a
+ * base-vs-quote differential) rather than the fully-weighted composite
+ * this module builds. */
+export function surpriseRollupFor(country: string, rows: RecentSurpriseRow[]): number | null {
   const matching = rows.filter((r) => r.country === country && r.surpriseZ !== null);
   if (matching.length === 0) return null;
   let weightedSum = 0;
