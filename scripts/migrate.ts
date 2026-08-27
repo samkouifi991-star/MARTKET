@@ -1,10 +1,11 @@
 // One-time-per-deploy database bootstrap, run from Vercel's "vercel-build"
 // step (see package.json) — the ONLY place with both a real DATABASE_URL
-// and real network access to Neon. The agent sandbox that develops this
-// repo cannot reach Neon, CFTC, FRED, FMP, or *.vercel.app directly (a
-// standing, structural network restriction — see project history), so this
-// script is designed to run unattended inside Vercel's build container and
-// print results that are greppable straight out of the build log.
+// and real network access to the database. The agent sandbox that develops
+// this repo cannot reach the database, CFTC, FRED, FMP, or *.vercel.app
+// directly (a standing, structural network restriction — see project
+// history), so this script is designed to run unattended inside Vercel's
+// build container and print results that are greppable straight out of the
+// build log.
 //
 // Idempotent: drizzle's migrate() tracks applied migrations in its own
 // `__drizzle_migrations` table, so re-running this on every build is safe
@@ -17,16 +18,20 @@
 // driver/Postgres error — never a generic "Failed query" — so a failure is
 // diagnosable straight from Vercel's build output.
 //
+// Standard TCP Postgres driver (node-postgres) — this must run against any
+// Postgres host (Supabase, RDS, self-hosted, or Neon's own standard TCP
+// endpoint), not a vendor-specific serverless HTTP API.
+//
 // Deliberately has ZERO dependency on any external market-data provider
 // (FMP/FRED/CFTC/Myfxbook) — a database migration must never be coupled to
 // a third-party API's availability or rate limits. This script only:
-// connect to Neon -> apply schema -> verify tables exist -> exit. Provider
+// connect -> apply schema -> verify tables exist -> exit. Provider
 // verification and data seeding belong in their own controlled scripts
 // (see fmp-*.ts, fred-*.ts, cftc-*.ts, five-market-seed.ts,
 // provider-storage-seed.ts), run explicitly and separately from the build.
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
-import { migrate } from "drizzle-orm/neon-http/migrator";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import * as schema from "../src/db/schema";
 
 const EXPECTED_TABLES = [
@@ -58,15 +63,15 @@ const EXPECTED_TABLES = [
   "scoring_integrity_errors",
   "economic_release_tracking",
   "economic_watch_diagnostics",
-  // Email/Zapier ingestion (replaces FMP economic-calendar/news deps).
+  // Email/Zapier + manual-entry ingestion (replaces FMP economic-calendar/news deps).
   "zapier_ingest_log",
 ];
 
 function describeError(err: unknown): string {
   if (err instanceof Error) {
-    // Neon's HTTP driver often nests the real Postgres error under `.cause`
-    // — surface both, not just the outer wrapper ("Failed query") that
-    // hides what actually went wrong.
+    // node-postgres often nests the real Postgres error under `.cause` —
+    // surface both, not just the outer wrapper ("Failed query") that hides
+    // what actually went wrong.
     const cause = (err as { cause?: unknown }).cause;
     const causeMsg = cause instanceof Error ? ` | cause: ${cause.message}` : cause ? ` | cause: ${String(cause)}` : "";
     return `${err.name}: ${err.message}${causeMsg}`;
@@ -83,17 +88,18 @@ async function main() {
     return;
   }
 
-  const sqlClient = neon(url);
-  const db = drizzle(sqlClient, { schema });
+  const pool = new Pool({ connectionString: url });
+  const db = drizzle(pool, { schema });
 
   // 1. Verify the connection with the simplest possible round trip before
   // touching schema, so a connection failure is reported distinctly from a
   // migration failure.
   try {
-    await sqlClient`select 1`;
+    await pool.query("select 1");
     console.log("DB_MIGRATE_STEP: connection OK");
   } catch (err) {
     console.log(`DB_MIGRATE_RESULT: FAIL (connection) — ${describeError(err)}`);
+    await pool.end().catch(() => {});
     return;
   }
 
@@ -104,6 +110,7 @@ async function main() {
     console.log("DB_MIGRATE_STEP: migrate() completed");
   } catch (err) {
     console.log(`DB_MIGRATE_RESULT: FAIL (migration) — ${describeError(err)}`);
+    await pool.end().catch(() => {});
     return;
   }
 
@@ -112,8 +119,8 @@ async function main() {
   // market_scores fail": those failures are relation-does-not-exist errors
   // from a database that had never been migrated, not a data problem.
   try {
-    const rows = (await sqlClient`select table_name from information_schema.tables where table_schema = 'public'`) as { table_name: string }[];
-    const present = new Set(rows.map((r) => r.table_name));
+    const result = await pool.query<{ table_name: string }>("select table_name from information_schema.tables where table_schema = 'public'");
+    const present = new Set(result.rows.map((r) => r.table_name));
     const missing = EXPECTED_TABLES.filter((t) => !present.has(t));
     if (missing.length > 0) {
       console.log(`DB_MIGRATE_RESULT: FAIL (tables missing after migration) — ${missing.join(", ")}`);
@@ -123,6 +130,8 @@ async function main() {
     console.log("DB_MIGRATE_RESULT: SUCCESS — schema verified");
   } catch (err) {
     console.log(`DB_MIGRATE_RESULT: FAIL (table-existence check) — ${describeError(err)}`);
+  } finally {
+    await pool.end().catch(() => {});
   }
 }
 
