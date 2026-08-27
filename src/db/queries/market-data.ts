@@ -329,6 +329,9 @@ export type StoredCalendarEvent = {
   previous: number | null;
   forecast: number | null;
   affectedMarkets: string[];
+  // Zapier-ingestion addition — "classified"/"unclassified", null for
+  // legacy FMP rows that predate the column (never backfilled).
+  processingStatus: string | null;
 };
 
 function toStoredCalendarEvent(r: {
@@ -341,8 +344,20 @@ function toStoredCalendarEvent(r: {
   previous: number | null;
   forecast: number | null;
   affectedMarkets: string[];
+  processingStatus: string | null;
 }): StoredCalendarEvent {
-  return { id: r.id, country: r.country, event: r.event, dateTime: r.dateTime.toISOString(), impact: r.impact, actual: r.actual, previous: r.previous, forecast: r.forecast, affectedMarkets: r.affectedMarkets };
+  return {
+    id: r.id,
+    country: r.country,
+    event: r.event,
+    dateTime: r.dateTime.toISOString(),
+    impact: r.impact,
+    actual: r.actual,
+    previous: r.previous,
+    forecast: r.forecast,
+    affectedMarkets: r.affectedMarkets,
+    processingStatus: r.processingStatus,
+  };
 }
 
 // Storage-first read for the general economic-calendar surfaces (the

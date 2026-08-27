@@ -34,5 +34,8 @@ export async function getLiveNewsFeed(limit = 60): Promise<ClientNewsArticle[]> 
     importance: r.importance,
     confidence: r.confidence,
     explanation: r.reason,
+    geopoliticalRelevance: r.geopoliticalRelevance ?? undefined,
+    monetaryPolicyRelevance: r.monetaryPolicyRelevance ?? undefined,
+    riskSentiment: r.riskSentiment ?? undefined,
   }));
 }

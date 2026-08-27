@@ -47,6 +47,7 @@ export function NewsClient({ articles }: { articles: ClientNewsArticle[] }) {
               {n.source} · {formatRelative(n.publishedAt)}
               {n.topic && <> · {n.topic}</>}
               {n.isPriced !== undefined && <> · {n.isPriced ? "Already priced in" : "Not yet fully priced in"}</>}
+              {n.riskSentiment && <> · {n.riskSentiment}</>}
             </p>
             <p className="text-xs text-(--text-dim) mt-2 leading-relaxed">{n.explanation}</p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 text-[11px] text-(--text-faint)">
@@ -54,6 +55,8 @@ export function NewsClient({ articles }: { articles: ClientNewsArticle[] }) {
               {n.urgency !== undefined && <span>Urgency {n.urgency}/100</span>}
               <span>Confidence {n.confidence}/100</span>
               {n.expectedImpactDuration && <span>Expected impact: {n.expectedImpactDuration}</span>}
+              {n.geopoliticalRelevance !== undefined && <span>Geopolitical relevance {n.geopoliticalRelevance}/100</span>}
+              {n.monetaryPolicyRelevance !== undefined && <span>Monetary-policy relevance {n.monetaryPolicyRelevance}/100</span>}
             </div>
             <div className="flex flex-wrap gap-1.5 mt-2">
               {n.affectedMarkets.map((m) => (

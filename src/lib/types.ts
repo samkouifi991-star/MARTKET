@@ -273,6 +273,12 @@ export type ClientNewsArticle = {
   urgency?: number;
   isPriced?: boolean;
   expectedImpactDuration?: string;
+  // Email/Zapier LLM-classification additions — undefined for the demo
+  // fixture path and for legacy FMP rows classified by the keyword
+  // heuristic (no such signal exists there).
+  geopoliticalRelevance?: number;
+  monetaryPolicyRelevance?: number;
+  riskSentiment?: string;
 };
 
 export type NewsArticle = {
@@ -311,6 +317,10 @@ export type ClientCalendarEvent = {
   actual: number | string | null;
   affectedMarkets: string[];
   historicalReaction?: string;
+  // Email/Zapier-ingestion additions — undefined for the demo fixture
+  // path and for legacy FMP rows that predate these columns.
+  surprise?: number | null;
+  status?: string | null;
 };
 
 export type CalendarEvent = {

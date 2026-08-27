@@ -63,6 +63,8 @@ export function CalendarClient({ events }: { events: ClientCalendarEvent[] }) {
               <th className="py-2 px-3 text-right">Previous</th>
               <th className="py-2 px-3 text-right">Forecast</th>
               <th className="py-2 px-3 text-right">Actual</th>
+              {events.some((e) => e.surprise !== undefined) && <th className="py-2 px-3 text-right">Surprise</th>}
+              {events.some((e) => e.status !== undefined) && <th className="py-2 px-3">Status</th>}
               {events.some((e) => e.historicalReaction) && <th className="py-2 pl-3">Historical reaction</th>}
             </tr>
           </thead>
@@ -81,6 +83,14 @@ export function CalendarClient({ events }: { events: ClientCalendarEvent[] }) {
                 <td className="py-2 px-3 text-right tabular-nums text-(--text-faint)">{e.previous ?? "—"}</td>
                 <td className="py-2 px-3 text-right tabular-nums text-(--text-faint)">{e.forecast ?? "—"}</td>
                 <td className="py-2 px-3 text-right tabular-nums font-medium">{e.actual ?? "—"}</td>
+                {events.some((ev) => ev.surprise !== undefined) && (
+                  <td className={`py-2 px-3 text-right tabular-nums ${e.surprise != null && e.surprise > 0 ? "text-emerald-400" : e.surprise != null && e.surprise < 0 ? "text-rose-400" : "text-(--text-faint)"}`}>
+                    {e.surprise != null ? (e.surprise > 0 ? `+${e.surprise.toFixed(2)}` : e.surprise.toFixed(2)) : "—"}
+                  </td>
+                )}
+                {events.some((ev) => ev.status !== undefined) && (
+                  <td className="py-2 px-3 text-xs text-(--text-faint) capitalize">{e.status ?? "—"}</td>
+                )}
                 {events.some((ev) => ev.historicalReaction) && <td className="py-2 pl-3 text-xs text-(--text-faint) max-w-xs">{e.historicalReaction}</td>}
               </tr>
             ))}

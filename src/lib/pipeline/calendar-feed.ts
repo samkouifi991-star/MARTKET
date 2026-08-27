@@ -30,5 +30,10 @@ export async function getLiveCalendarFeed(pastDays: number, futureDays: number, 
     forecast: r.forecast,
     actual: r.actual,
     affectedMarkets: r.affectedMarkets,
+    // Raw actual-minus-forecast — not the V2 shadow engine's historically-
+    // standardized surpriseZ, just the plain difference this table can
+    // honestly show without joining a V2 table from a V1 page.
+    surprise: r.actual !== null && r.forecast !== null ? r.actual - r.forecast : null,
+    status: r.processingStatus,
   }));
 }
