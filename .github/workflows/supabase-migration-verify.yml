@@ -22,6 +22,12 @@
 #                         (qa-verification@marketintelligenceai.test,
 #                         already in ADMIN_EMAILS) — signs up on first run,
 #                         signs in on subsequent runs.
+#   rebuild_market_data   boolean, default false. Leave off for routine
+#                         UI/manual-entry/Zapier re-verification — only turn
+#                         on when you actually need fresh candles/macro/
+#                         positioning/sentiment/scores, since it re-hits
+#                         OANDA/FRED/CFTC/FMP and rewrites tens of thousands
+#                         of candle rows every time it runs.
 #
 # Safe to delete once the migration is confirmed and no longer needed.
 name: Supabase Migration + Ingestion Pipeline Verification
@@ -35,9 +41,15 @@ on:
       qa_password:
         description: "Password for qa-verification@marketintelligenceai.test (min 8 chars)"
         required: true
+      rebuild_market_data:
+        description: "Rebuild market data from providers first? Off by default — this run only re-hits OANDA/FRED/CFTC/FMP and rewrites tens of thousands of candle rows when you actually need fresh data, not for routine UI/Zapier re-verification."
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   rebuild-market-data:
+    if: ${{ github.event.inputs.rebuild_market_data == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Rebuild market data (prices -> candles -> macro -> positioning -> retail-sentiment -> scores)
@@ -63,6 +75,7 @@ jobs:
 
   manual-entry-and-ui-verification:
     needs: rebuild-market-data
+    if: always() && !cancelled() && !contains(needs.*.result, 'failure')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (for the verification script only)
