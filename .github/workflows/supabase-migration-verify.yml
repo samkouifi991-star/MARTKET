@@ -87,6 +87,7 @@ jobs:
 
   zapier-webhook-tests:
     needs: manual-entry-and-ui-verification
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Zapier webhook A/B/C/D (new / update / revision / duplicate)

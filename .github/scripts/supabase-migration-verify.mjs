@@ -47,6 +47,23 @@ function containsAll(text, fragments) {
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: DESKTOP });
 const page = await context.newPage();
+// Vercel serverless cold starts on routes this run hasn't hit yet can
+// comfortably exceed Playwright's 30s default action timeout — raise it
+// generously rather than have one slow compile abort the whole run.
+page.setDefaultTimeout(60000);
+
+// Runs one labeled section; on failure, logs it as a FAILed check and
+// keeps going rather than aborting every later section (and screenshot)
+// over one page's problem.
+async function section(label, fn) {
+  try {
+    await fn();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    record(label, false, `threw: ${message.split("\n")[0]}`);
+    console.log(`SECTION_FAILED[${label}] url=${page.url()}`);
+  }
+}
 
 async function shot(name) {
   const path = `${name.replace(/[^a-z0-9-]+/gi, "_")}.jpg`;
@@ -131,111 +148,139 @@ try {
 
   // ===== MANUAL ECONOMIC RELEASE ENTRY (exact spec example) =====
   console.log("=== MANUAL ECONOMIC ENTRY ===");
-  await goto("/admin/data-entry");
-  const today = new Date().toISOString().slice(0, 10);
-  await page.selectOption('select[name="currency"]', "USD");
-  await page.selectOption('select[name="impact"]', "High");
-  await page.fill('input[name="event"]', "CPI m/m");
-  await page.fill('input[name="releaseDate"]', today);
-  await page.fill('input[name="releaseTime"]', "13:30");
-  await page.fill('input[name="actual"]', "0.4%");
-  await page.fill('input[name="forecast"]', "0.2%");
-  await page.fill('input[name="previous"]', "0.1%");
-  await page.click('button[type="submit"]');
-  await page.waitForTimeout(2500);
-  const econEntryText = await textOf(page);
-  const econSaved = econEntryText.includes("Saved") && econEntryText.includes("surprise-scored");
-  record("manual-economic-entry-saved", econSaved, econSaved ? "" : "expected 'Saved — surprise-scored' message not found");
-  await shot("12-admin-data-entry");
+  await section("manual-economic-entry-saved", async () => {
+    await goto("/admin/data-entry", { settleMs: 3000 });
+    console.log(`PAGE_URL_AFTER_GOTO: ${page.url()}`);
+    await page.waitForSelector('select[name="currency"]', { timeout: 60000 });
+    const today = new Date().toISOString().slice(0, 10);
+    await page.selectOption('select[name="currency"]', "USD");
+    await page.selectOption('select[name="impact"]', "High");
+    await page.fill('input[name="event"]', "CPI m/m");
+    await page.fill('input[name="releaseDate"]', today);
+    await page.fill('input[name="releaseTime"]', "13:30");
+    await page.fill('input[name="actual"]', "0.4%");
+    await page.fill('input[name="forecast"]', "0.2%");
+    await page.fill('input[name="previous"]', "0.1%");
+    await page.click('button[type="submit"]');
+    await page.waitForTimeout(2500);
+    const econEntryText = await textOf(page);
+    const econSaved = econEntryText.includes("Saved") && econEntryText.includes("surprise-scored");
+    record("manual-economic-entry-saved", econSaved, econSaved ? "" : "expected 'Saved — surprise-scored' message not found");
+    await shot("12-admin-data-entry");
+  });
 
-  await goto("/admin/incoming-data");
-  const incomingText = await textOf(page);
-  const incomingCheck = containsAll(incomingText, ["Manual (Admin)", "CPI m/m", "USD"]);
-  record("incoming-data-shows-manual-cpi-row", incomingCheck.ok, incomingCheck.missing.join(", "));
-  await shot("13-admin-incoming-data");
+  await section("incoming-data-shows-manual-cpi-row", async () => {
+    await goto("/admin/incoming-data");
+    const incomingText = await textOf(page);
+    const incomingCheck = containsAll(incomingText, ["Manual (Admin)", "CPI m/m", "USD"]);
+    record("incoming-data-shows-manual-cpi-row", incomingCheck.ok, incomingCheck.missing.join(", "));
+    await shot("13-admin-incoming-data");
+  });
 
-  await goto("/economic-calendar");
-  // Default "when" filter is "Upcoming" (dateTime >= now) — the release we
-  // just entered is scheduled for today, which may already be in the past
-  // relative to whenever this job happens to run. Switch to "All" so
-  // visibility never depends on wall-clock timing.
-  await page.click('button:has-text("All")').catch(() => {});
-  await page.waitForTimeout(300);
-  const calendarText = await textOf(page);
-  const calendarCheck = containsAll(calendarText, ["CPI m/m", "USD"]);
-  record("economic-calendar-shows-cpi-release", calendarCheck.ok, calendarCheck.missing.join(", "));
-  const surpriseTextHit = /0\.4/.test(calendarText) && /0\.2/.test(calendarText);
-  record("economic-calendar-shows-actual-forecast-values", surpriseTextHit);
-  await shot("14-economic-surprise-calendar");
+  await section("economic-calendar-shows-cpi-release", async () => {
+    await goto("/economic-calendar");
+    // Default "when" filter is "Upcoming" (dateTime >= now) — the release
+    // we just entered is scheduled for today, which may already be in the
+    // past relative to whenever this job happens to run. Switch to "All"
+    // so visibility never depends on wall-clock timing.
+    await page.click('button:has-text("All")').catch(() => {});
+    await page.waitForTimeout(300);
+    const calendarText = await textOf(page);
+    const calendarCheck = containsAll(calendarText, ["CPI m/m", "USD"]);
+    record("economic-calendar-shows-cpi-release", calendarCheck.ok, calendarCheck.missing.join(", "));
+    const surpriseTextHit = /0\.4/.test(calendarText) && /0\.2/.test(calendarText);
+    record("economic-calendar-shows-actual-forecast-values", surpriseTextHit);
+    await shot("14-economic-surprise-calendar");
+  });
 
-  await goto("/inflation");
-  const inflationText = await textOf(page);
-  console.log("INFLATION_PAGE_TEXT_SNIPPET:", inflationText.slice(0, 400).replace(/\n+/g, " | "));
+  await section("inflation-page-snippet", async () => {
+    await goto("/inflation");
+    const inflationText = await textOf(page);
+    console.log("INFLATION_PAGE_TEXT_SNIPPET:", inflationText.slice(0, 400).replace(/\n+/g, " | "));
+  });
 
-  await goto("/economic-heatmap");
-  await shot("06b-economic-heatmap-after");
+  await section("economic-heatmap-after", async () => {
+    await goto("/economic-heatmap");
+    await shot("06b-economic-heatmap-after");
+  });
 
-  await goto("/markets/GBPUSD");
-  await shot("02b-ai-market-scorecard-gbpusd-after");
+  await section("ai-market-scorecard-after", async () => {
+    await goto("/markets/GBPUSD");
+    await shot("02b-ai-market-scorecard-gbpusd-after");
+  });
 
   // ===== MANUAL NEWS / GEOPOLITICAL EVENT ENTRY (exact spec example) =====
   console.log("=== MANUAL NEWS ENTRY ===");
-  await goto("/admin/data-entry");
-  await page.click('button:has-text("News / Geopolitical Event")');
-  await page.waitForTimeout(300);
-  const todayNews = new Date().toISOString().slice(0, 10);
-  await page.fill('input[name="headline"]', "Fed signals rates may remain higher for longer");
-  await page.fill('input[name="source"]', "Forex Factory");
-  await page.selectOption('select[name="impact"]', "High");
-  await page.fill('input[name="publishedDate"]', todayNews);
-  await page.fill('input[name="publishedTime"]', "18:00");
-  await page.click('button[type="submit"]');
-  await page.waitForTimeout(2500);
-  const newsEntryText = await textOf(page);
-  const newsSaved = newsEntryText.includes("Saved and classified");
-  record("manual-news-entry-saved", newsSaved, newsSaved ? "" : "expected 'Saved and classified' message not found");
+  await section("manual-news-entry-saved", async () => {
+    await goto("/admin/data-entry", { settleMs: 3000 });
+    console.log(`PAGE_URL_AFTER_GOTO: ${page.url()}`);
+    await page.waitForSelector('button:has-text("News / Geopolitical Event")', { timeout: 60000 });
+    await page.click('button:has-text("News / Geopolitical Event")');
+    await page.waitForTimeout(300);
+    const todayNews = new Date().toISOString().slice(0, 10);
+    await page.fill('input[name="headline"]', "Fed signals rates may remain higher for longer");
+    await page.fill('input[name="source"]', "Forex Factory");
+    await page.selectOption('select[name="impact"]', "High");
+    await page.fill('input[name="publishedDate"]', todayNews);
+    await page.fill('input[name="publishedTime"]', "18:00");
+    await page.click('button[type="submit"]');
+    await page.waitForTimeout(2500);
+    const newsEntryText = await textOf(page);
+    const newsSaved = newsEntryText.includes("Saved and classified");
+    record("manual-news-entry-saved", newsSaved, newsSaved ? "" : "expected 'Saved and classified' message not found");
+  });
 
-  await goto("/admin/incoming-data");
-  const incomingText2 = await textOf(page);
-  const incomingNewsCheck = containsAll(incomingText2, ["Manual (Admin)", "Fed signals rates"]);
-  record("incoming-data-shows-manual-news-row", incomingNewsCheck.ok, incomingNewsCheck.missing.join(", "));
-  // "Rules" (deterministic classifier) is the expected value since
-  // ANTHROPIC_API_KEY is deliberately not configured (not a launch
-  // blocker) — this is the concrete proof the app works without it.
-  const classifierIsRules = incomingText2.includes("Rules");
-  record("classifier-source-is-rules-no-anthropic-required", classifierIsRules);
+  await section("incoming-data-shows-manual-news-row", async () => {
+    await goto("/admin/incoming-data");
+    const incomingText2 = await textOf(page);
+    const incomingNewsCheck = containsAll(incomingText2, ["Manual (Admin)", "Fed signals rates"]);
+    record("incoming-data-shows-manual-news-row", incomingNewsCheck.ok, incomingNewsCheck.missing.join(", "));
+    // "Rules" (deterministic classifier) is the expected value since
+    // ANTHROPIC_API_KEY is deliberately not configured (not a launch
+    // blocker) — this is the concrete proof the app works without it.
+    const classifierIsRules = incomingText2.includes("Rules");
+    record("classifier-source-is-rules-no-anthropic-required", classifierIsRules);
+  });
 
-  await goto("/news");
-  const newsIntelText = await textOf(page);
-  const newsIntelCheck = containsAll(newsIntelText, ["Fed signals rates"]);
-  record("news-intelligence-shows-headline", newsIntelCheck.ok, newsIntelCheck.missing.join(", "));
+  await section("news-intelligence-shows-headline", async () => {
+    await goto("/news");
+    const newsIntelText = await textOf(page);
+    const newsIntelCheck = containsAll(newsIntelText, ["Fed signals rates"]);
+    record("news-intelligence-shows-headline", newsIntelCheck.ok, newsIntelCheck.missing.join(", "));
+  });
 
-  await goto("/geopolitical-risk");
-  const geoRiskText = await textOf(page);
-  const geoRiskShowsItem = geoRiskText.includes("Fed signals rates");
-  // Not necessarily a failure: without ANTHROPIC_API_KEY, the deterministic
-  // fallback classifier deliberately sets monetaryPolicyRelevance/
-  // geopoliticalRelevance to 0 (see src/lib/ingestion/news.ts's catch
-  // block) and riskCategory to "other" — so this item legitimately may not
-  // clear the Geopolitical Risk Tracker's relevance threshold. Recorded as
-  // informational, not scored PASS/FAIL against the rest of the suite.
-  console.log(`INFO[geopolitical-risk-tracker-shows-news-item]: ${geoRiskShowsItem ? "YES" : "NO (expected without ANTHROPIC_API_KEY — deterministic fallback yields 0 relevance)"}`);
-  await shot("10b-geopolitical-risk-after");
+  await section("geopolitical-risk-after", async () => {
+    await goto("/geopolitical-risk");
+    const geoRiskText = await textOf(page);
+    const geoRiskShowsItem = geoRiskText.includes("Fed signals rates");
+    // Not necessarily a failure: without ANTHROPIC_API_KEY, the
+    // deterministic fallback classifier deliberately sets
+    // monetaryPolicyRelevance/geopoliticalRelevance to 0 (see
+    // src/lib/ingestion/news.ts's catch block) and riskCategory to "other"
+    // — so this item legitimately may not clear the Geopolitical Risk
+    // Tracker's relevance threshold. Recorded as informational, not scored
+    // PASS/FAIL against the rest of the suite.
+    console.log(`INFO[geopolitical-risk-tracker-shows-news-item]: ${geoRiskShowsItem ? "YES" : "NO (expected without ANTHROPIC_API_KEY — deterministic fallback yields 0 relevance)"}`);
+    await shot("10b-geopolitical-risk-after");
+  });
 
   // ===== FINAL REQUIRED SCREENSHOTS =====
   console.log("=== FINAL SCREENSHOTS ===");
-  const mobileContext = await browser.newContext({ viewport: MOBILE });
-  const mobilePage = await mobileContext.newPage();
-  await mobilePage.goto(`${baseUrl}/`, { waitUntil: "load", timeout: 60000 });
-  await mobilePage.waitForTimeout(1800);
-  await mobilePage.screenshot({ path: "15-mobile-dashboard.jpg", fullPage: true, type: "jpeg", quality: 45 });
-  const mSize = fs.statSync("15-mobile-dashboard.jpg").size;
-  const mB64 = fs.readFileSync("15-mobile-dashboard.jpg").toString("base64");
-  console.log(`SHOT_CAPTURED: 15-mobile-dashboard bytes=${mSize} base64Length=${mB64.length}`);
-  console.log("BEGIN_SHOT_B64:15-mobile-dashboard");
-  console.log(mB64);
-  console.log("END_SHOT_B64:15-mobile-dashboard");
-  await mobileContext.close();
+  await section("mobile-dashboard", async () => {
+    const mobileContext = await browser.newContext({ viewport: MOBILE });
+    const mobilePage = await mobileContext.newPage();
+    mobilePage.setDefaultTimeout(60000);
+    await mobilePage.goto(`${baseUrl}/`, { waitUntil: "load", timeout: 60000 });
+    await mobilePage.waitForTimeout(1800);
+    await mobilePage.screenshot({ path: "15-mobile-dashboard.jpg", fullPage: true, type: "jpeg", quality: 45 });
+    const mSize = fs.statSync("15-mobile-dashboard.jpg").size;
+    const mB64 = fs.readFileSync("15-mobile-dashboard.jpg").toString("base64");
+    console.log(`SHOT_CAPTURED: 15-mobile-dashboard bytes=${mSize} base64Length=${mB64.length}`);
+    console.log("BEGIN_SHOT_B64:15-mobile-dashboard");
+    console.log(mB64);
+    console.log("END_SHOT_B64:15-mobile-dashboard");
+    await mobileContext.close();
+  });
 
   console.log("=== SUMMARY ===");
   console.log(JSON.stringify(results, null, 2));
