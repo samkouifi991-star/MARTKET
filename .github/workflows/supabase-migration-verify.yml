@@ -153,9 +153,19 @@ jobs:
           JSON
           )"
 
+          # E. News — a real controlled news payload via the webhook itself
+          # (distinct headline from the manual-entry test so dedup never
+          # masks whether the Zapier channel's news path independently works).
+          PUBLISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+          call "E_news" "$(cat <<JSON
+          {"type":"news","source":"forex_factory_email","headline":"ECB holds rates steady, signals no near-term cuts","summary":"The European Central Bank left its main refinancing rate unchanged and pushed back against market expectations for imminent cuts.","currencies":["EUR"],"impact":"High","publishedAt":"${PUBLISHED_AT}"}
+          JSON
+          )"
+
           echo "=== ZAPIER_SUMMARY ==="
           for label in A_new_scheduled B_release_update C_revision D_duplicate; do
             id=$(node -e "try{const j=JSON.parse(require('fs').readFileSync('zapier_${label}.json','utf8'));console.log(j.economicEventId ?? 'null')}catch(e){console.log('parse_error')}")
             markets=$(node -e "try{const j=JSON.parse(require('fs').readFileSync('zapier_${label}.json','utf8'));console.log(JSON.stringify(j.recomputedMarkets ?? []))}catch(e){console.log('[]')}")
             echo "SUMMARY[$label]: economicEventId=$id recomputedMarkets=$markets"
           done
+          node -e "try{const j=JSON.parse(require('fs').readFileSync('zapier_E_news.json','utf8'));console.log('SUMMARY[E_news]: newsArticleId='+(j.newsArticleId ?? 'null')+' duplicate='+(j.duplicate ?? false)+' recomputedMarkets='+JSON.stringify(j.recomputedMarkets ?? []))}catch(e){console.log('SUMMARY[E_news]: parse_error')}"
