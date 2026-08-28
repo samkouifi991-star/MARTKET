@@ -103,6 +103,8 @@ try {
     await page.waitForLoadState("networkidle").catch(() => {});
     await page.waitForTimeout(1500);
     bodyText = await textOf(page);
+    console.log(`AUTH: post-signin url=${page.url()}`);
+    console.log(`AUTH: post-signin body snippet: ${bodyText.slice(0, 300).replace(/\n+/g, " | ")}`);
   }
 
   await goto("/admin");
