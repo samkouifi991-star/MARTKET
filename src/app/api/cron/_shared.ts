@@ -4,11 +4,21 @@ import { DATA_MODE } from "@/services/data-mode";
 
 /** Vercel Cron sends requests with this header; verify it matches CRON_SECRET
  * (set as a Vercel env var) so the endpoint can't be triggered by anyone
- * who finds the URL. See https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs */
+ * who finds the URL. See https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs
+ *
+ * Also accepts EVENT_WATCH_SECRET as a fallback — the same "external
+ * scheduler" secret verifyEventWatchAuth below already uses for the V2
+ * release-watch route — so a one-off GitHub-Actions-triggered rebuild
+ * (e.g. after a database migration) can call these routes without a
+ * dedicated new secret, matching this file's existing "reuse, don't
+ * duplicate, secrets across scheduler paths" convention. */
 export function verifyCronAuth(req: NextRequest): boolean {
+  const auth = req.headers.get("authorization");
   const secret = process.env.CRON_SECRET;
-  if (!secret) return false; // fail closed: no secret configured means no access
-  return req.headers.get("authorization") === `Bearer ${secret}`;
+  if (secret && auth === `Bearer ${secret}`) return true;
+  const fallback = process.env.EVENT_WATCH_SECRET;
+  if (fallback && auth === `Bearer ${fallback}`) return true;
+  return false; // fail closed: no secret configured means no access
 }
 
 /** Same idea as verifyCronAuth, for routes triggered by an external

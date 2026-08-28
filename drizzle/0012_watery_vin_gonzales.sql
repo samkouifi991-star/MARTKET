@@ -1,0 +1,1 @@
+ALTER TABLE "zapier_ingest_log" ADD COLUMN "classifier_model" varchar(64);

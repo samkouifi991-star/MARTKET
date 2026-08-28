@@ -106,6 +106,7 @@ export async function ingestNews(payload: NewsPayload, options: IngestNewsOption
     outcome: "accepted_new",
     newsArticleId: insertedId,
     recomputedMarkets,
+    classifierModel: classification.model,
   }).catch(() => {});
 
   return { dryRun: false, duplicate: false, newsArticleId: insertedId, recomputedMarkets };

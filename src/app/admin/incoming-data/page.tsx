@@ -44,6 +44,16 @@ function outcomeBadgeClass(outcome: string): string {
   return "text-(--text-faint)";
 }
 
+// "AI" when the LLM classifier actually produced this news row's
+// interpretation; "Rules" when the deterministic keyword fallback ran
+// instead (e.g. ANTHROPIC_API_KEY isn't configured — never a launch
+// blocker, see llm-news-classifier.ts). Not applicable to economic-event
+// rows, which are never LLM-classified.
+function classifierLabel(row: ZapierIngestLogRow): string {
+  if (row.payloadType !== "news") return "—";
+  return row.classifierModel ? "AI" : "Rules";
+}
+
 export default async function IncomingDataPage() {
   await requireAdmin();
 
@@ -100,6 +110,7 @@ export default async function IncomingDataPage() {
                   <th className="py-2 pr-3 font-medium">Event / Headline</th>
                   <th className="py-2 pr-3 font-medium">Currency</th>
                   <th className="py-2 pr-3 font-medium">Impact</th>
+                  <th className="py-2 pr-3 font-medium">Classifier</th>
                   <th className="py-2 pr-3 font-medium">Status</th>
                   <th className="py-2 pr-3 font-medium">Markets affected</th>
                   <th className="py-2 pr-3 font-medium">Recomputed</th>
@@ -118,6 +129,7 @@ export default async function IncomingDataPage() {
                     </td>
                     <td className="py-2 pr-3">{rawField(row, "currency")}</td>
                     <td className="py-2 pr-3">{rawField(row, "impact")}</td>
+                    <td className="py-2 pr-3 text-xs">{classifierLabel(row)}</td>
                     <td className={`py-2 pr-3 font-medium ${outcomeBadgeClass(row.outcome)}`}>{OUTCOME_LABEL[row.outcome] ?? row.outcome}</td>
                     <td className="py-2 pr-3 text-xs text-(--text-faint)">{row.recomputedMarkets.length > 0 ? row.recomputedMarkets.join(", ") : "—"}</td>
                     <td className="py-2 pr-3 tabular-nums">{row.recomputedMarkets.length}</td>

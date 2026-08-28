@@ -30,6 +30,11 @@ export async function logZapierIngest(entry: {
   newsArticleId?: number | null;
   recomputedMarkets?: string[];
   errorDetail?: string | null;
+  /** Which classifier produced a news row's interpretation — the model
+   * name for the AI path, null for the deterministic keyword fallback or
+   * for non-news rows. Shown as "AI"/"Rules" on the Admin Incoming Data
+   * page. */
+  classifierModel?: string | null;
 }): Promise<void> {
   const db = getDb();
   await db.insert(zapierIngestLog).values({
@@ -42,6 +47,7 @@ export async function logZapierIngest(entry: {
     newsArticleId: entry.newsArticleId ?? null,
     recomputedMarkets: entry.recomputedMarkets ?? [],
     errorDetail: entry.errorDetail ?? null,
+    classifierModel: entry.classifierModel ?? null,
   });
 }
 
@@ -56,6 +62,7 @@ export type ZapierIngestLogRow = {
   newsArticleId: number | null;
   recomputedMarkets: string[];
   errorDetail: string | null;
+  classifierModel: string | null;
   // The exact body Zapier sent — the Admin Incoming Data page reads
   // event/headline/currency/impact straight from this rather than
   // joining economic_events/news_articles, since the log already carries
@@ -77,6 +84,7 @@ export async function getRecentZapierIngestLog(limit = 100): Promise<ZapierInges
     newsArticleId: r.newsArticleId,
     recomputedMarkets: r.recomputedMarkets,
     errorDetail: r.errorDetail,
+    classifierModel: r.classifierModel,
     rawPayload: r.rawPayload,
   }));
 }

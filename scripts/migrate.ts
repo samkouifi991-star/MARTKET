@@ -67,6 +67,16 @@ const EXPECTED_TABLES = [
   "zapier_ingest_log",
 ];
 
+// Column-level checks for the newest schema additions (platform-redesign
+// Phases 1/8) — table-name presence alone doesn't prove a column exists,
+// and these two specifically gate real application behavior (channel
+// distinguishes manual vs. Zapier provenance; risk_category feeds the
+// Geopolitical Risk Tracker's sub-scores).
+const EXPECTED_COLUMNS: { table: string; column: string }[] = [
+  { table: "zapier_ingest_log", column: "channel" },
+  { table: "news_articles", column: "risk_category" },
+];
+
 function describeError(err: unknown): string {
   if (err instanceof Error) {
     // node-postgres often nests the real Postgres error under `.cause` —
@@ -127,9 +137,29 @@ async function main() {
       return;
     }
     console.log(`DB_MIGRATE_STEP: all ${EXPECTED_TABLES.length} expected tables present`);
-    console.log("DB_MIGRATE_RESULT: SUCCESS — schema verified");
   } catch (err) {
     console.log(`DB_MIGRATE_RESULT: FAIL (table-existence check) — ${describeError(err)}`);
+    await pool.end().catch(() => {});
+    return;
+  }
+
+  // 4. Column-level check for the newest additions — a real
+  // information_schema.columns query, not an inference from the migration
+  // script having "exited successfully".
+  try {
+    const result = await pool.query<{ table_name: string; column_name: string }>(
+      "select table_name, column_name from information_schema.columns where table_schema = 'public'"
+    );
+    const present = new Set(result.rows.map((r) => `${r.table_name}.${r.column_name}`));
+    const missing = EXPECTED_COLUMNS.filter((c) => !present.has(`${c.table}.${c.column}`));
+    if (missing.length > 0) {
+      console.log(`DB_MIGRATE_RESULT: FAIL (columns missing after migration) — ${missing.map((c) => `${c.table}.${c.column}`).join(", ")}`);
+      return;
+    }
+    console.log(`DB_MIGRATE_STEP: all ${EXPECTED_COLUMNS.length} newest columns present (${EXPECTED_COLUMNS.map((c) => `${c.table}.${c.column}`).join(", ")})`);
+    console.log("DB_MIGRATE_RESULT: SUCCESS — schema verified");
+  } catch (err) {
+    console.log(`DB_MIGRATE_RESULT: FAIL (column-existence check) — ${describeError(err)}`);
   } finally {
     await pool.end().catch(() => {});
   }

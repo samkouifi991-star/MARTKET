@@ -240,6 +240,13 @@ export const zapierIngestLog = pgTable(
     newsArticleId: integer("news_article_id").references(() => newsArticles.id),
     recomputedMarkets: jsonb("recomputed_markets").$type<string[]>().notNull().default([]),
     errorDetail: text("error_detail"),
+    // Which classifier produced a news row's interpretation — "claude-opus-5"
+    // (or whichever model ran) for the AI path, null for the deterministic
+    // keyword fallback (news-classifier.ts) or for non-news rows. Lets the
+    // Admin Incoming Data page show "AI" vs "Rules" without joining to
+    // news_articles — same "log carries everything the page needs" design
+    // as every other column here.
+    classifierModel: varchar("classifier_model", { length: 64 }),
   },
   (t) => [
     index("zapier_ingest_log_received_at").on(t.receivedAt),
