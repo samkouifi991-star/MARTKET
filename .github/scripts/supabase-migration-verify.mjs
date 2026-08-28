@@ -44,6 +44,21 @@ function containsAll(text, fragments) {
   return { ok: missing.length === 0, missing };
 }
 
+// Polls the page body for a "Saving…" -> "Saved…" transition instead of a
+// fixed sleep — the Server Action does a real Supabase write + surprise/
+// recompute pass (Promise.all across every affected market), which can
+// comfortably exceed a couple of seconds. Returns the final body text once
+// either the expected substring appears or timeoutMs elapses.
+async function waitForBodyText(includesText, timeoutMs = 20000) {
+  const start = Date.now();
+  let text = await textOf(page);
+  while (!text.includes(includesText) && Date.now() - start < timeoutMs) {
+    await page.waitForTimeout(500);
+    text = await textOf(page);
+  }
+  return text;
+}
+
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: DESKTOP });
 const page = await context.newPage();
@@ -100,8 +115,14 @@ try {
     await page.fill("#email", qaEmail);
     await page.fill("#password", qaPassword);
     await page.click('button[type="submit"]');
-    await page.waitForLoadState("networkidle").catch(() => {});
-    await page.waitForTimeout(1500);
+    // Poll for navigation away from /signin (successful redirect) rather
+    // than a fixed sleep — the signin Server Action does a real Supabase
+    // read + session-row write, which can take longer than a fixed delay
+    // under Transaction-pooler round-trip overhead.
+    const authStart = Date.now();
+    while (page.url().includes("/signin") && Date.now() - authStart < 15000) {
+      await page.waitForTimeout(500);
+    }
     bodyText = await textOf(page);
     console.log(`AUTH: post-signin url=${page.url()}`);
     console.log(`AUTH: post-signin body snippet: ${bodyText.slice(0, 300).replace(/\n+/g, " | ")}`);
@@ -164,8 +185,7 @@ try {
     await page.fill('input[name="forecast"]', "0.2%");
     await page.fill('input[name="previous"]', "0.1%");
     await page.click('button[type="submit"]');
-    await page.waitForTimeout(2500);
-    const econEntryText = await textOf(page);
+    const econEntryText = await waitForBodyText("Saved", 20000);
     const econSaved = econEntryText.includes("Saved") && econEntryText.includes("surprise-scored");
     record("manual-economic-entry-saved", econSaved, econSaved ? "" : "expected 'Saved — surprise-scored' message not found");
     await shot("12-admin-data-entry");
@@ -226,8 +246,7 @@ try {
     await page.fill('input[name="publishedDate"]', todayNews);
     await page.fill('input[name="publishedTime"]', "18:00");
     await page.click('button[type="submit"]');
-    await page.waitForTimeout(2500);
-    const newsEntryText = await textOf(page);
+    const newsEntryText = await waitForBodyText("Saved", 20000);
     const newsSaved = newsEntryText.includes("Saved and classified");
     record("manual-news-entry-saved", newsSaved, newsSaved ? "" : "expected 'Saved and classified' message not found");
   });
