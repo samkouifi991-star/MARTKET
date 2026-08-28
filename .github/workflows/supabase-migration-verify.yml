@@ -1,0 +1,147 @@
+# One-off, manually-triggered end-to-end verification for the Neon ->
+# Supabase database migration and the manual-entry/Zapier ingestion
+# pipeline. Runs on a GitHub Actions runner (unrestricted egress) against
+# the real deployed production app, since the orchestrating sandbox for
+# this repo cannot reach *.vercel.app or Supabase's Postgres port directly
+# (see economic-release-watch.yml/launch-audit.yml for the same pattern).
+#
+# Required repo secrets (already configured):
+#   APP_BASE_URL        e.g. https://your-deployment.vercel.app
+#   EVENT_WATCH_SECRET  accepted as a CRON_SECRET fallback by verifyCronAuth
+#                       (src/app/api/cron/_shared.ts) — used here only to
+#                       trigger the standard /api/cron/* market-data-rebuild
+#                       routes, never the Zapier webhook.
+#
+# Required workflow_dispatch inputs (NOT stored as permanent secrets — this
+# is a private, single-user repo and these are one-off verification
+# credentials, never the database connection string itself, which this
+# workflow never touches):
+#   zapier_ingest_secret  the ZAPIER_INGEST_SECRET value set in Vercel
+#                         Production, needed to call the real webhook.
+#   qa_password           password for the dedicated QA admin test account
+#                         (qa-verification@marketintelligenceai.test,
+#                         already in ADMIN_EMAILS) — signs up on first run,
+#                         signs in on subsequent runs.
+#
+# Safe to delete once the migration is confirmed and no longer needed.
+name: Supabase Migration + Ingestion Pipeline Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      zapier_ingest_secret:
+        description: "ZAPIER_INGEST_SECRET (Vercel Production value)"
+        required: true
+      qa_password:
+        description: "Password for qa-verification@marketintelligenceai.test (min 8 chars)"
+        required: true
+
+jobs:
+  rebuild-market-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebuild market data (prices -> candles -> macro -> positioning -> retail-sentiment -> scores)
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          SECRET: ${{ secrets.EVENT_WATCH_SECRET }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$SECRET" ]; then
+            echo "APP_BASE_URL or EVENT_WATCH_SECRET is not set."
+            exit 1
+          fi
+          for job in prices candles macro positioning retail-sentiment scores; do
+            echo "=== CRON_JOB: $job ==="
+            http_status=$(curl -sS -L -o "response_${job}.json" -w "%{http_code}" \
+              -H "Authorization: Bearer ${SECRET}" \
+              "${APP_BASE_URL}/api/cron/${job}")
+            echo "HTTP_STATUS[$job]: ${http_status}"
+            echo "BEGIN_CRON_JSON:$job"
+            cat "response_${job}.json"
+            echo ""
+            echo "END_CRON_JSON:$job"
+          done
+
+  manual-entry-and-ui-verification:
+    needs: rebuild-market-data
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for the verification script only)
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm install --no-save playwright@latest
+          npx playwright install --with-deps chromium
+
+      - name: Run manual-entry + UI verification script
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          QA_EMAIL: "qa-verification@marketintelligenceai.test"
+          QA_PASSWORD: ${{ github.event.inputs.qa_password }}
+        run: node .github/scripts/supabase-migration-verify.mjs
+
+  zapier-webhook-tests:
+    needs: manual-entry-and-ui-verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Zapier webhook A/B/C/D (new / update / revision / duplicate)
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          ZAPIER_SECRET: ${{ github.event.inputs.zapier_ingest_secret }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$ZAPIER_SECRET" ]; then
+            echo "APP_BASE_URL or zapier_ingest_secret input is not set."
+            exit 1
+          fi
+          SCHEDULED_AT="2026-09-15T13:30:00.000Z"
+
+          call() {
+            local label="$1"; local body="$2"
+            echo "=== ZAPIER_CALL: $label ==="
+            http_status=$(curl -sS -o "zapier_${label}.json" -w "%{http_code}" \
+              -X POST "${APP_BASE_URL}/api/integrations/zapier/market-event" \
+              -H "Authorization: Bearer ${ZAPIER_SECRET}" \
+              -H "Content-Type: application/json" \
+              -d "$body")
+            echo "HTTP_STATUS[$label]: ${http_status}"
+            echo "BEGIN_ZAPIER_JSON:$label"
+            cat "zapier_${label}.json"
+            echo ""
+            echo "END_ZAPIER_JSON:$label"
+          }
+
+          # A. New scheduled release — Actual not yet known.
+          call "A_new_scheduled" "$(cat <<JSON
+          {"type":"economic_event","source":"forex_factory_email","currency":"USD","event":"CPI m/m","impact":"High","scheduledAt":"${SCHEDULED_AT}","forecast":"0.2%","previous":"0.1%","actual":null}
+          JSON
+          )"
+
+          # B. Release update — same release, Actual now published.
+          call "B_release_update" "$(cat <<JSON
+          {"type":"economic_event","source":"forex_factory_email","currency":"USD","event":"CPI m/m","impact":"High","scheduledAt":"${SCHEDULED_AT}","forecast":"0.2%","previous":"0.1%","actual":"0.4%"}
+          JSON
+          )"
+
+          # C. Revision — Previous revised 0.1% -> 0.0%, same release/actual.
+          call "C_revision" "$(cat <<JSON
+          {"type":"economic_event","source":"forex_factory_email","currency":"USD","event":"CPI m/m","impact":"High","scheduledAt":"${SCHEDULED_AT}","forecast":"0.2%","previous":"0.0%","actual":"0.4%"}
+          JSON
+          )"
+
+          # D. Duplicate — identical to C, sent again.
+          call "D_duplicate" "$(cat <<JSON
+          {"type":"economic_event","source":"forex_factory_email","currency":"USD","event":"CPI m/m","impact":"High","scheduledAt":"${SCHEDULED_AT}","forecast":"0.2%","previous":"0.0%","actual":"0.4%"}
+          JSON
+          )"
+
+          echo "=== ZAPIER_SUMMARY ==="
+          for label in A_new_scheduled B_release_update C_revision D_duplicate; do
+            id=$(node -e "try{const j=JSON.parse(require('fs').readFileSync('zapier_${label}.json','utf8'));console.log(j.economicEventId ?? 'null')}catch(e){console.log('parse_error')}")
+            markets=$(node -e "try{const j=JSON.parse(require('fs').readFileSync('zapier_${label}.json','utf8'));console.log(JSON.stringify(j.recomputedMarkets ?? []))}catch(e){console.log('[]')}")
+            echo "SUMMARY[$label]: economicEventId=$id recomputedMarkets=$markets"
+          done
