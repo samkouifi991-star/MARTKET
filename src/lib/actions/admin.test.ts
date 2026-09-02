@@ -7,7 +7,7 @@
 // and refuses to save an invalid configuration at all.
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), unstable_cache: (fn: unknown) => fn }));
 vi.mock("@/lib/auth/dal");
 vi.mock("@/db/queries/scoring-config");
 vi.mock("@/lib/pipeline/scoring-engine");

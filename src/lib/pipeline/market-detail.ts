@@ -18,6 +18,7 @@
 // canonical, storage-only resolver Top Setups/Dashboard/Markets/Heatmap/
 // Watchlists/the landing page all call too, so this page can never show a
 // different current price for a symbol than any other surface does.
+import { unstable_cache } from "next/cache";
 import { getInstrument } from "@/lib/instruments";
 import { publicInstruments } from "@/services/market-coverage";
 import { generatePositioning } from "@/lib/demo/positioning";
@@ -33,6 +34,18 @@ import { getSymbolMapping } from "@/services/market-data/symbol-map";
 import { CardResult, isUsable, seasonalityDepthFreshness, worseOf } from "./types";
 import { resolveSmartMoney } from "./positioning";
 import { getCanonicalPriceCard } from "./price";
+import { withCacheFallback } from "@/lib/cache-fallback";
+
+// Egress fix, phase 2: seasonality's own candle read (20*365 days — up to
+// ~7,300 rows, by far the single largest read on this page) and CFTC's
+// weekly-cadence report both change far slower than a 45s AutoRefresh
+// cycle warrants re-reading them. CFTC publishes once a week and
+// seasonality's underlying history is, by definition, historical — an
+// hours-scale cache is still far fresher than either source actually
+// updates. See technical.ts's cachedDailyCandles/H4/H1 for the same
+// pattern applied to the price chart.
+const cachedSeasonalityCandles = unstable_cache((symbol: string) => getDailyCandlesWithFallback(symbol, 20 * 365), ["mkt-detail-seasonality-candles"], { revalidate: 4 * 3600 });
+const cachedPositioning = unstable_cache((symbol: string) => getPositioningWithFallback(symbol), ["mkt-detail-positioning"], { revalidate: 3 * 3600 });
 
 export type InstitutionalCardData = {
   classification: string;
@@ -55,8 +68,10 @@ export const MIN_YEARS_FOR_LIVE_SEASONALITY = 3;
 
 async function institutionalCard(symbol: string, mode: DataMode): Promise<CardResult<InstitutionalCardData>> {
   // Storage-first: live CFTC call first, falls back to the last stored
-  // report (DELAYED/STALE) on failure — see last-known-good.ts.
-  const result = await getPositioningWithFallback(symbol);
+  // report (DELAYED/STALE) on failure — see last-known-good.ts. Cached
+  // (see cachedPositioning above) since a real CFTC report only publishes
+  // weekly — re-fetching on every 45s AutoRefresh buys nothing.
+  const result = await withCacheFallback(() => cachedPositioning(symbol), () => getPositioningWithFallback(symbol));
   if (result.value) {
     const v = result.value;
     return {
@@ -139,7 +154,10 @@ async function smartMoneyCard(symbol: string): Promise<CardResult<SmartMoneyCard
 }
 
 async function seasonalityCard(symbol: string, mode: DataMode): Promise<CardResult<SeasonalityStat>> {
-  const history = await getDailyCandlesWithFallback(symbol, 20 * 365);
+  // Cached (see cachedSeasonalityCandles above) — by far the largest single
+  // read on this page (up to ~7,300 rows) for a statistic that, by
+  // definition, only changes as slowly as history itself does.
+  const history = await withCacheFallback(() => cachedSeasonalityCandles(symbol), () => getDailyCandlesWithFallback(symbol, 20 * 365));
   if (isUsable(history.status, history.value)) {
     const stat = computeCurrentMonthStat(history.value!);
     // Real span of the sample, not stat.years (which counts occurrences of
@@ -186,7 +204,11 @@ export type LiveMarketDetail = {
 
 export async function getLiveMarketDetail(symbol: string, mode: DataMode): Promise<LiveMarketDetail> {
   const [price, institutional, retail, smartMoney, seasonality] = await Promise.all([
-    getCanonicalPriceCard(symbol, mode),
+    // cacheHistorical: true — this page's own chart is the one caller that
+    // opts into caching the daily/H4/H1 candle reads behind current price
+    // (see technical.ts). getQuoteWithFallback (current price itself)
+    // stays uncached and refreshes on every call, same as always.
+    getCanonicalPriceCard(symbol, mode, { cacheHistorical: true }),
     institutionalCard(symbol, mode),
     retailCard(symbol),
     smartMoneyCard(symbol),

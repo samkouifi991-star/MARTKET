@@ -70,7 +70,7 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
   // updateCurrent so Top Setups isn't left with nothing to read.
   const score: MarketScore = demoMode
     ? computeMarketScore(instrument)
-    : (await getCurrentScore(instrument.symbol).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { updateCurrent: true }));
+    : (await getCurrentScore(instrument.symbol, { cacheHistory: true }).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { updateCurrent: true }));
   const live: LiveMarketDetail | null = demoMode ? null : await getLiveMarketDetail(instrument.symbol, DATA_MODE);
   // The grouped scorecard (components/market/Scorecard.tsx) composes with
   // `score`/`live` above rather than recomputing them — see

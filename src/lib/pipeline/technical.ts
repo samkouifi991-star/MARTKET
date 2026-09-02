@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { getInstrument } from "@/lib/instruments";
 import { technicalFactor as demoTechnicalFactor } from "@/lib/scoring";
 import { computeTechnicalTrend, TechnicalTrendResult } from "@/lib/engines/technical-trend";
@@ -6,8 +7,22 @@ import { Provenance, NormalizedCandle } from "@/services/types";
 import { DataFreshness } from "@/lib/types";
 import { demoFallbackFactor, errorFactor, ResolvedFactor, unavailableFactor } from "./types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
+import { withCacheFallback } from "@/lib/cache-fallback";
 
 const PROVIDER_DISPLAY: Record<string, string> = { fmp: "FMP", oanda: "OANDA" };
+
+// Egress fix, phase 2: Market Detail's own chart opts into caching these
+// storage-only reads (candles cron only writes once/day, so re-reading
+// Supabase on every 45s AutoRefresh cycle buys nothing) — see
+// TechnicalTrendOptions.cacheHistorical below. Nothing else opts in, so
+// scoring (resolveTechnicalFactor) and every list page keep reading
+// current storage state on every call, unaffected. Revalidate windows
+// roughly match each timeframe's own bar length: a daily bar is stale for
+// 30 min without meaningfully changing what the chart shows, an H1 bar
+// much sooner.
+const cachedDailyCandles = unstable_cache((symbol: string, days: number) => getDailyCandlesWithFallback(symbol, days, true), ["mkt-detail-daily-candles"], { revalidate: 1800 });
+const cachedH4Candles = unstable_cache((symbol: string) => getIntradayCandlesWithFallback(symbol, "4hour", true), ["mkt-detail-h4-candles"], { revalidate: 1200 });
+const cachedH1Candles = unstable_cache((symbol: string) => getIntradayCandlesWithFallback(symbol, "1hour", true), ["mkt-detail-h1-candles"], { revalidate: 600 });
 
 export type TechnicalTrendFetch = {
   daily: Provenance<NormalizedCandle[]>;
@@ -29,6 +44,14 @@ export type TechnicalTrendOptions = {
    * existing caller (Market Detail, the real Forex Scorecard page,
    * resolveTechnicalFactor's scoring path) keeps its current behavior. */
   includeIntraday?: boolean;
+  /** Serve the storage-only candle reads from a short-lived cache (see
+   * cachedDailyCandles/H4/H1 above) instead of re-reading Supabase on
+   * every call — only takes effect when storageOnly is true, so the live-
+   * scoring path is never affected even if a future caller opts in by
+   * mistake. Off by default; Market Detail's own chart is the one caller
+   * that sets this (see price.ts's getCanonicalPriceCard passthrough and
+   * market-detail.ts's getLiveMarketDetail). */
+  cacheHistorical?: boolean;
 };
 
 /** Real data the caller can compute from: live, or last-known-good stored
@@ -46,8 +69,13 @@ function hasUsableValue<T>(p: Provenance<T>): boolean {
  * scoring factor) and the market-detail price chart card, so both read the
  * exact same real indicators rather than each computing its own. */
 export async function fetchTechnicalTrend(symbol: string, storageOnly = false, opts: TechnicalTrendOptions = {}): Promise<TechnicalTrendFetch> {
-  const { dailyDepth = 260, includeIntraday = true } = opts;
-  const daily = await getDailyCandlesWithFallback(symbol, dailyDepth, storageOnly);
+  const { dailyDepth = 260, includeIntraday = true, cacheHistorical = false } = opts;
+  const useCache = storageOnly && cacheHistorical;
+
+  const daily = useCache
+    ? await withCacheFallback(() => cachedDailyCandles(symbol, dailyDepth), () => getDailyCandlesWithFallback(symbol, dailyDepth, true))
+    : await getDailyCandlesWithFallback(symbol, dailyDepth, storageOnly);
+
   if (!hasUsableValue(daily) || !includeIntraday) {
     const result = hasUsableValue(daily) ? computeTechnicalTrend({ daily: daily.value! }) : null;
     return { daily, h4: daily as Provenance<NormalizedCandle[]>, h1: daily as Provenance<NormalizedCandle[]>, result };
@@ -57,7 +85,12 @@ export async function fetchTechnicalTrend(symbol: string, storageOnly = false, o
   // cron writes 4h/1h to Neon — see cron/candles/route.ts) — a live 4H/1H
   // failure degrades to the last stored value instead of dropping straight
   // to daily-only, same principle daily candles already followed.
-  const [h4, h1] = await Promise.all([getIntradayCandlesWithFallback(symbol, "4hour", storageOnly), getIntradayCandlesWithFallback(symbol, "1hour", storageOnly)]);
+  const [h4, h1] = useCache
+    ? await Promise.all([
+        withCacheFallback(() => cachedH4Candles(symbol), () => getIntradayCandlesWithFallback(symbol, "4hour", true)),
+        withCacheFallback(() => cachedH1Candles(symbol), () => getIntradayCandlesWithFallback(symbol, "1hour", true)),
+      ])
+    : await Promise.all([getIntradayCandlesWithFallback(symbol, "4hour", storageOnly), getIntradayCandlesWithFallback(symbol, "1hour", storageOnly)]);
   const result = computeTechnicalTrend({
     daily: daily.value!,
     h4: hasUsableValue(h4) ? h4.value! : undefined,

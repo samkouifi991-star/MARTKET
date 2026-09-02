@@ -3,10 +3,12 @@
 // snapshot. Every call here is a no-op-on-failure by design at the call
 // site (see scoring-engine.ts): a database outage must never break score
 // computation or serving.
+import { unstable_cache } from "next/cache";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import { currentFactorScores, currentMarketScores, factorScores, marketScores } from "../schema";
 import { Bias, DataFreshness, MarketScore, ScoreFactor, ScoreFactorKey } from "@/lib/types";
+import { withCacheFallback } from "@/lib/cache-fallback";
 
 export async function recordScoreHistory(score: MarketScore, scoringVersionId: number | null = null): Promise<void> {
   const db = getDb();
@@ -168,6 +170,16 @@ export async function upsertCurrentScore(score: MarketScore, scoringVersionId: n
     });
 }
 
+// Egress fix, phase 2: score history changes at most once/day (the scores
+// cron's own cadence — see vercel.json), so re-reading it on every 45s
+// Market Detail AutoRefresh cycle buys nothing. Only opted into by callers
+// that pass cacheHistory:true (Market Detail's own symbol — see
+// markets/[symbol]/page.tsx); every other caller of getCurrentScore keeps
+// reading current storage state on every call. Falls back to the real,
+// uncached read whenever unstable_cache has no request/build context to
+// attach to (e.g. under vitest) — see lib/cache-fallback.ts.
+const cachedScoreHistoryForChart = unstable_cache((symbol: string) => getScoreHistory(symbol), ["mkt-detail-score-history"], { revalidate: 12 * 60 });
+
 // Reconstructs a full MarketScore from the current-score tables, with real
 // history from market_scores (the ~5-month chart's source — see
 // SCORE_HISTORY_WINDOW_HOURS) attached — never used as a stand-in for "the
@@ -175,7 +187,7 @@ export async function upsertCurrentScore(score: MarketScore, scoringVersionId: n
 // needs. Returns null when no current-score row exists yet for this symbol
 // (e.g. before the scores cron's first run or any Market Detail visit) so
 // callers can fall back to a fresh compute.
-export async function getCurrentScore(symbol: string, opts: { includeHistory?: boolean } = {}): Promise<MarketScore | null> {
+export async function getCurrentScore(symbol: string, opts: { includeHistory?: boolean; cacheHistory?: boolean } = {}): Promise<MarketScore | null> {
   const includeHistory = opts.includeHistory ?? true;
   const db = getDb();
   const [row] = await db.select().from(currentMarketScores).where(eq(currentMarketScores.symbol, symbol)).limit(1);
@@ -188,7 +200,9 @@ export async function getCurrentScore(symbol: string, opts: { includeHistory?: b
   // list page — see top-setups.ts's getCanonicalMarketRows) pass
   // includeHistory:false to skip this read entirely rather than pulling up
   // to ~150 bounded-but-unused rows per symbol on every render.
-  const priorHistory = includeHistory ? await getScoreHistory(symbol).catch(() => []) : [];
+  const priorHistory = includeHistory
+    ? await (opts.cacheHistory ? withCacheFallback(() => cachedScoreHistoryForChart(symbol), () => getScoreHistory(symbol)) : getScoreHistory(symbol)).catch(() => [])
+    : [];
   const history: MarketScore["history"] = [...priorHistory].reverse().map((r) => ({ date: r.computedAt, score: r.totalScore }));
 
   const factors: ScoreFactor[] = factorRows.map((f) => ({

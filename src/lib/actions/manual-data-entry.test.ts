@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 vi.mock("@/lib/auth/dal");
 vi.mock("@/lib/ingestion/economic-event");
 vi.mock("@/lib/ingestion/news");
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), unstable_cache: (fn: unknown) => fn }));
 
 import { requireAdmin } from "@/lib/auth/dal";
 import { ingestEconomicEvent } from "@/lib/ingestion/economic-event";
