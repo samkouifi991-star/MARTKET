@@ -39,13 +39,34 @@ function clamp(v: number, min = -10, max = 10): number {
   return Math.max(min, Math.min(max, v));
 }
 
-export function bandHeatmapValue(value: number): HeatmapLabel {
-  if (value >= 4) return "Strong bullish";
-  if (value >= 1) return "Bullish";
-  if (value > -1) return "Neutral";
-  if (value > -4) return "Bearish";
+// Generalized version of the heatmap's own ±1/±4 banding so other
+// deterministic differentials on a different scale (e.g. Forex Scorecard's
+// strength/rate differentials — see forex-scorecard.ts) can reuse the same
+// 5-tier label vocabulary and color language instead of inventing a
+// second banding scheme with its own thresholds and colors.
+export function bandByThresholds(value: number, softThreshold: number, strongThreshold: number): HeatmapLabel {
+  if (value >= strongThreshold) return "Strong bullish";
+  if (value >= softThreshold) return "Bullish";
+  if (value > -softThreshold) return "Neutral";
+  if (value > -strongThreshold) return "Bearish";
   return "Strong bearish";
 }
+
+export function bandHeatmapValue(value: number): HeatmapLabel {
+  return bandByThresholds(value, 1, 4);
+}
+
+// Shared color language for the Strong bullish..Strong bearish vocabulary —
+// exported so every consumer (this heatmap, Forex Scorecard) renders the
+// exact same colors for the exact same label, not visually-similar but
+// independently-defined copies.
+export const HEATMAP_LABEL_CLASSES: Record<HeatmapLabel, string> = {
+  "Strong bullish": "bg-emerald-500/25 text-emerald-300",
+  Bullish: "bg-emerald-500/10 text-emerald-400",
+  Neutral: "bg-slate-500/10 text-(--text-faint)",
+  Bearish: "bg-rose-500/10 text-rose-400",
+  "Strong bearish": "bg-rose-500/25 text-rose-300",
+};
 
 function cellFor(value: number | null): HeatmapCell {
   return { value: value !== null ? Number(value.toFixed(2)) : null, label: value !== null ? bandHeatmapValue(value) : null };

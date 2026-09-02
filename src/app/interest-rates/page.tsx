@@ -50,8 +50,9 @@ async function RatesGrid() {
           <StatTile
             key={currency}
             label={currency}
-            value={rate.policyRate !== null ? `${rate.policyRate}%` : "N/A"}
+            value={rate.policyRate !== null ? `${rate.policyRate}%` : "—"}
             sub={trendLabel}
+            unavailable={rate.policyRate === null ? { freshness: "unavailable", reason: `No verified FRED policy-rate series yet for ${currency}.` } : undefined}
           />
         );
       })}

@@ -26,7 +26,6 @@ import {
   CalendarDays,
   Grid3x3,
   Gauge,
-  Bell,
   History,
   Bot,
   Settings,
@@ -96,7 +95,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: "Tools",
     items: [
-      { label: "Alerts", href: "/alerts", icon: Bell },
+      // Pre-launch value pass: Alerts is removed from customer navigation
+      // (see app/alerts/page.tsx) until a real, persisted, evaluated alert
+      // engine exists — the previous entry here linked to a fully
+      // hardcoded/in-memory placeholder a paying customer could easily
+      // mistake for a working feature.
       // Phase 18 (public-launch demo sweep): every statistic on this page
       // (win rates, average returns, sample sizes) is RNG-generated, not
       // computed from real historical scores. Demo-only until a real

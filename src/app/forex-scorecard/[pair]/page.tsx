@@ -5,15 +5,73 @@
 // canonical (V1) score.
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { FX_PAIRS, buildForexScorecard } from "@/lib/pipeline/forex-scorecard";
+import { FX_PAIRS, buildForexScorecard, pairDirectionLabel } from "@/lib/pipeline/forex-scorecard";
+import { HeatmapLabel, HEATMAP_LABEL_CLASSES } from "@/lib/pipeline/economic-heatmap";
 import { requireEntitlement } from "@/lib/auth/dal";
 import { isDemoOnly } from "@/services/data-mode";
 import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
-import { StrengthBadge } from "@/components/ui/StrengthBadge";
 import { BiasBadge } from "@/components/ui/BiasBadge";
+import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { formatSigned } from "@/lib/format";
 import { ArrowLeft } from "lucide-react";
+
+// Shared row shape for the Economic Strength / Interest Rates / Economic
+// Surprise cards below — each is "base value, quote value, difference +
+// direction pill", the exact same layout with different numbers and units.
+function DifferentialCard({
+  title,
+  baseLabel,
+  baseValue,
+  quoteLabel,
+  quoteValue,
+  differential,
+  band,
+  base,
+  quote,
+  unit = "",
+  unavailableReason,
+}: {
+  title: string;
+  baseLabel: string;
+  baseValue: string | null;
+  quoteLabel: string;
+  quoteValue: string | null;
+  differential: number | null;
+  band: HeatmapLabel | null;
+  base: string;
+  quote: string;
+  unit?: string;
+  unavailableReason: string;
+}) {
+  return (
+    <Card title={title}>
+      {baseValue !== null && quoteValue !== null && differential !== null ? (
+        <div className="space-y-1.5 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-(--text-faint)">{baseLabel}</span>
+            <span className="font-medium tabular-nums">{baseValue}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-(--text-faint)">{quoteLabel}</span>
+            <span className="font-medium tabular-nums">{quoteValue}</span>
+          </div>
+          <div className="flex items-center justify-between pt-1.5 border-t border-(--border)">
+            <span className="text-(--text-faint)">Difference</span>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold tabular-nums">{formatSigned(differential, unit === "%" ? 2 : 0)}{unit}</span>
+              <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${band ? HEATMAP_LABEL_CLASSES[band] : ""}`}>
+                {pairDirectionLabel(band, base, quote)}
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <DataFreshnessTag freshness="unavailable" reason={unavailableReason} />
+      )}
+    </Card>
+  );
+}
 
 export function generateStaticParams() {
   return FX_PAIRS.map((symbol) => ({ pair: symbol }));
@@ -65,77 +123,109 @@ async function ScorecardDetail({ pair }: { pair: string }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatTile label="Final score" value={data.finalScore !== null ? formatSigned(data.finalScore, 1) : "N/A"} sub={data.finalBias ?? undefined} />
-        <StatTile label="Strength differential" value={data.strengthDifferential !== null ? formatSigned(data.strengthDifferential, 0) : "N/A"} sub={`${data.base} vs ${data.quote}`} />
-        <StatTile label="Rate differential" value={data.rateDifferentialPts !== null ? `${formatSigned(data.rateDifferentialPts, 2)}pt` : "N/A"} />
-        <StatTile label="Surprise differential" value={data.surpriseDifferential !== null ? formatSigned(data.surpriseDifferential, 1) : "N/A"} />
+        <StatTile
+          label="Final score"
+          value={data.finalScore !== null ? formatSigned(data.finalScore, 1) : "—"}
+          sub={data.finalScore === null ? "Unavailable" : (data.finalBias ?? undefined)}
+        />
+        <StatTile
+          label="Strength differential"
+          value={data.strengthDifferential !== null ? formatSigned(data.strengthDifferential, 0) : "—"}
+          sub={data.strengthDifferential === null ? "Unavailable" : `${data.base} vs ${data.quote}`}
+        />
+        <StatTile
+          label="Rate differential"
+          value={data.rateDifferentialPts !== null ? `${formatSigned(data.rateDifferentialPts, 2)}pt` : "—"}
+          sub={data.rateDifferentialPts === null ? "Unavailable" : undefined}
+        />
+        <StatTile
+          label="Surprise differential"
+          value={data.surpriseDifferential !== null ? formatSigned(data.surpriseDifferential, 1) : "—"}
+          sub={data.surpriseDifferential === null ? "Unavailable" : undefined}
+        />
       </div>
+
+      {/* One deterministic sentence combining the differentials/trend
+          already shown above — see synthesizeForexNarrative. Every clause
+          is a direct readout of a real field; never generated by an LLM. */}
+      {data.narrative && (
+        <Card>
+          <p className="text-sm leading-relaxed">{data.narrative}</p>
+        </Card>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <Card title={`${data.base} Economic Strength`}>
-          {data.baseStrength.score !== null ? (
-            <div className="flex items-center justify-between">
-              <span className={`text-2xl font-semibold tabular-nums ${data.baseStrength.score > 0 ? "text-emerald-400" : "text-rose-400"}`}>{formatSigned(data.baseStrength.score, 0)}</span>
-              {data.baseStrength.level && <StrengthBadge level={data.baseStrength.level} />}
-            </div>
-          ) : (
-            <p className="text-sm text-(--text-faint)">Unavailable — no verified data yet.</p>
-          )}
-        </Card>
-        <Card title={`${data.quote} Economic Strength`}>
-          {data.quoteStrength.score !== null ? (
-            <div className="flex items-center justify-between">
-              <span className={`text-2xl font-semibold tabular-nums ${data.quoteStrength.score > 0 ? "text-emerald-400" : "text-rose-400"}`}>{formatSigned(data.quoteStrength.score, 0)}</span>
-              {data.quoteStrength.level && <StrengthBadge level={data.quoteStrength.level} />}
-            </div>
-          ) : (
-            <p className="text-sm text-(--text-faint)">Unavailable — no verified data yet.</p>
-          )}
-        </Card>
+        <DifferentialCard
+          title="Economic Strength"
+          baseLabel={data.base}
+          baseValue={data.baseStrength.score !== null ? `${formatSigned(data.baseStrength.score, 0)}${data.baseStrength.level ? ` (${data.baseStrength.level})` : ""}` : null}
+          quoteLabel={data.quote}
+          quoteValue={data.quoteStrength.score !== null ? `${formatSigned(data.quoteStrength.score, 0)}${data.quoteStrength.level ? ` (${data.quoteStrength.level})` : ""}` : null}
+          differential={data.strengthDifferential}
+          band={data.strengthBand}
+          base={data.base}
+          quote={data.quote}
+          unavailableReason="No verified economic-strength score yet for one or both currencies."
+        />
+        <DifferentialCard
+          title="Interest Rates"
+          baseLabel={`${data.base} policy rate`}
+          baseValue={data.baseRate !== null ? `${data.baseRate}%` : null}
+          quoteLabel={`${data.quote} policy rate`}
+          quoteValue={data.quoteRate !== null ? `${data.quoteRate}%` : null}
+          differential={data.rateDifferentialPts}
+          band={data.rateBand}
+          base={data.base}
+          quote={data.quote}
+          unit="%"
+          unavailableReason="No verified policy-rate series yet for one or both currencies."
+        />
       </div>
 
-      <Card title="Policy rates">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-          <div>
-            <div className="text-xs text-(--text-faint)">{data.base} policy rate</div>
-            <div className="font-medium tabular-nums">{data.baseRate !== null ? `${data.baseRate}%` : "N/A"}</div>
-          </div>
-          <div>
-            <div className="text-xs text-(--text-faint)">{data.quote} policy rate</div>
-            <div className="font-medium tabular-nums">{data.quoteRate !== null ? `${data.quoteRate}%` : "N/A"}</div>
-          </div>
-          <div>
-            <div className="text-xs text-(--text-faint)">Differential</div>
-            <div className="font-medium tabular-nums">{data.rateDifferentialPts !== null ? `${formatSigned(data.rateDifferentialPts, 2)}pt` : "N/A"}</div>
-          </div>
-        </div>
-      </Card>
+      <DifferentialCard
+        title="Economic Surprise"
+        baseLabel={data.base}
+        baseValue={data.baseSurprise !== null ? formatSigned(data.baseSurprise, 1) : null}
+        quoteLabel={data.quote}
+        quoteValue={data.quoteSurprise !== null ? formatSigned(data.quoteSurprise, 1) : null}
+        differential={data.surpriseDifferential}
+        band={data.surpriseBand}
+        base={data.base}
+        quote={data.quote}
+        unavailableReason="No recent economic-release surprises detected for either currency yet."
+      />
 
-      <Card title="Multi-timeframe trend">
+      <Card title="Technical">
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
             <div className="text-xs text-(--text-faint) mb-1">Daily</div>
-            <div className={`text-sm font-medium ${trendClass(data.dailyTrend)}`}>{data.dailyTrend ?? "N/A"}</div>
+            <div className={`text-sm font-medium ${trendClass(data.dailyTrend)}`}>{data.dailyTrend ?? <DataFreshnessTag freshness="unavailable" />}</div>
           </div>
           <div>
             <div className="text-xs text-(--text-faint) mb-1">4H</div>
-            <div className={`text-sm font-medium ${trendClass(data.h4Trend)}`}>{data.h4Trend ?? "N/A"}</div>
+            <div className={`text-sm font-medium ${trendClass(data.h4Trend)}`}>{data.h4Trend ?? <DataFreshnessTag freshness="unavailable" />}</div>
           </div>
           <div>
             <div className="text-xs text-(--text-faint) mb-1">1H</div>
-            <div className={`text-sm font-medium ${trendClass(data.h1Trend)}`}>{data.h1Trend ?? "N/A"}</div>
+            <div className={`text-sm font-medium ${trendClass(data.h1Trend)}`}>{data.h1Trend ?? <DataFreshnessTag freshness="unavailable" />}</div>
           </div>
         </div>
       </Card>
 
-      <Card title="Retail sentiment">
+      <Card title="Retail">
         {data.retail ? (
           <div className="flex items-center justify-between text-sm">
-            <span>{data.retail.pctLong.toFixed(0)}% long / {data.retail.pctShort.toFixed(0)}% short</span>
-            <span className={`text-xs font-medium ${trendClass(data.retail.contrarianBias)}`}>Contrarian: {data.retail.contrarianBias}</span>
+            <span>
+              {data.retail.pctLong >= data.retail.pctShort ? `${data.retail.pctLong.toFixed(0)}% long` : `${data.retail.pctShort.toFixed(0)}% short`}
+            </span>
+            {data.retail.contrarianBias !== "Neutral" && (
+              <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${data.retail.contrarianBias === "Bullish" ? HEATMAP_LABEL_CLASSES.Bullish : HEATMAP_LABEL_CLASSES.Bearish}`}>
+                CONTRARIAN {data.retail.contrarianBias.toUpperCase()}
+              </span>
+            )}
           </div>
         ) : (
-          <p className="text-sm text-(--text-faint)">Unavailable — no verified retail-sentiment data yet.</p>
+          <DataFreshnessTag freshness="unavailable" reason="No verified retail-sentiment provider connected for this pair yet." />
         )}
       </Card>
 
@@ -146,7 +236,7 @@ async function ScorecardDetail({ pair }: { pair: string }) {
             {data.finalBias && <BiasBadge bias={data.finalBias} />}
           </div>
         ) : (
-          <p className="text-sm text-(--text-faint)">Unavailable — score has not been computed yet for {pair}.</p>
+          <DataFreshnessTag freshness="unavailable" reason={`Score has not been computed yet for ${pair}.`} />
         )}
         <Link href={`/markets/${pair}`} className="text-xs text-(--accent) hover:underline mt-2 inline-block">
           Full scorecard breakdown →

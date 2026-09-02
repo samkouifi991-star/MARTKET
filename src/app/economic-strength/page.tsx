@@ -8,6 +8,7 @@ import { isDemoOnly } from "@/services/data-mode";
 import { computeAllCurrencyStrengths } from "@/lib/pipeline/economic-strength";
 import { Card } from "@/components/ui/Card";
 import { StrengthBadge } from "@/components/ui/StrengthBadge";
+import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { formatSigned } from "@/lib/format";
 
 export const metadata = { title: "Economic Strength Index — Market Intelligence AI" };
@@ -54,9 +55,9 @@ async function StrengthList() {
                 {c.score !== null ? (
                   <span className={`text-sm font-semibold tabular-nums ${c.score > 0 ? "text-emerald-400" : c.score < 0 ? "text-rose-400" : "text-(--text-dim)"}`}>{formatSigned(c.score, 0)}</span>
                 ) : (
-                  <span className="text-xs text-(--text-faint)">N/A</span>
+                  <DataFreshnessTag freshness="unavailable" reason={`No verified growth/labor/rate/surprise data currently available for ${c.country}.`} />
                 )}
-                {c.level ? <StrengthBadge level={c.level} size="sm" /> : <span className="text-[11px] text-(--text-faint)">Unavailable</span>}
+                {c.level && <StrengthBadge level={c.level} size="sm" />}
               </div>
             </summary>
             <div className="px-3 pb-3 pt-1 border-t border-(--border)">

@@ -64,9 +64,10 @@ async function InflationGrid() {
           <StatTile
             key={currency}
             label={currency}
-            value={cell.value !== null ? `${cell.value > 0 ? "+" : ""}${cell.value.toFixed(1)}` : "N/A"}
-            sub={cell.label ?? "Unavailable"}
+            value={cell.value !== null ? `${cell.value > 0 ? "+" : ""}${cell.value.toFixed(1)}` : "—"}
+            sub={cell.label ?? undefined}
             valueClassName={cell.value === null ? "" : cell.value > 0 ? "text-emerald-400" : cell.value < 0 ? "text-rose-400" : ""}
+            unavailable={cell.value === null ? { freshness: "unavailable", reason: `No verified data yet for ${currency}.` } : undefined}
           />
         );
       })}

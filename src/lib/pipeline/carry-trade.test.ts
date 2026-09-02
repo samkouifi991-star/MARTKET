@@ -21,6 +21,8 @@ function scorecard(overrides: Partial<ForexScorecardData>): ForexScorecardData {
     quoteRate: null,
     rateDifferentialPts: null,
     surpriseDifferential: null,
+    baseSurprise: null,
+    quoteSurprise: null,
     dailyTrend: null,
     h4Trend: null,
     h1Trend: null,
@@ -28,6 +30,10 @@ function scorecard(overrides: Partial<ForexScorecardData>): ForexScorecardData {
     retail: null,
     finalScore: null,
     finalBias: null,
+    strengthBand: null,
+    rateBand: null,
+    surpriseBand: null,
+    narrative: null,
     ...overrides,
   };
 }

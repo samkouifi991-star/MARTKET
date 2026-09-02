@@ -29,6 +29,7 @@ import { UnavailableState } from "@/components/ui/UnavailableState";
 import { FactorSentimentBadge } from "@/components/ui/FactorSentimentBadge";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
+import { PriceScoreOverlayChart } from "@/components/charts/PriceScoreOverlayChart";
 import { factorContributionColorClass, factorSentiment, formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
 import { filterToRecentWindow, formatDateTime, formatRelative } from "@/lib/time";
 import { DataFreshness, MarketScore, PriceData } from "@/lib/types";
@@ -201,6 +202,12 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
         </div>
       ) : (
         <Scorecard instrument={instrument} score={score} data={scorecardData!} biasThresholds={scoringConfig.biasThresholds} price={price} priceFreshness={priceFreshness} />
+      )}
+
+      {price && (
+        <Card title="Price & Intelligence History" subtitle="Does the score move before the market does? Real, stored data only — never fabricated.">
+          <PriceScoreOverlayChart priceSeries={recentPriceSeries} scoreHistory={score.history} decimals={instrument.decimals} thresholds={scoringConfig.biasThresholds} />
+        </Card>
       )}
 
       <div className="grid lg:grid-cols-2 gap-4">

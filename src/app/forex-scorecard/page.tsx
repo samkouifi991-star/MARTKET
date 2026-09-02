@@ -5,8 +5,10 @@ import Link from "next/link";
 import { requireEntitlement } from "@/lib/auth/dal";
 import { isDemoOnly } from "@/services/data-mode";
 import { buildAllForexScorecards } from "@/lib/pipeline/forex-scorecard";
+import { HEATMAP_LABEL_CLASSES } from "@/lib/pipeline/economic-heatmap";
 import { Card } from "@/components/ui/Card";
 import { BiasBadge } from "@/components/ui/BiasBadge";
+import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { formatSigned } from "@/lib/format";
 
 export const metadata = { title: "Forex Scorecard — Market Intelligence AI" };
@@ -63,17 +65,41 @@ async function ScorecardTable() {
                     {r.base}/{r.quote}
                   </Link>
                 </td>
-                <td className={`py-2 px-3 text-right tabular-nums ${r.strengthDifferential === null ? "text-(--text-faint)" : r.strengthDifferential > 0 ? "text-emerald-400" : r.strengthDifferential < 0 ? "text-rose-400" : ""}`}>
-                  {r.strengthDifferential !== null ? formatSigned(r.strengthDifferential, 0) : "N/A"}
+                <td className="py-2 px-3 text-right">
+                  {r.strengthDifferential !== null ? (
+                    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${r.strengthBand ? HEATMAP_LABEL_CLASSES[r.strengthBand] : ""}`}>
+                      {formatSigned(r.strengthDifferential, 0)}
+                    </span>
+                  ) : (
+                    <DataFreshnessTag freshness="unavailable" reason="No verified economic-strength score yet for one or both currencies." />
+                  )}
                 </td>
-                <td className="py-2 px-3 text-right tabular-nums">{r.rateDifferentialPts !== null ? `${formatSigned(r.rateDifferentialPts, 2)}pt` : "N/A"}</td>
-                <td className="py-2 px-3 text-right tabular-nums">{r.surpriseDifferential !== null ? formatSigned(r.surpriseDifferential, 1) : "N/A"}</td>
+                <td className="py-2 px-3 text-right">
+                  {r.rateDifferentialPts !== null ? (
+                    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${r.rateBand ? HEATMAP_LABEL_CLASSES[r.rateBand] : ""}`}>
+                      {formatSigned(r.rateDifferentialPts, 2)}pt
+                    </span>
+                  ) : (
+                    <DataFreshnessTag freshness="unavailable" reason="No verified policy-rate series yet for one or both currencies." />
+                  )}
+                </td>
+                <td className="py-2 px-3 text-right">
+                  {r.surpriseDifferential !== null ? (
+                    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${r.surpriseBand ? HEATMAP_LABEL_CLASSES[r.surpriseBand] : ""}`}>
+                      {formatSigned(r.surpriseDifferential, 1)}
+                    </span>
+                  ) : (
+                    <DataFreshnessTag freshness="unavailable" reason="No recent economic-release surprises detected for either currency yet." />
+                  )}
+                </td>
                 <td className="py-2 px-3 text-center text-xs">{r.dailyTrend ?? "—"}</td>
                 <td className="py-2 px-3 text-center text-xs">{r.h4Trend ?? "—"}</td>
                 <td className="py-2 px-3 text-center text-xs">{r.h1Trend ?? "—"}</td>
-                <td className="py-2 px-3 text-right text-xs">{r.retail ? `${r.retail.pctLong.toFixed(0)}% long` : "N/A"}</td>
+                <td className="py-2 px-3 text-right text-xs">
+                  {r.retail ? `${r.retail.pctLong.toFixed(0)}% long` : <DataFreshnessTag freshness="unavailable" reason="No verified retail-sentiment provider connected for this pair yet." />}
+                </td>
                 <td className="py-2 pl-3 text-right">
-                  {r.finalBias ? <BiasBadge bias={r.finalBias} size="sm" /> : <span className="text-xs text-(--text-faint)">N/A</span>}
+                  {r.finalBias ? <BiasBadge bias={r.finalBias} size="sm" /> : <DataFreshnessTag freshness="unavailable" reason="Score has not been computed yet for this pair." />}
                 </td>
               </tr>
             ))}

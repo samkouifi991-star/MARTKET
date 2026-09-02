@@ -6,6 +6,7 @@ import { requireEntitlement } from "@/lib/auth/dal";
 import { isDemoOnly } from "@/services/data-mode";
 import { buildCarryTradeScanner, CarrySupport } from "@/lib/pipeline/carry-trade";
 import { Card } from "@/components/ui/Card";
+import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 import { formatSigned } from "@/lib/format";
 
 export const metadata = { title: "Carry Trade Scanner — Market Intelligence AI" };
@@ -65,12 +66,18 @@ async function CarryTable() {
                     {r.base}/{r.quote}
                   </Link>
                 </td>
-                <td className="py-2 px-3 text-right tabular-nums">{r.rateDifferentialPts !== null ? `${formatSigned(r.rateDifferentialPts, 2)}pt` : "N/A"}</td>
+                <td className="py-2 px-3 text-right tabular-nums">
+                  {r.rateDifferentialPts !== null ? `${formatSigned(r.rateDifferentialPts, 2)}pt` : <DataFreshnessTag freshness="unavailable" reason="No verified policy-rate series yet for one or both currencies." />}
+                </td>
                 <td className="py-2 px-3 text-xs">
-                  {r.carryDirection ? `${r.carryDirection === "Long base" ? r.base : r.carryDirection === "Long quote" ? r.quote : "—"}${r.carryDirection === "Flat" ? " (flat)" : ""}` : "N/A"}
+                  {r.carryDirection ? (
+                    `${r.carryDirection === "Long base" ? r.base : r.carryDirection === "Long quote" ? r.quote : "—"}${r.carryDirection === "Flat" ? " (flat)" : ""}`
+                  ) : (
+                    <DataFreshnessTag freshness="unavailable" reason="No verified policy-rate series yet for one or both currencies." />
+                  )}
                 </td>
                 <td className={`py-2 px-3 text-right tabular-nums ${r.strengthDifferential === null ? "text-(--text-faint)" : r.strengthDifferential > 0 ? "text-emerald-400" : r.strengthDifferential < 0 ? "text-rose-400" : ""}`}>
-                  {r.strengthDifferential !== null ? formatSigned(r.strengthDifferential, 0) : "N/A"}
+                  {r.strengthDifferential !== null ? formatSigned(r.strengthDifferential, 0) : <DataFreshnessTag freshness="unavailable" reason="No verified economic-strength score yet for one or both currencies." />}
                 </td>
                 <td className="py-2 pl-3">
                   <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${SUPPORT_CLASSES[r.support]}`}>{r.support}</span>

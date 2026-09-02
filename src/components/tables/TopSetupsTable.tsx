@@ -12,6 +12,8 @@ import { formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/l
 import { formatRelative } from "@/lib/time";
 import { factorLabel } from "@/lib/scoring";
 import { Sparkline } from "@/components/ui/Sparkline";
+import { buildCatalyst, isNewSetup } from "@/lib/catalyst";
+import { InfoTooltip } from "@/components/ui/InfoTooltip";
 
 const FACTOR_COLUMNS: { key: ScoreFactorKey; label: string }[] = [
   { key: "institutional", label: "Inst." },
@@ -117,6 +119,12 @@ export function TopSetupsTable({ rows, watchlistSymbols }: { rows: MarketRow[]; 
               <th className="px-3 py-2.5">Bias</th>
               <th className="px-3 py-2.5">Confidence</th>
               <th className="px-3 py-2.5 text-right">24h Δ</th>
+              <th className="px-3 py-2.5">
+                <span className="inline-flex items-center gap-1">
+                  Catalyst
+                  <InfoTooltip text="The top 1-2 factors currently pulling this score the most, named directly from the same factor breakdown you see when you expand a row — never a generated explanation." />
+                </span>
+              </th>
               {FACTOR_COLUMNS.map((f) => (
                 <th key={f.key} className="px-3 py-2.5 text-right">{f.label}</th>
               ))}
@@ -127,6 +135,8 @@ export function TopSetupsTable({ rows, watchlistSymbols }: { rows: MarketRow[]; 
             {filtered.map((row) => {
               const isOpen = expanded === row.instrument.symbol;
               const topFactors = [...row.score.factors].sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution)).slice(0, 3);
+              const catalyst = buildCatalyst(row.score.factors);
+              const isNew = isNewSetup(row.score);
               return (
                 <Fragment key={row.instrument.symbol}>
                   <tr
@@ -137,13 +147,23 @@ export function TopSetupsTable({ rows, watchlistSymbols }: { rows: MarketRow[]; 
                       <div className="flex items-center gap-1.5">
                         {isOpen ? <ChevronDown size={13} className="text-(--text-faint)" /> : <ChevronRight size={13} className="text-(--text-faint)" />}
                         <div>
-                          <Link
-                            href={`/markets/${row.instrument.symbol}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="font-medium hover:text-(--accent)"
-                          >
-                            {row.instrument.symbol}
-                          </Link>
+                          <div className="flex items-center gap-1.5">
+                            <Link
+                              href={`/markets/${row.instrument.symbol}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="font-medium hover:text-(--accent)"
+                            >
+                              {row.instrument.symbol}
+                            </Link>
+                            {isNew && (
+                              <span
+                                title="Entered a directional (Bullish/Bearish) bias in the last 24 hours"
+                                className="inline-flex items-center rounded-full bg-sky-500/15 text-sky-400 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
+                              >
+                                New
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-(--text-faint)">{row.instrument.name}</div>
                         </div>
                       </div>
@@ -160,6 +180,9 @@ export function TopSetupsTable({ rows, watchlistSymbols }: { rows: MarketRow[]; 
                         {formatSigned(row.score.change24h)}
                       </div>
                     </td>
+                    <td className="px-3 py-2.5 text-xs text-(--text-faint) max-w-[220px] truncate" title={catalyst ?? undefined}>
+                      {catalyst ?? "—"}
+                    </td>
                     {FACTOR_COLUMNS.map((f) => {
                       const factor = row.score.factors.find((x) => x.key === f.key)!;
                       return (
@@ -172,7 +195,7 @@ export function TopSetupsTable({ rows, watchlistSymbols }: { rows: MarketRow[]; 
                   </tr>
                   {isOpen && (
                     <tr className="border-b border-(--border) bg-white/[.015]">
-                      <td colSpan={7 + FACTOR_COLUMNS.length} className="px-6 py-4">
+                      <td colSpan={8 + FACTOR_COLUMNS.length} className="px-6 py-4">
                         <div className="grid sm:grid-cols-3 gap-4">
                           {topFactors.map((f) => (
                             <div key={f.key} className="text-xs">

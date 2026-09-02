@@ -1,8 +1,11 @@
 import Link from "next/link";
-import { getDashboardMarketRows } from "@/lib/pipeline/dashboard";
+import { getDashboardMarketRows, DashboardMarketRow } from "@/lib/pipeline/dashboard";
 import { StatTile } from "@/components/ui/StatTile";
 import { Card } from "@/components/ui/Card";
 import { AutoRefresh } from "@/components/ui/AutoRefresh";
+import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
+import { BiasBadge } from "@/components/ui/BiasBadge";
+import { buildCatalyst } from "@/lib/catalyst";
 import { formatSigned, scoreColorClass } from "@/lib/format";
 import { generateRiskGauge } from "@/lib/demo/riskGauge";
 import { getLiveRiskGauge } from "@/lib/pipeline/risk-gauge";
@@ -39,6 +42,14 @@ export default async function DashboardPage() {
   const topBullish = sorted.slice(0, 5);
   const topBearish = sorted.slice(-5).reverse();
   const avgConfidence = eligible.length > 0 ? Math.round(eligible.reduce((s, r) => s + r.score!.confidence, 0) / eligible.length) : 0;
+
+  // "What changed since yesterday?" — reuses current_market_scores.change24h,
+  // already loaded on every row above (see pipeline/dashboard.ts). No new
+  // provider call, no new DB read: this is a re-sort of the exact same
+  // `eligible` rows the bullish/bearish cards below already use.
+  const byChange = [...eligible].filter((r) => r.score!.change24h !== 0).sort((a, b) => b.score!.change24h - a.score!.change24h);
+  const improving = byChange.slice(0, 3);
+  const weakening = byChange.slice(-3).reverse();
   const veryBullish = eligible.filter((r) => r.score!.bias === "Very Bullish").length;
   const veryBearish = eligible.filter((r) => r.score!.bias === "Very Bearish").length;
 
@@ -84,19 +95,24 @@ export default async function DashboardPage() {
       <div>
         <h1 className="text-xl font-semibold">Dashboard</h1>
         <p className="text-sm text-(--text-faint) mt-1">
-          Which markets have the strongest conditions right now, what&apos;s driving them, and what changed recently.
+          What changed since yesterday, which markets have the strongest conditions right now, and what&apos;s driving them.{" "}
+          {rows.length} markets tracked{blockedCount > 0 ? ` (${eligible.length} live, ${blockedCount} pending coverage)` : ""}.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatTile
-          label="Markets tracked"
-          value={String(rows.length)}
-          sub={blockedCount > 0 ? `${eligible.length} live · ${blockedCount} pending coverage` : "Across 4 asset classes"}
-        />
+      <div className="grid grid-cols-3 gap-3">
         <StatTile label="Very Bullish" value={String(veryBullish)} valueClassName="text-emerald-400" sub="Score ≥ +8" />
         <StatTile label="Very Bearish" value={String(veryBearish)} valueClassName="text-rose-400" sub="Score ≤ -8" />
         <StatTile label="Avg. confidence" value={`${avgConfidence}%`} sub="Across all markets" />
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card title="Improving" subtitle="Biggest 24h score gains" action={<Link href="/top-setups" className="text-xs text-(--accent) hover:underline">View all →</Link>} className="p-3 sm:p-4">
+          <MoverList rows={improving} />
+        </Card>
+        <Card title="Weakening" subtitle="Biggest 24h score drops" action={<Link href="/top-setups" className="text-xs text-(--accent) hover:underline">View all →</Link>} className="p-3 sm:p-4">
+          <MoverList rows={weakening} />
+        </Card>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-4">
@@ -223,5 +239,47 @@ export default async function DashboardPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+// Shared by both the "Improving" and "Weakening" cards above — score,
+// 24h change, bias, confidence, and (when a factor clearly stands out)
+// catalyst, all already present on every row's canonical score. Falls back
+// to "No markets changed since yesterday yet" rather than an empty card
+// when change24h is uniformly 0 (e.g. immediately after the scores cron's
+// very first run, before any day-over-day delta exists).
+function MoverList({ rows }: { rows: DashboardMarketRow[] }) {
+  if (rows.length === 0) {
+    return <p className="text-xs text-(--text-faint)">No markets changed since yesterday yet.</p>;
+  }
+  return (
+    <ul className="space-y-2.5">
+      {rows.map((r) => {
+        const score = r.score!;
+        const catalyst = buildCatalyst(score.factors);
+        return (
+          <li key={r.instrument.symbol}>
+            <Link href={`/markets/${r.instrument.symbol}`} className="block hover:text-(--accent)">
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-medium">{r.instrument.symbol}</span>
+                  <BiasBadge bias={score.bias} size="sm" />
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`tabular-nums text-xs ${scoreColorClass(score.change24h)}`}>{formatSigned(score.change24h)} 24h</span>
+                  <span className={`tabular-nums font-semibold ${scoreColorClass(score.totalScore)}`}>{formatSigned(score.totalScore)}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="w-16 shrink-0">
+                  <ConfidenceBar value={score.confidence} compact />
+                </div>
+                {catalyst && <span className="text-[11px] text-(--text-faint) truncate">{catalyst}</span>}
+              </div>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

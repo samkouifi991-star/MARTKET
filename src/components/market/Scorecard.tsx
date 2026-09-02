@@ -12,20 +12,10 @@ import { formatDateTime } from "@/lib/time";
 import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { Card } from "@/components/ui/Card";
-import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
+import { DataFreshnessTag, unavailableLeadWord, DATA_FRESHNESS_LABELS } from "@/components/ui/DataFreshnessTag";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
 import { IndicatorRow, IndicatorSection, InterestRatesSection, ScorecardData, ScoreDriverRow, SurpriseIndexRow, TechnicalsRow } from "@/lib/pipeline/scorecard";
 import { UnavailableState } from "@/components/ui/UnavailableState";
-import { DATA_FRESHNESS_LABELS } from "@/components/ui/DataFreshnessTag";
-
-// The uppercase leading word for a not-yet-available section, matching
-// DataFreshnessTag's own vocabulary — "not_applicable" (a factor that
-// structurally can't exist for this asset, e.g. no CFTC contract) reads
-// distinctly from "unavailable" (a real, temporary provider/data gap), the
-// same distinction the freshness badge already draws.
-function unavailableLeadWord(freshness: DataFreshness): "NOT APPLICABLE" | "UNAVAILABLE" {
-  return freshness === "not_applicable" ? "NOT APPLICABLE" : "UNAVAILABLE";
-}
 
 function StatusBadge({ sentiment }: { sentiment: FactorSentiment | null }) {
   if (!sentiment) {
@@ -65,10 +55,35 @@ function DataQualitySummaryLine({ summary }: { summary: { total: number; counts:
   );
 }
 
-function SectionShell({ title, children }: { title: string; children: React.ReactNode }) {
+// `compact` renders the section collapsed behind a native <details> instead
+// of always-open — for a section that's real but still thin on data (the V2
+// Economic Surprise preview; see its own usage below), so it doesn't occupy
+// a full section's worth of scroll space next to fully-live sections and
+// read as "half-finished" on an otherwise complete Scorecard. The section
+// itself is unchanged — same data, same component — only its default
+// visibility changes.
+function SectionShell({ title, badge, compact = false, children }: { title: string; badge?: string; compact?: boolean; children: React.ReactNode }) {
+  const heading = (
+    <h4 className="text-xs font-semibold uppercase tracking-wide text-(--text-faint) mb-2 flex items-center gap-2">
+      {title}
+      {badge && (
+        <span className="normal-case tracking-normal font-medium text-[10px] rounded-full px-1.5 py-0.5 bg-sky-500/10 text-sky-400">{badge}</span>
+      )}
+    </h4>
+  );
+
+  if (compact) {
+    return (
+      <details className="border-b border-(--border) last:border-0 pb-4 last:pb-0">
+        <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">{heading}</summary>
+        <div className="mt-2">{children}</div>
+      </details>
+    );
+  }
+
   return (
     <div className="border-b border-(--border) last:border-0 pb-4 last:pb-0">
-      <h4 className="text-xs font-semibold uppercase tracking-wide text-(--text-faint) mb-2">{title}</h4>
+      {heading}
       {children}
     </div>
   );
@@ -257,12 +272,12 @@ function SurpriseIndexTable({ section, symbol }: { section: ScorecardData["surpr
   return (
     <>
       {section.limited && (
-        <p className="text-[11px] text-amber-400/90 mb-2">
-          Limited/shadow data — Scoring Engine V2&apos;s economic-release history for {symbol} is still accumulating. This section will fill in as more real releases are detected.
+        <p className="text-[11px] text-(--text-faint) mb-2">
+          Preview — real economic-release history for {symbol} is still accumulating. This section fills in as more releases are detected; it does not affect your V1 score above.
         </p>
       )}
       {section.rows.length === 0 ? (
-        <p className="text-xs text-(--text-faint)">No V2 shadow release history recorded for this market yet.</p>
+        <p className="text-xs text-(--text-faint)">No release history recorded for this market yet.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -434,7 +449,12 @@ export function Scorecard({
             )}
           </SectionShell>
 
-          <SectionShell title="Economic Surprise Index (V2 shadow)">
+          {/* Customer-facing label deliberately drops the internal "V2
+              shadow" versioning term — collapsed by default (compact) and
+              tagged "Preview" so this accumulating-data section reads as an
+              intentional early look, not an unfinished part of the V1
+              Scorecard above it. Same underlying data either way. */}
+          <SectionShell title="Economic Surprise Index" badge="Preview" compact>
             <SurpriseIndexTable section={data.surpriseIndex} symbol={instrument.symbol} />
           </SectionShell>
         </div>

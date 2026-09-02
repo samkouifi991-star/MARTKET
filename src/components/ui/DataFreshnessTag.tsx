@@ -16,12 +16,30 @@ export const DATA_FRESHNESS_LABELS: Record<DataFreshness, { text: string; classe
   not_applicable: { text: "Not Applicable", classes: "text-(--text-faint) opacity-60" },
 };
 
-export function DataFreshnessTag({ freshness, lastUpdated }: { freshness: DataFreshness; lastUpdated?: string }) {
+// `reason` renders as a native title tooltip so compact contexts (table
+// cells, stat tiles) can still disclose WHY a value is unavailable/not
+// applicable (e.g. "GBPJPY is a currency cross and does not have a
+// reliable single CFTC futures contract") without a full UnavailableState
+// block — see UnavailableState for the fuller, paragraph-length version of
+// the same disclosure.
+export function DataFreshnessTag({ freshness, lastUpdated, reason }: { freshness: DataFreshness; lastUpdated?: string; reason?: string }) {
   const meta = DATA_FRESHNESS_LABELS[freshness];
   return (
-    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${meta.classes}`}>
+    <span
+      title={reason}
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${meta.classes}`}
+    >
       {meta.text}
       {lastUpdated && <span className="normal-case font-normal opacity-80">· {formatRelative(lastUpdated)}</span>}
     </span>
   );
+}
+
+// Shared "which word leads an unavailable-state disclosure" rule — a
+// structurally-inapplicable factor (not_applicable) reads "NOT APPLICABLE",
+// everything else (no verified source yet, provider outage, etc.) reads
+// "UNAVAILABLE". Originally local to Scorecard.tsx; promoted here so every
+// consumer of the freshness vocabulary can share one definition.
+export function unavailableLeadWord(freshness: DataFreshness): "NOT APPLICABLE" | "UNAVAILABLE" {
+  return freshness === "not_applicable" ? "NOT APPLICABLE" : "UNAVAILABLE";
 }

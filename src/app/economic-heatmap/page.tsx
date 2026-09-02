@@ -3,19 +3,12 @@
 // bearish. See lib/pipeline/economic-heatmap.ts for the full methodology.
 import { requireEntitlement } from "@/lib/auth/dal";
 import { isDemoOnly } from "@/services/data-mode";
-import { buildEconomicHeatmap, HeatmapLabel } from "@/lib/pipeline/economic-heatmap";
+import { buildEconomicHeatmap, HEATMAP_LABEL_CLASSES } from "@/lib/pipeline/economic-heatmap";
 import { Card } from "@/components/ui/Card";
+import { DataFreshnessTag } from "@/components/ui/DataFreshnessTag";
 
 export const metadata = { title: "Economic Heatmap — Market Intelligence AI" };
 export const dynamic = "force-dynamic";
-
-const LABEL_CLASSES: Record<HeatmapLabel, string> = {
-  "Strong bullish": "bg-emerald-500/25 text-emerald-300",
-  Bullish: "bg-emerald-500/10 text-emerald-400",
-  Neutral: "bg-slate-500/10 text-(--text-faint)",
-  Bearish: "bg-rose-500/10 text-rose-400",
-  "Strong bearish": "bg-rose-500/25 text-rose-300",
-};
 
 export default async function EconomicHeatmapPage() {
   await requireEntitlement();
@@ -63,8 +56,12 @@ async function HeatmapTable() {
                   const cell = row.cells[c];
                   return (
                     <td key={c} className="py-1.5 px-2">
-                      <div className={`rounded-md px-2 py-1.5 text-center text-[11px] font-medium ${cell.label ? LABEL_CLASSES[cell.label] : "text-(--text-faint)"}`}>
-                        {cell.value !== null ? cell.value.toFixed(1) : "N/A"}
+                      <div className={`rounded-md px-2 py-1.5 text-center text-[11px] font-medium ${cell.label ? HEATMAP_LABEL_CLASSES[cell.label] : ""}`}>
+                        {cell.value !== null ? (
+                          cell.value.toFixed(1)
+                        ) : (
+                          <DataFreshnessTag freshness="unavailable" />
+                        )}
                       </div>
                     </td>
                   );
