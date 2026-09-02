@@ -1,0 +1,33 @@
+# One-off, manually-triggered health check for the 24-48h observation window
+# on the Market Detail fast/slow cache split (see commit 3cc9337). This
+# sandbox's own outbound network policy blocks *.vercel.app directly (see
+# launch-audit.yml's header for the same limitation), so this reuses that
+# workflow's pattern: a GitHub Actions runner (unrestricted egress) makes a
+# single timed request to each page and prints status/timing into this
+# job's own log, read back via the GitHub Actions API. Not meant to be run
+# on a schedule or repeatedly in quick succession — one request per symbol
+# per check-in, not load generation. Safe to delete once the observation
+# window is over.
+name: Market Detail Health Check
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: One timed GET each to /markets/GBPJPY and /markets/XAUUSD
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+        run: |
+          if [ -z "$APP_BASE_URL" ]; then
+            echo "APP_BASE_URL is not set."
+            exit 1
+          fi
+          echo "BEGIN_HEALTH_CHECK"
+          for SYM in GBPJPY XAUUSD; do
+            RESULT=$(curl -s -o /dev/null -w "http_code=%{http_code} time_total=%{time_total}s" -m 30 "${APP_BASE_URL}/markets/${SYM}")
+            echo "${SYM}: ${RESULT}"
+          done
+          echo "END_HEALTH_CHECK"
