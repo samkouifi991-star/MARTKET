@@ -134,7 +134,7 @@ async function auditRow(instrument: Instrument): Promise<LaunchAuditRow> {
     getPositioningWithFallback(symbol, true),
     getRetailSentimentFromStorage(symbol),
     getFredSeriesWithFallback(country, "cpi", 2, true),
-    getCurrentScore(symbol).catch(() => null),
+    getCurrentScore(symbol, { includeHistory: false }).catch(() => null),
   ]);
   const seasonalityCandles = await getDailyCandlesWithFallback(symbol, 20 * 365, true);
 

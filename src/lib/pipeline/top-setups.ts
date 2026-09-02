@@ -65,11 +65,21 @@ export async function getCanonicalMarketRows({ includeAll = false }: { includeAl
     }));
   }
 
+  // Egress guard (Supabase free-tier egress incident): every real caller of
+  // this function (Top Setups, Markets, Heatmap, Watchlists, the landing
+  // ranking list, Market Detail's correlation panel) renders only
+  // totalScore/bias/confidence/change24h/current price — never the score-
+  // history chart or the daily/4h/1h candle series — so this reads the
+  // lite form of both underlying calls: no score history, a short daily
+  // window, and no intraday candles at all. A caller that genuinely needs
+  // one symbol's full chart-quality data (the landing page's featured
+  // showcase card) fetches that one symbol separately at full depth
+  // instead of paying this cost for all 19 rows — see landing.ts.
   return Promise.all(
     instruments.map(async (instrument) => {
       const [score, priceCard] = await Promise.all([
-        (async () => (await getCurrentScore(instrument.symbol).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { storageOnly: true, updateCurrent: true })))(),
-        getCanonicalPriceCard(instrument.symbol, DATA_MODE),
+        (async () => (await getCurrentScore(instrument.symbol, { includeHistory: false }).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { storageOnly: true, updateCurrent: true })))(),
+        getCanonicalPriceCard(instrument.symbol, DATA_MODE, { dailyDepth: 60, includeIntraday: false }),
       ]);
       return {
         instrument,

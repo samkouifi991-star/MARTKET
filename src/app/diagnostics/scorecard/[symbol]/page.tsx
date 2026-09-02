@@ -51,7 +51,7 @@ export default async function ScorecardDiagnosticPage({
   // Identical read as the real page: the canonical current_market_score
   // row (db/queries/scores.ts's getCurrentScore), falling back to a fresh
   // live compute only if none exists yet.
-  const score: MarketScore = (await getCurrentScore(instrument.symbol).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { updateCurrent: true }));
+  const score: MarketScore = (await getCurrentScore(instrument.symbol, { includeHistory: false }).catch(() => null)) ?? (await computeLiveMarketScore(instrument.symbol, DATA_MODE, { updateCurrent: true }));
 
   // Cross-check against Dashboard's own read (getAllCurrentScores, a bulk
   // read of the SAME table) — proves this page, Dashboard, and Top Setups

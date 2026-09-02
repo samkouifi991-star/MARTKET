@@ -45,7 +45,7 @@ export async function recordReleaseSurprise(input: ReleaseSurpriseInput): Promis
       eventExternalId: input.eventExternalId,
       releaseKey: input.releaseKey,
     })
-    .returning();
+    .returning({ id: economicReleaseSurprises.id }); // only the id is used below — avoid returning every column
   return row.id;
 }
 

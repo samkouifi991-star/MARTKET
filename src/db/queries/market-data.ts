@@ -605,22 +605,39 @@ export async function getLatestStoredEconomicSeries(country: string, indicator: 
 
 export type StoredDailyCandles = { candles: NormalizedCandle[]; fetchedAt: Date; provider: string };
 
-/** All stored candles for this symbol/timeframe, oldest first, plus the most
- * recent `fetched_at` across those rows (when we last successfully wrote
- * any of them) — the timestamp a last-known-good fallback should report as
- * "as of", not the moment this function happens to be called — and the
- * provider that wrote the most recent (latest-dated) candle, so a
- * last-known-good fallback can report the series' TRUE current source
- * (e.g. "oanda") rather than assuming a fixed provider. Generalized over
- * timeframe so daily and intraday (4h/1h) share one implementation. */
-export async function getLatestStoredCandles(symbol: string, timeframe: "1d" | "4h" | "1h"): Promise<StoredDailyCandles | null> {
+// Egress guard (Supabase free-tier egress incident): this table is
+// append-only (upsertCandles never deletes — see cron/candles/route.ts) and
+// the daily cron requests up to 20*365 live days per symbol, so an
+// unbounded read here grows without limit for as long as the app has been
+// running. Every caller of getLatestStoredCandles/getLatestStoredDailyCandles
+// must therefore go through a real LIMIT — no exceptions. These defaults
+// match what the technical-trend engine actually needs: scoreTimeframe()
+// (technical-trend.ts) computes an SMA200, so anything under ~200 bars
+// silently drops that moving average; the numbers below give it headroom
+// on all three timeframes while still being a >90% reduction from the
+// thousands of rows a truly unbounded read could return. Callers wanting a
+// different depth (e.g. seasonality's genuinely long lookback) pass their
+// own `limit` explicitly — this default only applies when they don't.
+export const DEFAULT_CANDLE_READ_LIMIT: Record<"1d" | "4h" | "1h", number> = { "1d": 260, "4h": 250, "1h": 300 };
+
+/** The most recent `limit` stored candles for this symbol/timeframe, oldest
+ * first, plus the most recent `fetched_at` across those rows (when we last
+ * successfully wrote any of them) — the timestamp a last-known-good
+ * fallback should report as "as of", not the moment this function happens
+ * to be called — and the provider that wrote the most recent (latest-dated)
+ * candle, so a last-known-good fallback can report the series' TRUE current
+ * source (e.g. "oanda") rather than assuming a fixed provider. Generalized
+ * over timeframe so daily and intraday (4h/1h) share one implementation. */
+export async function getLatestStoredCandles(symbol: string, timeframe: "1d" | "4h" | "1h", limit: number = DEFAULT_CANDLE_READ_LIMIT[timeframe]): Promise<StoredDailyCandles | null> {
   const db = getDb();
   const rows = await db
     .select()
     .from(marketCandles)
     .where(and(eq(marketCandles.symbol, symbol), eq(marketCandles.timeframe, timeframe)))
-    .orderBy(marketCandles.date);
+    .orderBy(desc(marketCandles.date))
+    .limit(limit);
   if (rows.length === 0) return null;
+  rows.reverse(); // restore ascending (oldest-first) order — every downstream consumer assumes chronological order
 
   const candles: NormalizedCandle[] = rows.map((r) => ({ date: r.date.toISOString(), open: r.open, high: r.high, low: r.low, close: r.close, volume: r.volume }));
   const fetchedAt = rows.reduce((max, r) => (r.fetchedAt > max ? r.fetchedAt : max), rows[0].fetchedAt);
@@ -630,8 +647,11 @@ export async function getLatestStoredCandles(symbol: string, timeframe: "1d" | "
 
 /** Daily-only convenience wrapper — kept as its own name since it's the
  * overwhelming majority of existing callers (Technical/Seasonality/price
- * chart all default to daily). */
-export async function getLatestStoredDailyCandles(symbol: string): Promise<StoredDailyCandles | null> {
-  return getLatestStoredCandles(symbol, "1d");
+ * chart all default to daily). `limit` defaults to DEFAULT_CANDLE_READ_LIMIT
+ * but seasonality passes its own much larger, explicit window since a
+ * meaningful seasonal comparison genuinely needs many years of daily bars —
+ * see last-known-good.ts's getDailyCandlesWithFallback. */
+export async function getLatestStoredDailyCandles(symbol: string, limit?: number): Promise<StoredDailyCandles | null> {
+  return getLatestStoredCandles(symbol, "1d", limit);
 }
 

@@ -65,7 +65,7 @@ export async function buildForexScorecard(symbol: string, storageOnly = true): P
     getRecentSurprisesForCountries([baseCountry, quoteCountry]),
     fetchTechnicalTrend(symbol, storageOnly),
     getRetailSentimentFromStorage(symbol),
-    getCurrentScore(symbol),
+    getCurrentScore(symbol, { includeHistory: false }), // only finalScore/finalBias below ever read this
   ]);
 
   const strengthDifferential = baseStrength.score !== null && quoteStrength.score !== null ? round(baseStrength.score - quoteStrength.score) : null;

@@ -29,10 +29,10 @@ import { getQuoteWithFallback } from "@/services/market-data/last-known-good";
 import { PriceData } from "@/lib/types";
 import { allowsDemoFallback, DataMode } from "@/services/data-mode";
 import { CardResult, isUsable, worseOf } from "./types";
-import { fetchTechnicalTrend } from "./technical";
+import { fetchTechnicalTrend, TechnicalTrendOptions } from "./technical";
 
-export async function getCanonicalPriceCard(symbol: string, mode: DataMode): Promise<CardResult<PriceData>> {
-  const [quote, technical] = await Promise.all([getQuoteWithFallback(symbol, true), fetchTechnicalTrend(symbol, true)]);
+export async function getCanonicalPriceCard(symbol: string, mode: DataMode, technicalOpts: TechnicalTrendOptions = {}): Promise<CardResult<PriceData>> {
+  const [quote, technical] = await Promise.all([getQuoteWithFallback(symbol, true), fetchTechnicalTrend(symbol, true, technicalOpts)]);
 
   if (isUsable(quote.status, quote.value) && isUsable(technical.daily.status, technical.daily.value) && technical.result) {
     const t = technical.result;

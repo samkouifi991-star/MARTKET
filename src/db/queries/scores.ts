@@ -175,7 +175,8 @@ export async function upsertCurrentScore(score: MarketScore, scoringVersionId: n
 // needs. Returns null when no current-score row exists yet for this symbol
 // (e.g. before the scores cron's first run or any Market Detail visit) so
 // callers can fall back to a fresh compute.
-export async function getCurrentScore(symbol: string): Promise<MarketScore | null> {
+export async function getCurrentScore(symbol: string, opts: { includeHistory?: boolean } = {}): Promise<MarketScore | null> {
+  const includeHistory = opts.includeHistory ?? true;
   const db = getDb();
   const [row] = await db.select().from(currentMarketScores).where(eq(currentMarketScores.symbol, symbol)).limit(1);
   if (!row) return null;
@@ -183,7 +184,11 @@ export async function getCurrentScore(symbol: string): Promise<MarketScore | nul
   const factorRows = await db.select().from(currentFactorScores).where(eq(currentFactorScores.symbol, symbol));
   if (factorRows.length === 0) return null;
 
-  const priorHistory = await getScoreHistory(symbol).catch(() => []);
+  // Egress guard: callers that never render the score-history chart (every
+  // list page — see top-setups.ts's getCanonicalMarketRows) pass
+  // includeHistory:false to skip this read entirely rather than pulling up
+  // to ~150 bounded-but-unused rows per symbol on every render.
+  const priorHistory = includeHistory ? await getScoreHistory(symbol).catch(() => []) : [];
   const history: MarketScore["history"] = [...priorHistory].reverse().map((r) => ({ date: r.computedAt, score: r.totalScore }));
 
   const factors: ScoreFactor[] = factorRows.map((f) => ({

@@ -83,7 +83,7 @@ async function buildRow(instrument: Instrument): Promise<PipelineHealthRow> {
     getPositioningWithFallback(symbol, true),
     getRetailSentimentFromStorage(symbol),
     getFredSeriesWithFallback(country, "cpi", 2, true),
-    getCurrentScore(symbol).catch(() => null),
+    getCurrentScore(symbol, { includeHistory: false }).catch(() => null),
   ]);
 
   return {

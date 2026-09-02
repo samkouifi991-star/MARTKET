@@ -134,7 +134,7 @@ function candlesFromStored(stored: StoredDailyCandles, note: string): Provenance
 
 export async function getDailyCandlesWithFallback(symbol: string, days = 260, storageOnly = false): Promise<Provenance<NormalizedCandle[]>> {
   if (storageOnly) {
-    const stored = await getLatestStoredDailyCandles(symbol);
+    const stored = await getLatestStoredDailyCandles(symbol, days);
     if (!stored || stored.candles.length === 0) return unavailable("fmp", "Financial Modeling Prep", `No stored daily candles exist yet for ${symbol} (storage-only read — no live provider call attempted).`);
     return candlesFromStored(stored, `Storage-only read — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}.`);
   }
@@ -142,7 +142,7 @@ export async function getDailyCandlesWithFallback(symbol: string, days = 260, st
   const live = await marketData.getDailyCandles(symbol, days);
   if (live.status === "live") return live;
 
-  const stored = await getLatestStoredDailyCandles(symbol);
+  const stored = await getLatestStoredDailyCandles(symbol, days);
   if (!stored || stored.candles.length === 0) return live;
 
   return candlesFromStored(stored, `Live refresh unavailable (${live.error ?? live.status}) — showing ${stored.candles.length} stored candles, last written ${stored.fetchedAt.toISOString()}`);

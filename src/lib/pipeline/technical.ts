@@ -16,6 +16,21 @@ export type TechnicalTrendFetch = {
   result: TechnicalTrendResult | null;
 };
 
+export type TechnicalTrendOptions = {
+  /** Daily candle window to request — defaults to 260 (matches
+   * scoreTimeframe's SMA200 need). List-only callers that never render the
+   * daily/4h/1h trend or the price series (Top Setups, Markets, Watchlists,
+   * Heatmap) pass a much smaller value since they only read the current
+   * score/price this factor happens to sit alongside. */
+  dailyDepth?: number;
+  /** Whether to fetch 4H/1H candles at all — skip for callers that never
+   * render an intraday trend label or use the intraday-blended result
+   * (see technical-trend.ts's TIMEFRAME_WEIGHTS). Defaults to true so every
+   * existing caller (Market Detail, the real Forex Scorecard page,
+   * resolveTechnicalFactor's scoring path) keeps its current behavior. */
+  includeIntraday?: boolean;
+};
+
 /** Real data the caller can compute from: live, or last-known-good stored
  * data — never a synthetic/demo value. Distinct from "unavailable"/"error",
  * which mean there is genuinely nothing usable (including no stored
@@ -30,10 +45,12 @@ function hasUsableValue<T>(p: Provenance<T>): boolean {
  * multi-timeframe technical result. Shared by resolveTechnicalFactor (the
  * scoring factor) and the market-detail price chart card, so both read the
  * exact same real indicators rather than each computing its own. */
-export async function fetchTechnicalTrend(symbol: string, storageOnly = false): Promise<TechnicalTrendFetch> {
-  const daily = await getDailyCandlesWithFallback(symbol, 260, storageOnly);
-  if (!hasUsableValue(daily)) {
-    return { daily, h4: daily as Provenance<NormalizedCandle[]>, h1: daily as Provenance<NormalizedCandle[]>, result: null };
+export async function fetchTechnicalTrend(symbol: string, storageOnly = false, opts: TechnicalTrendOptions = {}): Promise<TechnicalTrendFetch> {
+  const { dailyDepth = 260, includeIntraday = true } = opts;
+  const daily = await getDailyCandlesWithFallback(symbol, dailyDepth, storageOnly);
+  if (!hasUsableValue(daily) || !includeIntraday) {
+    const result = hasUsableValue(daily) ? computeTechnicalTrend({ daily: daily.value! }) : null;
+    return { daily, h4: daily as Provenance<NormalizedCandle[]>, h1: daily as Provenance<NormalizedCandle[]>, result };
   }
 
   // Intraday candles now have their own storage fallback too (the candles

@@ -46,23 +46,42 @@ vi.mock("../client", () => ({
   }),
 }));
 
-type FakeQuery<T> = Promise<T[]> & { where: () => FakeQuery<T>; orderBy: () => FakeQuery<T>; limit: (n: number) => FakeQuery<T> };
+type FakeQuery<T> = Promise<T[]> & { where: () => FakeQuery<T>; orderBy: (dir?: unknown) => FakeQuery<T>; limit: (n: number) => FakeQuery<T> };
+
+// drizzle's desc(col)/asc(col) both compile to a `sql` tagged-template
+// fragment (see drizzle-orm/sql/expressions/select.js: `sql`${column} desc``)
+// — its queryChunks array ends with a StringChunk whose `.value` is
+// [" desc"], so walking those chunks (not JSON.stringify, which throws on
+// the circular table reference the middle chunk carries) reliably tells
+// the two apart without depending on drizzle's internal class shapes.
+function isDescOrder(dir: unknown): boolean {
+  const chunks = (dir as { queryChunks?: unknown[] })?.queryChunks ?? [];
+  return chunks.some((c) => {
+    const value = (c as { value?: unknown[] })?.value;
+    return Array.isArray(value) && value.some((v) => typeof v === "string" && v.includes("desc"));
+  });
+}
+
 function makeQuery<T>(data: T[]): FakeQuery<T> {
   const promise = Promise.resolve(data) as FakeQuery<T>;
   promise.where = () => makeQuery(data);
-  // getLatestStoredCandles relies on real Postgres's ORDER BY date ASC to
-  // put the latest-dated candle last, regardless of insertion/provider
-  // order — sort here (by a `date` field, when rows have one) so this fake
-  // actually exercises that "greatest date wins" property instead of just
-  // echoing insertion order.
-  promise.orderBy = () =>
-    makeQuery(
+  // getLatestStoredCandles relies on real Postgres's ORDER BY date ASC/DESC
+  // to put the latest-dated candle first or last, regardless of insertion/
+  // provider order — sort here (by a `date` field, when rows have one) so
+  // this fake actually exercises that "greatest date wins" property, in
+  // whichever direction the real query asked for, instead of just echoing
+  // insertion order or hardcoding one direction.
+  promise.orderBy = (dir?: unknown) => {
+    const descending = isDescOrder(dir);
+    return makeQuery(
       [...data].sort((a, b) => {
         const da = (a as { date?: Date }).date;
         const db = (b as { date?: Date }).date;
-        return da instanceof Date && db instanceof Date ? da.getTime() - db.getTime() : 0;
+        if (!(da instanceof Date) || !(db instanceof Date)) return 0;
+        return descending ? db.getTime() - da.getTime() : da.getTime() - db.getTime();
       })
     );
+  };
   promise.limit = (n: number) => makeQuery(data.slice(0, n));
   return promise;
 }

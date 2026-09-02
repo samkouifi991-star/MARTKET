@@ -242,7 +242,7 @@ export async function computeMarketScoreV2(symbol: string, mode: DataMode, optio
     })(),
     fetchRegimeInputs(storageOnly),
     getCurrentScoreV2(symbol).catch(() => null),
-    getCurrentScore(symbol).catch(() => null),
+    getCurrentScore(symbol, { includeHistory: false }).catch(() => null),
   ]);
 
   const regime = classifyRegime(regimeInputs);
