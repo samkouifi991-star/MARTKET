@@ -24,6 +24,10 @@ import { classifyIndicatorSurprise, classifyMacroTrend, IndicatorClassification,
 import { computeGoldMacroRegime, GOLD_SYMBOL, GoldMacroDriver } from "./gold-macro";
 import { InstitutionalCardData, LiveMarketDetail } from "./market-detail";
 import { CardResult, worseOf } from "./types";
+import { buildForexScorecard, ForexScorecardData } from "./forex-scorecard";
+import { getLiveNewsFeed } from "./news-feed";
+import { getUpcomingHighImpactEvents, StoredCalendarEvent } from "@/db/queries/market-data";
+import { ClientNewsArticle } from "@/lib/types";
 
 // ---- Left-panel sub-scores ----
 // OUR OWN grouping (not the screenshot's proprietary one), computed purely
@@ -344,6 +348,88 @@ async function resolveSurpriseIndexSection(symbol: string): Promise<SurpriseInde
   return { rows, limited: rows.length < SURPRISE_INDEX_LIMITED_THRESHOLD };
 }
 
+// ---- Currency Comparison (FX-only) ----
+// The "Scorecard" rename (was the standalone /forex-scorecard page) folds
+// the FX-specific base-vs-quote comparison directly into the per-
+// instrument Scorecard instead of maintaining a second deep-dive page —
+// reuses forex-scorecard.ts's already-composed differentials/bands/
+// narrative verbatim, no new math. null for every non-FX instrument
+// (nothing forced onto assets it doesn't apply to).
+export async function resolveCurrencyComparison(instrument: Instrument, storageOnly: boolean): Promise<ForexScorecardData | null> {
+  if (!instrument.currencies) return null;
+  return buildForexScorecard(instrument.symbol, storageOnly);
+}
+
+// ---- "Latest COT Changes" — plain-English read of the same net-weekly-
+// change/direction fields already shown in the Institutional Activity
+// numbers above; no new fetch, no new classification beyond a label. ----
+export type CotChangeLabel = "Increasing longs" | "Increasing shorts" | "Reducing longs" | "Reducing shorts" | "Little change";
+
+// `direction` here is the net-positioning direction CFTC's own client
+// already computes (cftc.ts: "Bullish" net-long / "Bearish" net-short /
+// "Neutral") — there's no separately-stored long-side vs. short-side
+// weekly delta, so a growing net-long position reads as "Increasing
+// longs" and a shrinking one as "Reducing longs" (and the mirror for a
+// net-short position), the same convention market commentary uses when
+// only the net change is available.
+export function cotChangeLabel(data: Pick<InstitutionalCardData, "direction" | "netWeeklyChange">): CotChangeLabel {
+  if (Math.abs(data.netWeeklyChange) < 1) return "Little change";
+  if (data.direction === "Bullish") return data.netWeeklyChange > 0 ? "Increasing longs" : "Reducing longs";
+  if (data.direction === "Bearish") return data.netWeeklyChange < 0 ? "Increasing shorts" : "Reducing shorts";
+  return "Little change";
+}
+
+// ---- News & Market Context ----
+// Composed entirely from fields the real ingestion pipeline already
+// classified at write time (news-classifier.ts's importance/geopolitical-
+// relevance/monetary-policy-relevance/risk-sentiment) — no new provider
+// call, no new LLM summarization at render time, nothing invented. Reuses
+// getLiveNewsFeed/getUpcomingHighImpactEvents, the same bounded reads the
+// Dashboard already makes elsewhere, filtered to this instrument's own
+// affected markets/currencies.
+export type NewsContextSection = {
+  latest: ClientNewsArticle[];
+  monetaryPolicy: ClientNewsArticle | null;
+  geopolitical: ClientNewsArticle | null;
+  riskSentiment: ClientNewsArticle["riskSentiment"] | null;
+  upcomingEvent: StoredCalendarEvent | null;
+};
+
+const NEWS_CONTEXT_FEED_LIMIT = 60;
+const NEWS_CONTEXT_MAX_LATEST = 3;
+const NEWS_CONTEXT_EVENT_WINDOW_HOURS = 24 * 14;
+const NEWS_CONTEXT_EVENT_SCAN_LIMIT = 30;
+const RELEVANCE_THRESHOLD = 50;
+
+export async function resolveNewsContext(instrument: Instrument): Promise<NewsContextSection> {
+  const relatedTickers = instrument.currencies ?? [instrument.symbol];
+  const [feed, events] = await Promise.all([
+    getLiveNewsFeed(NEWS_CONTEXT_FEED_LIMIT),
+    getUpcomingHighImpactEvents(NEWS_CONTEXT_EVENT_WINDOW_HOURS, NEWS_CONTEXT_EVENT_SCAN_LIMIT),
+  ]);
+
+  const related = feed.filter((n) => n.affectedMarkets.includes(instrument.symbol) || n.affectedMarkets.some((m) => relatedTickers.includes(m)));
+  const latest = [...related].sort((a, b) => b.importance - a.importance).slice(0, NEWS_CONTEXT_MAX_LATEST);
+
+  const byMonetaryRelevance = [...related].sort((a, b) => (b.monetaryPolicyRelevance ?? 0) - (a.monetaryPolicyRelevance ?? 0));
+  const monetaryPolicy = (byMonetaryRelevance[0]?.monetaryPolicyRelevance ?? 0) >= RELEVANCE_THRESHOLD ? byMonetaryRelevance[0] : null;
+
+  const byGeoRelevance = [...related].sort((a, b) => (b.geopoliticalRelevance ?? 0) - (a.geopoliticalRelevance ?? 0));
+  const geopolitical = (byGeoRelevance[0]?.geopoliticalRelevance ?? 0) >= RELEVANCE_THRESHOLD ? byGeoRelevance[0] : null;
+
+  const withRiskSentiment = [...related].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()).find((n) => n.riskSentiment);
+
+  const relevantEvents = events.filter((e) => e.affectedMarkets.includes(instrument.symbol) || e.affectedMarkets.some((m) => relatedTickers.includes(m)));
+
+  return {
+    latest,
+    monetaryPolicy,
+    geopolitical,
+    riskSentiment: withRiskSentiment?.riskSentiment ?? null,
+    upcomingEvent: relevantEvents[0] ?? null,
+  };
+}
+
 // ---- Composition ----
 export type ScorecardData = {
   subScores: ScorecardSubScores;
@@ -357,16 +443,20 @@ export type ScorecardData = {
   jobsMarket: IndicatorSection;
   interestRates: InterestRatesSection;
   surpriseIndex: SurpriseIndexSection;
+  currencyComparison: ForexScorecardData | null;
+  newsContext: NewsContextSection;
 };
 
 export async function buildScorecardData(instrument: Instrument, score: MarketScore, live: LiveMarketDetail, storageOnly = false): Promise<ScorecardData> {
   const country = primaryMacroCountry(instrument);
-  const [economicGrowth, inflation, jobsMarket, interestRates, surpriseIndex] = await Promise.all([
+  const [economicGrowth, inflation, jobsMarket, interestRates, surpriseIndex, currencyComparison, newsContext] = await Promise.all([
     resolveIndicatorSection(instrument, country, GROWTH_INDICATORS, { label: "GDP Growth Rate (QoQ)", fredKey: "gdpGrowth", trendKind: "growth" }, storageOnly),
     resolveIndicatorSection(instrument, country, INFLATION_INDICATORS, { label: "CPI (Index level)", fredKey: "cpi", trendKind: "inflation" }, storageOnly),
     resolveIndicatorSection(instrument, country, JOBS_INDICATORS, { label: "Unemployment Rate", fredKey: "unemploymentRate", trendKind: "jobs" }, storageOnly),
     resolveInterestRatesSection(instrument, country, storageOnly),
     resolveSurpriseIndexSection(instrument.symbol),
+    resolveCurrencyComparison(instrument, storageOnly),
+    resolveNewsContext(instrument),
   ]);
 
   return {
@@ -385,5 +475,7 @@ export async function buildScorecardData(instrument: Instrument, score: MarketSc
     jobsMarket,
     interestRates,
     surpriseIndex,
+    currencyComparison,
+    newsContext,
   };
 }

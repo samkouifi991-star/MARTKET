@@ -51,7 +51,7 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = await params;
   const instrument = getInstrument(symbol);
-  return { title: instrument ? `${instrument.symbol} — Market Intelligence AI` : "Market not found" };
+  return { title: instrument ? `${instrument.symbol} Scorecard — Market Intelligence AI` : "Market not found" };
 }
 
 export default async function MarketDetailPage({ params }: { params: Promise<{ symbol: string }> }) {
@@ -129,12 +129,19 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
   return (
     <div className="space-y-6">
       <AutoRefresh intervalSeconds={45} />
-      <Link href="/markets" className="inline-flex items-center gap-1 text-xs text-(--text-faint) hover:text-(--text-dim)">
-        <ArrowLeft size={13} /> Back to Markets
-      </Link>
+      <div className="flex items-center gap-1.5 text-xs text-(--text-faint)">
+        <Link href="/scorecard" className="inline-flex items-center gap-1 hover:text-(--text-dim)">
+          <ArrowLeft size={13} /> Scorecard
+        </Link>
+        <span>/</span>
+        <span>{instrument.symbol}</span>
+      </div>
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-(--text-faint)">Scorecard</span>
+          </div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold">{instrument.symbol}</h1>
             <span className="text-xs rounded-full border border-(--border) px-2 py-0.5 text-(--text-faint)">{instrument.assetClass}</span>
@@ -204,7 +211,12 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
         <Scorecard instrument={instrument} score={score} data={scorecardData!} biasThresholds={scoringConfig.biasThresholds} price={price} priceFreshness={priceFreshness} />
       )}
 
-      {price && (
+      {/* Live/hybrid mode renders this same chart inside the Scorecard
+          component itself, right after "Why This Score?" (see
+          components/market/Scorecard.tsx) — demo mode's separate flat
+          rendering path (above) doesn't use that component, so it gets its
+          own copy here instead of losing the chart entirely. */}
+      {demoMode && price && (
         <Card title="Price & Intelligence History" subtitle="Does the score move before the market does? Real, stored data only — never fabricated.">
           <PriceScoreOverlayChart priceSeries={recentPriceSeries} scoreHistory={score.history} decimals={instrument.decimals} thresholds={scoringConfig.biasThresholds} />
         </Card>
@@ -348,41 +360,46 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ s
         </Card>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        <Card title="Related news" action={<Link href="/news" className="text-xs text-(--accent) hover:underline">All news →</Link>}>
-          {!demoMode && <p className="text-[10px] text-(--text-faint) mb-2">Sample data — not yet wired to the live News factor&apos;s feed.</p>}
-          {related.length === 0 ? (
-            <p className="text-sm text-(--text-faint)">No recent news tagged to this market.</p>
-          ) : (
-            <ul className="space-y-3">
-              {related.map((n) => (
-                <li key={n.id} className="text-sm">
-                  <div className="font-medium leading-snug">{n.headline}</div>
-                  <div className="text-xs text-(--text-faint) mt-0.5">
-                    {n.interpretation} · importance {n.importance}/100 · {formatRelative(n.publishedAt)}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+      {/* Live/hybrid mode now gets this from the Scorecard's own "News &
+          Market Context" section (real ingestion data — see
+          scorecard.ts's resolveNewsContext). Demo mode's separate flat
+          rendering path keeps its own sample-data cards, honestly labeled
+          as such, since it never calls buildScorecardData. */}
+      {demoMode && (
+        <div className="grid lg:grid-cols-2 gap-4">
+          <Card title="Related news" action={<Link href="/news" className="text-xs text-(--accent) hover:underline">All news →</Link>}>
+            {related.length === 0 ? (
+              <p className="text-sm text-(--text-faint)">No recent news tagged to this market.</p>
+            ) : (
+              <ul className="space-y-3">
+                {related.map((n) => (
+                  <li key={n.id} className="text-sm">
+                    <div className="font-medium leading-snug">{n.headline}</div>
+                    <div className="text-xs text-(--text-faint) mt-0.5">
+                      {n.interpretation} · importance {n.importance}/100 · {formatRelative(n.publishedAt)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
 
-        <Card title="Upcoming economic events" action={<Link href="/economic-calendar" className="text-xs text-(--accent) hover:underline">Calendar →</Link>}>
-          {!demoMode && <p className="text-[10px] text-(--text-faint) mb-2">Sample data — not yet wired to a live economic calendar feed.</p>}
-          {upcomingEvents.length === 0 ? (
-            <p className="text-sm text-(--text-faint)">No scheduled releases affecting this market in the near term.</p>
-          ) : (
-            <ul className="space-y-2.5">
-              {upcomingEvents.map((e) => (
-                <li key={e.id} className="text-sm flex items-center justify-between">
-                  <span>{e.event} <span className="text-(--text-faint) text-xs">({e.country})</span></span>
-                  <span className="text-xs text-(--text-faint)">{formatDateTime(e.dateTime)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </div>
+          <Card title="Upcoming economic events" action={<Link href="/economic-calendar" className="text-xs text-(--accent) hover:underline">Calendar →</Link>}>
+            {upcomingEvents.length === 0 ? (
+              <p className="text-sm text-(--text-faint)">No scheduled releases affecting this market in the near term.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {upcomingEvents.map((e) => (
+                  <li key={e.id} className="text-sm flex items-center justify-between">
+                    <span>{e.event} <span className="text-(--text-faint) text-xs">({e.country})</span></span>
+                    <span className="text-xs text-(--text-faint)">{formatDateTime(e.dateTime)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+      )}
 
       <Card title="What could invalidate this bias?" subtitle={`Current bias: ${score.bias}`}>
         <ul className="space-y-2">

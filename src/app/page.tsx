@@ -309,7 +309,7 @@ export default async function LandingPage() {
             </p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <FeatureTeaser icon={<ArrowLeftRight size={16} />} title="Forex Scorecard" href="/forex-scorecard" />
+            <FeatureTeaser icon={<ArrowLeftRight size={16} />} title="Scorecard" href="/scorecard" />
             <FeatureTeaser icon={<Coins size={16} />} title="Economic Strength" href="/economic-strength" />
             <FeatureTeaser icon={<Grid3x3 size={16} />} title="Economic Heatmap" href="/economic-heatmap" />
             <FeatureTeaser icon={<ShieldAlert size={16} />} title="Geopolitical Risk" href="/geopolitical-risk" />
@@ -634,13 +634,13 @@ function buildFeaturePanels(previews: Awaited<ReturnType<typeof getLandingFeatur
 
   panels.push({
     key: "forex",
-    label: "Forex Scorecard",
+    label: "Scorecard",
     content: !previews.forexScorecard || previews.forexScorecard.length === 0 ? (
       <Unavailable />
     ) : (
       <div className="space-y-2 max-w-md mx-auto">
         {previews.forexScorecard.map((sc) => (
-          <Link key={sc.symbol} href={`/forex-scorecard/${sc.symbol}`} className="card p-3 flex items-center justify-between hover:border-(--border-strong) transition-colors">
+          <Link key={sc.symbol} href={`/markets/${sc.symbol}`} className="card p-3 flex items-center justify-between hover:border-(--border-strong) transition-colors">
             <span className="font-medium text-sm">{sc.base}/{sc.quote}</span>
             <div className="flex items-center gap-3">
               <span className="text-xs text-(--text-faint)">Strength Δ {sc.strengthDifferential !== null ? formatSigned(sc.strengthDifferential, 0) : "N/A"}</span>
@@ -649,7 +649,7 @@ function buildFeaturePanels(previews: Awaited<ReturnType<typeof getLandingFeatur
           </Link>
         ))}
         <p className="text-center text-xs text-(--text-faint) pt-1">
-          <Link href="/forex-scorecard" className="text-(--accent) hover:underline">View all pairs →</Link>
+          <Link href="/scorecard" className="text-(--accent) hover:underline">View all markets →</Link>
         </p>
       </div>
     ),

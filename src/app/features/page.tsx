@@ -32,16 +32,10 @@ type Feature = { icon: LucideIcon; title: string; description: string; href: str
 
 const FEATURES: Feature[] = [
   {
-    icon: ListOrdered,
-    title: "AI Market Scorecard",
-    description: "Every tracked instrument gets one transparent -10..+10 score, blending institutional positioning, retail sentiment, technicals, seasonality, macro fundamentals, and news — with every contributing factor shown, never a black box.",
-    href: "/markets",
-  },
-  {
     icon: ArrowLeftRight,
-    title: "Forex Scorecard",
-    description: "Per-pair breakdown combining both currencies' Economic Strength, policy-rate differential, economic-surprise momentum, multi-timeframe technical trend, and retail positioning into one view.",
-    href: "/forex-scorecard",
+    title: "Scorecard",
+    description: "The main deep-dive for any market — Forex, Gold/Silver, Indices, or Crypto. One transparent -10..+10 score, why it exists, which factors agree or conflict, and what changed recently, with FX pairs additionally showing base-vs-quote Economic Strength, rate, and economic-surprise differentials.",
+    href: "/scorecard",
   },
   {
     icon: ListOrdered,

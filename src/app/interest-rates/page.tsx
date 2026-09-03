@@ -22,7 +22,7 @@ export default async function InterestRatesPage() {
       <div>
         <h1 className="text-xl font-semibold">Interest Rates &amp; Monetary Policy</h1>
         <p className="text-sm text-(--text-faint) mt-1">
-          Real policy rates and recent trend direction (FRED) for the 8 tracked currencies. For currency pairs, the rate differential between the two currencies drives the interest-rate factor — see the Forex Scorecard and Carry Trade Scanner.
+          Real policy rates and recent trend direction (FRED) for the 8 tracked currencies. For currency pairs, the rate differential between the two currencies drives the interest-rate factor — see each pair&apos;s Scorecard and the Carry Trade Scanner.
         </p>
       </div>
 

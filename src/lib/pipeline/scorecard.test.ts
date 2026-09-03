@@ -12,13 +12,18 @@ vi.mock("./gold-macro", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./gold-macro")>();
   return { ...actual, computeGoldMacroRegime: vi.fn() };
 });
+vi.mock("./forex-scorecard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./forex-scorecard")>();
+  return { ...actual, buildForexScorecard: vi.fn() };
+});
 
-import { getLatestEconomicEventByIndicator } from "@/db/queries/market-data";
+import { getLatestEconomicEventByIndicator, getRecentNews, getUpcomingHighImpactEvents } from "@/db/queries/market-data";
 import { getRecentReleaseTracking, ReleaseTrackingRow } from "@/db/queries/release-tracking";
 import { getSurpriseById, SurpriseRow } from "@/db/queries/economic-releases";
 import { getFredSeriesWithFallback } from "@/services/market-data/last-known-good";
 import { computeGoldMacroRegime } from "./gold-macro";
-import { buildScorecardData } from "./scorecard";
+import { buildForexScorecard } from "./forex-scorecard";
+import { buildScorecardData, cotChangeLabel } from "./scorecard";
 
 const GOLD: Instrument = { symbol: "XAUUSD", name: "Gold", assetClass: "Commodities", decimals: 2 };
 const GBPUSD: Instrument = { symbol: "GBPUSD", name: "British Pound / US Dollar", assetClass: "Forex", currencies: ["GBP", "USD"], decimals: 4 };
@@ -113,6 +118,41 @@ beforeEach(() => {
     inflationExplanation: "unavailable",
     inflationFreshness: "unavailable",
     drivers: [],
+  });
+  // News & Market Context (resolveNewsContext) and Currency Comparison
+  // (resolveCurrencyComparison) both run unconditionally inside
+  // buildScorecardData now — defaulted here so every existing test in this
+  // file (none of which exercise those two additions directly) doesn't
+  // have to know about them. buildForexScorecard itself never returns
+  // null (see forex-scorecard.ts) — an all-fields-unavailable stub is the
+  // honest "nothing real to show yet" shape, matching what the real
+  // function returns when none of its underlying reads have data.
+  vi.mocked(getRecentNews).mockResolvedValue([]);
+  vi.mocked(getUpcomingHighImpactEvents).mockResolvedValue([]);
+  vi.mocked(buildForexScorecard).mockResolvedValue({
+    symbol: "GBPUSD",
+    base: "GBP",
+    quote: "USD",
+    baseStrength: { currency: "GBP", country: "GB", score: null, level: null, drivers: [], freshness: "unavailable" },
+    quoteStrength: { currency: "USD", country: "US", score: null, level: null, drivers: [], freshness: "unavailable" },
+    strengthDifferential: null,
+    baseRate: null,
+    quoteRate: null,
+    rateDifferentialPts: null,
+    surpriseDifferential: null,
+    baseSurprise: null,
+    quoteSurprise: null,
+    dailyTrend: null,
+    h4Trend: null,
+    h1Trend: null,
+    technicalFreshness: null,
+    retail: null,
+    finalScore: null,
+    finalBias: null,
+    strengthBand: null,
+    rateBand: null,
+    surpriseBand: null,
+    narrative: null,
   });
 });
 
@@ -428,5 +468,126 @@ describe("buildScorecardData — Technicals section reuses score.factors, no new
     const data = await buildScorecardData(GOLD, score, fixtureLiveDetail());
     expect(data.technicals.find((r) => r.label === "4H / Daily Chart Trend")?.classification).toBe("Bullish");
     expect(data.technicals.find((r) => r.label === "Seasonality Trend")?.classification).toBe("Bearish");
+  });
+});
+
+describe("buildScorecardData — Currency Comparison (pre-launch Scorecard rename)", () => {
+  it("is null for a non-FX instrument — nothing forced onto an asset it doesn't apply to", async () => {
+    vi.mocked(buildForexScorecard).mockClear();
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.currencyComparison).toBeNull();
+    expect(buildForexScorecard).not.toHaveBeenCalled();
+  });
+
+  it("passes through forex-scorecard.ts's already-composed data verbatim for an FX pair — no recomputation", async () => {
+    const stub = {
+      symbol: "GBPUSD",
+      base: "GBP",
+      quote: "USD",
+      baseStrength: { currency: "GBP", country: "GB", score: 61, level: "Strong" as const, drivers: [], freshness: "live" as const },
+      quoteStrength: { currency: "USD", country: "US", score: -34, level: "Weak" as const, drivers: [], freshness: "live" as const },
+      strengthDifferential: 95,
+      baseRate: 3.75,
+      quoteRate: 0.84,
+      rateDifferentialPts: 2.91,
+      surpriseDifferential: 36,
+      baseSurprise: 24,
+      quoteSurprise: -12,
+      dailyTrend: "Bullish" as const,
+      h4Trend: "Bullish" as const,
+      h1Trend: "Neutral" as const,
+      technicalFreshness: "live" as const,
+      retail: { pctLong: 32, pctShort: 68, contrarianBias: "Bullish" as const },
+      finalScore: 4.8,
+      finalBias: "Very Bullish" as const,
+      strengthBand: "Strong bullish" as const,
+      rateBand: "Strong bullish" as const,
+      surpriseBand: "Strong bullish" as const,
+      narrative: "GBP currently has stronger macro conditions.",
+    };
+    vi.mocked(buildForexScorecard).mockResolvedValue(stub);
+    const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.currencyComparison).toEqual(stub);
+    expect(buildForexScorecard).toHaveBeenCalledWith("GBPUSD", false);
+  });
+});
+
+describe("cotChangeLabel", () => {
+  it("reads a growing net-long position as Increasing longs", () => {
+    expect(cotChangeLabel({ direction: "Bullish", netWeeklyChange: 500 })).toBe("Increasing longs");
+  });
+  it("reads a shrinking net-long position as Reducing longs", () => {
+    expect(cotChangeLabel({ direction: "Bullish", netWeeklyChange: -500 })).toBe("Reducing longs");
+  });
+  it("reads a deepening net-short position as Increasing shorts", () => {
+    expect(cotChangeLabel({ direction: "Bearish", netWeeklyChange: -500 })).toBe("Increasing shorts");
+  });
+  it("reads a shrinking net-short position as Reducing shorts", () => {
+    expect(cotChangeLabel({ direction: "Bearish", netWeeklyChange: 500 })).toBe("Reducing shorts");
+  });
+  it("reads a near-zero weekly change as Little change regardless of direction", () => {
+    expect(cotChangeLabel({ direction: "Bullish", netWeeklyChange: 0.4 })).toBe("Little change");
+  });
+});
+
+describe("buildScorecardData — News & Market Context", () => {
+  function fixtureNews(overrides: Partial<import("@/db/queries/market-data").StoredNewsArticle> = {}): import("@/db/queries/market-data").StoredNewsArticle {
+    return {
+      id: 1,
+      headline: "Test headline",
+      source: "Test wire",
+      url: null,
+      publishedAt: new Date().toISOString(),
+      affectedMarkets: ["XAUUSD"],
+      interpretation: "Neutral",
+      importance: 50,
+      confidence: 70,
+      reason: "test",
+      ...overrides,
+    };
+  }
+
+  it("only surfaces items tagged to this instrument's affected markets", async () => {
+    vi.mocked(getRecentNews).mockResolvedValue([
+      fixtureNews({ id: 1, headline: "Relevant", affectedMarkets: ["XAUUSD"] }),
+      fixtureNews({ id: 2, headline: "Irrelevant", affectedMarkets: ["BTCUSD"] }),
+    ]);
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.newsContext.latest.map((n) => n.id)).toEqual(["1"]);
+  });
+
+  it("only surfaces monetary-policy/geopolitical context above the relevance threshold — never a low-relevance item", async () => {
+    vi.mocked(getRecentNews).mockResolvedValue([
+      fixtureNews({ id: 3, headline: "Low relevance", monetaryPolicyRelevance: 10, geopoliticalRelevance: 10 }),
+    ]);
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.newsContext.monetaryPolicy).toBeNull();
+    expect(data.newsContext.geopolitical).toBeNull();
+  });
+
+  it("surfaces the highest-relevance monetary-policy item once it clears the threshold", async () => {
+    vi.mocked(getRecentNews).mockResolvedValue([
+      fixtureNews({ id: 4, headline: "Fed signals hold", monetaryPolicyRelevance: 90 }),
+    ]);
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.newsContext.monetaryPolicy?.id).toBe("4");
+  });
+
+  it("filters upcoming events to this instrument's affected markets", async () => {
+    vi.mocked(getUpcomingHighImpactEvents).mockResolvedValue([
+      { id: 1, country: "US", event: "CPI", dateTime: new Date().toISOString(), impact: "High", actual: null, previous: null, forecast: null, affectedMarkets: ["XAUUSD"], processingStatus: null },
+      { id: 2, country: "JP", event: "BoJ Rate Decision", dateTime: new Date().toISOString(), impact: "High", actual: null, previous: null, forecast: null, affectedMarkets: ["USDJPY"], processingStatus: null },
+    ]);
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.newsContext.upcomingEvent?.event).toBe("CPI");
+  });
+
+  it("never fabricates content — empty feeds produce an empty (not invented) context", async () => {
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.newsContext.latest).toEqual([]);
+    expect(data.newsContext.monetaryPolicy).toBeNull();
+    expect(data.newsContext.geopolitical).toBeNull();
+    expect(data.newsContext.riskSentiment).toBeNull();
+    expect(data.newsContext.upcomingEvent).toBeNull();
   });
 });

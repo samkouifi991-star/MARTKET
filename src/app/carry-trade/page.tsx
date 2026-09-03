@@ -62,7 +62,7 @@ async function CarryTable() {
             {rows.map((r) => (
               <tr key={r.symbol} className="border-b border-(--border) last:border-0 hover:bg-white/[.02]">
                 <td className="py-2 pr-3">
-                  <Link href={`/forex-scorecard/${r.symbol}`} className="font-medium hover:text-(--accent)">
+                  <Link href={`/markets/${r.symbol}`} className="font-medium hover:text-(--accent)">
                     {r.base}/{r.quote}
                   </Link>
                 </td>

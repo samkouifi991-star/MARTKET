@@ -50,7 +50,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Dashboard", href: "/", icon: LayoutDashboard },
       { label: "Top Setups", href: "/top-setups", icon: ListOrdered },
-      { label: "Forex Scorecard", href: "/forex-scorecard", icon: ArrowLeftRight },
+      { label: "Scorecard", href: "/scorecard", icon: ArrowLeftRight },
     ],
   },
   {

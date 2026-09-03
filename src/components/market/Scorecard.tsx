@@ -7,15 +7,19 @@
 // badge coloring. Dark theme, existing CSS variables/components only.
 import { BiasThreshold } from "@/lib/config";
 import { DataFreshness, Instrument, MarketScore, PriceData, ScoreFactorKey } from "@/lib/types";
-import { FactorSentiment, factorSentiment, factorSentimentBadgeClasses, formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
-import { formatDateTime } from "@/lib/time";
+import { FactorSentiment, factorSentimentBadgeClasses, formatPrice, formatSigned, formatSignedPct, scoreColorClass } from "@/lib/format";
+import { formatDateTime, formatRelative } from "@/lib/time";
 import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { Card } from "@/components/ui/Card";
 import { DataFreshnessTag, unavailableLeadWord, DATA_FRESHNESS_LABELS } from "@/components/ui/DataFreshnessTag";
 import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
-import { IndicatorRow, IndicatorSection, InterestRatesSection, ScorecardData, ScoreDriverRow, SurpriseIndexRow, TechnicalsRow } from "@/lib/pipeline/scorecard";
+import { PriceScoreOverlayChart } from "@/components/charts/PriceScoreOverlayChart";
+import { filterToRecentWindow } from "@/lib/time";
+import { IndicatorRow, IndicatorSection, InterestRatesSection, NewsContextSection, ScorecardData, ScoreDriverRow, SurpriseIndexRow, TechnicalsRow, cotChangeLabel } from "@/lib/pipeline/scorecard";
 import { UnavailableState } from "@/components/ui/UnavailableState";
+import { HEATMAP_LABEL_CLASSES, HeatmapLabel } from "@/lib/pipeline/economic-heatmap";
+import { pairDirectionLabel } from "@/lib/pipeline/forex-scorecard";
 
 function StatusBadge({ sentiment }: { sentiment: FactorSentiment | null }) {
   if (!sentiment) {
@@ -62,7 +66,7 @@ function DataQualitySummaryLine({ summary }: { summary: { total: number; counts:
 // read as "half-finished" on an otherwise complete Scorecard. The section
 // itself is unchanged — same data, same component — only its default
 // visibility changes.
-function SectionShell({ title, badge, compact = false, children }: { title: string; badge?: string; compact?: boolean; children: React.ReactNode }) {
+function SectionShell({ title, badge, compact = false, id, children }: { title: string; badge?: string; compact?: boolean; id?: string; children: React.ReactNode }) {
   const heading = (
     <h4 className="text-xs font-semibold uppercase tracking-wide text-(--text-faint) mb-2 flex items-center gap-2">
       {title}
@@ -72,9 +76,11 @@ function SectionShell({ title, badge, compact = false, children }: { title: stri
     </h4>
   );
 
+  // scroll-mt so a jump from the sticky section nav doesn't land the
+  // heading directly under the sticky bar itself.
   if (compact) {
     return (
-      <details className="border-b border-(--border) last:border-0 pb-4 last:pb-0">
+      <details id={id} className="border-b border-(--border) last:border-0 pb-4 last:pb-0 scroll-mt-24">
         <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">{heading}</summary>
         <div className="mt-2">{children}</div>
       </details>
@@ -82,7 +88,7 @@ function SectionShell({ title, badge, compact = false, children }: { title: stri
   }
 
   return (
-    <div className="border-b border-(--border) last:border-0 pb-4 last:pb-0">
+    <div id={id} className="border-b border-(--border) last:border-0 pb-4 last:pb-0 scroll-mt-24">
       {heading}
       {children}
     </div>
@@ -316,6 +322,198 @@ function SurpriseIndexTable({ section, symbol }: { section: ScorecardData["surpr
   );
 }
 
+// Compact "base value / quote value / difference + direction pill" row —
+// the same shape the old standalone /forex-scorecard/[pair] page used,
+// rebuilt here since that page no longer exists (the Scorecard rename
+// folds FX cross-currency comparison directly into the per-instrument
+// Scorecard instead of a second deep-dive implementation).
+function DifferentialRow({
+  label,
+  baseLabel,
+  baseValue,
+  quoteLabel,
+  quoteValue,
+  differential,
+  band,
+  base,
+  quote,
+  decimals = 0,
+  unit = "",
+}: {
+  label: string;
+  baseLabel: string;
+  baseValue: string;
+  quoteLabel: string;
+  quoteValue: string;
+  differential: number;
+  band: HeatmapLabel | null;
+  base: string;
+  quote: string;
+  decimals?: number;
+  unit?: string;
+}) {
+  return (
+    <div className="text-xs">
+      <div className="text-(--text-faint) mb-1">{label}</div>
+      <div className="space-y-1">
+        <Row label={baseLabel} value={baseValue} />
+        <Row label={quoteLabel} value={quoteValue} />
+        <div className="flex items-center justify-between gap-2 pt-1 border-t border-(--border)">
+          <span className="text-(--text-faint)">Difference</span>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold tabular-nums">{formatSigned(differential, decimals)}{unit}</span>
+            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${band ? HEATMAP_LABEL_CLASSES[band] : ""}`}>
+              {pairDirectionLabel(band, base, quote)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// FX-only — folds the old standalone Forex Scorecard's base-vs-quote
+// comparison into this Scorecard. Reuses ForexScorecardData verbatim
+// (forex-scorecard.ts), including its already-computed bands and
+// deterministic narrative sentence — nothing recomputed here.
+function CurrencyComparisonView({ data }: { data: NonNullable<ScorecardData["currencyComparison"]> }) {
+  return (
+    <div className="space-y-3">
+      {data.narrative && <p className="text-xs text-(--text-dim) leading-relaxed">{data.narrative}</p>}
+      <div className="grid sm:grid-cols-2 gap-3">
+        {data.strengthDifferential !== null && data.baseStrength.score !== null && data.quoteStrength.score !== null ? (
+          <DifferentialRow
+            label="Economic Strength"
+            baseLabel={data.base}
+            baseValue={`${formatSigned(data.baseStrength.score, 0)}${data.baseStrength.level ? ` (${data.baseStrength.level})` : ""}`}
+            quoteLabel={data.quote}
+            quoteValue={`${formatSigned(data.quoteStrength.score, 0)}${data.quoteStrength.level ? ` (${data.quoteStrength.level})` : ""}`}
+            differential={data.strengthDifferential}
+            band={data.strengthBand}
+            base={data.base}
+            quote={data.quote}
+          />
+        ) : (
+          <UnavailableState>UNAVAILABLE — no verified economic-strength score yet for one or both currencies.</UnavailableState>
+        )}
+        {data.rateDifferentialPts !== null && data.baseRate !== null && data.quoteRate !== null ? (
+          <DifferentialRow
+            label="Interest Rates"
+            baseLabel={`${data.base} policy rate`}
+            baseValue={`${data.baseRate}%`}
+            quoteLabel={`${data.quote} policy rate`}
+            quoteValue={`${data.quoteRate}%`}
+            differential={data.rateDifferentialPts}
+            band={data.rateBand}
+            base={data.base}
+            quote={data.quote}
+            decimals={2}
+            unit="%"
+          />
+        ) : (
+          <UnavailableState>UNAVAILABLE — no verified policy-rate series yet for one or both currencies.</UnavailableState>
+        )}
+      </div>
+      {data.surpriseDifferential !== null && data.baseSurprise !== null && data.quoteSurprise !== null ? (
+        <DifferentialRow
+          label="Economic Surprise"
+          baseLabel={data.base}
+          baseValue={formatSigned(data.baseSurprise, 1)}
+          quoteLabel={data.quote}
+          quoteValue={formatSigned(data.quoteSurprise, 1)}
+          differential={data.surpriseDifferential}
+          band={data.surpriseBand}
+          base={data.base}
+          quote={data.quote}
+          decimals={1}
+        />
+      ) : (
+        <UnavailableState>UNAVAILABLE — no recent economic-release surprises detected for either currency yet.</UnavailableState>
+      )}
+      <div className="flex items-center gap-4 text-xs pt-1">
+        <TrendMini label="Daily" trend={data.dailyTrend} />
+        <TrendMini label="4H" trend={data.h4Trend} />
+        <TrendMini label="1H" trend={data.h1Trend} />
+        {data.retail && (
+          <span className="text-(--text-faint)">
+            Retail {data.retail.pctLong.toFixed(0)}% long{data.retail.contrarianBias !== "Neutral" ? ` — Contrarian ${data.retail.contrarianBias}` : ""}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TrendMini({ label, trend }: { label: string; trend: "Bullish" | "Bearish" | "Neutral" | null }) {
+  return (
+    <span className="text-(--text-faint)">
+      {label} <span className={trend === "Bullish" ? "text-emerald-400" : trend === "Bearish" ? "text-rose-400" : "text-(--text-dim)"}>{trend ?? "—"}</span>
+    </span>
+  );
+}
+
+// News & Market Context — composed entirely from fields the real
+// ingestion pipeline already classified at write time (importance/
+// geopolitical/monetary-policy relevance, risk sentiment); no new
+// provider call, no summarization at render time. See
+// scorecard.ts's resolveNewsContext.
+function NewsContextView({ context, symbol }: { context: NewsContextSection; symbol: string }) {
+  const hasAnything = context.latest.length > 0 || context.monetaryPolicy || context.geopolitical || context.riskSentiment || context.upcomingEvent;
+  if (!hasAnything) {
+    return <UnavailableState>UNAVAILABLE — no recent news or scheduled high-impact releases are currently tagged to {symbol}.</UnavailableState>;
+  }
+  return (
+    <div className="space-y-3 text-xs">
+      {context.latest.length > 0 && (
+        <div>
+          <div className="text-(--text-faint) mb-1">Latest important developments</div>
+          <ul className="space-y-1.5">
+            {context.latest.map((n) => (
+              <li key={n.id} className="flex items-start justify-between gap-2">
+                <span className="leading-snug">{n.headline}</span>
+                <span className="shrink-0 text-(--text-faint)">{formatRelative(n.publishedAt)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {context.monetaryPolicy && (
+        <Row label="Monetary-policy context" value={context.monetaryPolicy.headline} />
+      )}
+      {context.geopolitical && (
+        <Row label="Geopolitical context" value={context.geopolitical.headline} />
+      )}
+      {context.riskSentiment && <Row label="Risk sentiment" value={context.riskSentiment} />}
+      {context.upcomingEvent && (
+        <Row label="Important upcoming event" value={`${context.upcomingEvent.event} (${context.upcomingEvent.country}) — ${formatDateTime(context.upcomingEvent.dateTime)}`} />
+      )}
+    </div>
+  );
+}
+
+// Sticky compact anchor nav for a long Scorecard — plain scroll-to-section
+// links (no scroll-spy) to keep this simple; see the page's section ids.
+const SECTION_NAV_ITEMS = [
+  { id: "sc-overview", label: "Overview" },
+  { id: "sc-technical", label: "Technical" },
+  { id: "sc-positioning", label: "Positioning" },
+  { id: "sc-macro", label: "Macro" },
+  { id: "sc-rates", label: "Rates" },
+  { id: "sc-news", label: "News" },
+];
+
+function ScorecardSectionNav() {
+  return (
+    <div className="sticky top-14 z-20 -mx-1 mb-1 flex flex-wrap gap-1 rounded-lg border border-(--border) bg-(--bg-elevated)/95 backdrop-blur px-2 py-1.5 text-xs">
+      {SECTION_NAV_ITEMS.map((s) => (
+        <a key={s.id} href={`#${s.id}`} className="rounded-md px-2 py-1 text-(--text-faint) hover:text-(--text-dim) hover:bg-white/[.04] transition-colors">
+          {s.label}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export function Scorecard({
   instrument,
   score,
@@ -332,121 +530,139 @@ export function Scorecard({
   priceFreshness: DataFreshness;
 }) {
   const retailFactor = score.factors.find((f) => f.key === "retailSentiment" as ScoreFactorKey);
-  // News has no dedicated screenshot section, but every one of the 9
-  // scoring factors must stay visible somewhere in this redesign (nothing
-  // silently dropped from the old flat factor list) — shown as its own
-  // small section, same row shape as Technicals.
-  const newsFactor = score.factors.find((f) => f.key === "news" as ScoreFactorKey);
-  const newsRows: TechnicalsRow[] = newsFactor
-    ? [{ label: "News & geopolitical risk", classification: factorSentiment(newsFactor.contribution), explanation: newsFactor.explanation, freshness: newsFactor.freshness, lastUpdated: newsFactor.lastUpdated, source: newsFactor.source }]
-    : [];
 
   return (
-    <div className="grid lg:grid-cols-3 gap-4">
-      {/* Left summary panel */}
-      <Card className="lg:col-span-1 flex flex-col items-center">
-        <div className="text-center mb-1">
-          <div className="text-lg font-semibold">{instrument.symbol}</div>
-          <div className="text-xs text-(--text-faint)">{instrument.name}</div>
-        </div>
-        <div className="text-center mb-3">
-          {price ? (
-            <>
-              <div className="flex items-baseline justify-center gap-2">
-                <span className="text-xl font-semibold tabular-nums">{formatPrice(price.current, instrument.decimals)}</span>
-                <span className={`text-sm tabular-nums font-medium ${scoreColorClass(price.changePct24h)}`}>{formatSignedPct(price.changePct24h)}</span>
-              </div>
-              <div className="mt-1 flex justify-center">
-                <DataFreshnessTag freshness={priceFreshness} />
-              </div>
-            </>
-          ) : (
-            <UnavailableState>{priceFreshness === "not_applicable" ? "NOT APPLICABLE" : "UNAVAILABLE"} — no current price available.</UnavailableState>
-          )}
-        </div>
-        <ScoreGauge score={score.totalScore} bias={score.bias} />
-        <div className="w-full mt-3 space-y-1.5 text-xs">
-          <SubScoreRow label="Total score" value={score.totalScore} bold />
-          <SubScoreRow label="Technical score" value={data.subScores.technical} />
-          <SubScoreRow label="Sentiment + positioning score" value={data.subScores.sentimentPositioning} />
-          <SubScoreRow label="Fundamentals / macro score" value={data.subScores.fundamentals} />
-        </div>
-        <div className="w-full mt-3">
-          <ConfidenceBar value={score.confidence} />
-        </div>
-        <div className="w-full mt-1.5">
-          <DataQualitySummaryLine summary={data.dataQuality} />
-        </div>
-        <div className="w-full mt-3">
-          <div className="text-[10px] text-(--text-faint) uppercase tracking-wide mb-1">Score history</div>
-          <ScoreHistoryChart history={score.history} thresholds={biasThresholds} height={120} autoWindow />
-        </div>
-      </Card>
+    <div className="space-y-3">
+      <ScorecardSectionNav />
+      <div id="sc-overview" className="grid lg:grid-cols-3 gap-4 scroll-mt-24">
+        {/* Left summary panel */}
+        <Card className="lg:col-span-1 flex flex-col items-center">
+          <div className="text-center mb-1">
+            <div className="text-lg font-semibold">{instrument.symbol}</div>
+            <div className="text-xs text-(--text-faint)">{instrument.name}</div>
+          </div>
+          <div className="text-center mb-3">
+            {price ? (
+              <>
+                <div className="flex items-baseline justify-center gap-2">
+                  <span className="text-xl font-semibold tabular-nums">{formatPrice(price.current, instrument.decimals)}</span>
+                  <span className={`text-sm tabular-nums font-medium ${scoreColorClass(price.changePct24h)}`}>{formatSignedPct(price.changePct24h)}</span>
+                </div>
+                <div className="mt-1 flex justify-center">
+                  <DataFreshnessTag freshness={priceFreshness} />
+                </div>
+              </>
+            ) : (
+              <UnavailableState>{priceFreshness === "not_applicable" ? "NOT APPLICABLE" : "UNAVAILABLE"} — no current price available.</UnavailableState>
+            )}
+          </div>
+          <ScoreGauge score={score.totalScore} bias={score.bias} />
+          <div className="w-full mt-3 space-y-1.5 text-xs">
+            <SubScoreRow label="Total score" value={score.totalScore} bold />
+            <SubScoreRow label="Technical score" value={data.subScores.technical} />
+            <SubScoreRow label="Sentiment + positioning score" value={data.subScores.sentimentPositioning} />
+            <SubScoreRow label="Fundamentals / macro score" value={data.subScores.fundamentals} />
+          </div>
+          <div className="w-full mt-3">
+            <ConfidenceBar value={score.confidence} />
+          </div>
+          <div className="w-full mt-1.5">
+            <DataQualitySummaryLine summary={data.dataQuality} />
+          </div>
+          <div className="w-full mt-3">
+            <div className="text-[10px] text-(--text-faint) uppercase tracking-wide mb-1">Score history (quick view)</div>
+            <ScoreHistoryChart history={score.history} thresholds={biasThresholds} height={100} autoWindow />
+          </div>
+        </Card>
 
-      {/* Right grouped scorecard panel */}
-      <Card className="lg:col-span-2" title="Scorecard">
+        {/* Right panel — "Why This Score?" leads, since the overview
+            question ("what's the bias and why") should resolve before any
+            detail section. */}
+        <Card className="lg:col-span-2" title="Why This Score?">
+          <ScoreDriversView drivers={data.scoreDrivers} />
+        </Card>
+      </div>
+
+      {price && (
+        <Card title="Price & Intelligence History" subtitle="Does the score move before the market does? Real, stored data only — never fabricated.">
+          <PriceScoreOverlayChart priceSeries={filterToRecentWindow(price.series)} scoreHistory={score.history} decimals={instrument.decimals} thresholds={biasThresholds} />
+        </Card>
+      )}
+
+      <Card>
         <div className="space-y-4">
-          <SectionShell title="Why This Score?">
-            <ScoreDriversView drivers={data.scoreDrivers} />
-          </SectionShell>
-
-          <SectionShell title="Technicals">
+          <SectionShell title="Technicals" id="sc-technical">
             <TechnicalsRows rows={data.technicals} />
           </SectionShell>
 
-          <SectionShell title="Institutional Activity">
-            {data.institutional.data ? (
-              <div className="space-y-1.5 text-xs">
-                <div className="flex items-center gap-2 mb-1">
-                  <DataFreshnessTag freshness={data.institutional.freshness} lastUpdated={data.institutional.lastUpdated ?? undefined} />
-                </div>
-                <Row label="COT — Net positioning" value={`${data.institutional.data.direction} (${data.institutional.data.strength}) · ${data.institutional.data.netPositioning.toLocaleString()}` } />
-                <Row label="COT — Weekly change" value={formatSigned(data.institutional.data.netWeeklyChange, 0)} />
-                <Row label="Long % / Short %" value={`${data.institutional.data.pctLong.toFixed(0)}% / ${data.institutional.data.pctShort.toFixed(0)}%`} />
-                <Row label="Latest report date" value={data.institutional.data.reportDate.slice(0, 10)} />
-                <p className="text-[10px] text-(--text-faint) pt-1">Source: {data.institutional.source}</p>
+          {/* Sentiment & Positioning — retail and CFTC/institutional
+              combined into one section (per the redesign spec: "combine
+              the most important positioning information in one place"),
+              rather than two separate sections a user has to mentally
+              connect themselves. */}
+          <SectionShell title="Sentiment & Positioning" id="sc-positioning">
+            <div className="space-y-4">
+              <div>
+                <div className="text-[11px] text-(--text-faint) mb-1.5">Retail Sentiment</div>
+                {data.retail.data ? (
+                  <div className="space-y-1.5 text-xs" title={retailFactor?.explanation}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <DataFreshnessTag freshness={data.retail.freshness} lastUpdated={data.retail.lastUpdated ?? undefined} />
+                      {retailFactor && <StatusBadge sentiment={retailFactor.contribution > 0 ? "Bullish" : retailFactor.contribution < 0 ? "Bearish" : "Neutral"} />}
+                    </div>
+                    <Row label="Long % / Short %" value={`${data.retail.data.pctLong.toFixed(0)}% / ${data.retail.data.pctShort.toFixed(0)}%`} />
+                    <p className="text-[10px] text-(--text-faint) pt-1">Source: {data.retail.source}</p>
+                  </div>
+                ) : (
+                  <UnavailableState>UNAVAILABLE — verified retail sentiment provider not connected yet</UnavailableState>
+                )}
               </div>
-            ) : (
-              <UnavailableState>
-                {unavailableLeadWord(data.institutional.freshness)}
-                {data.institutional.reason ? ` — ${data.institutional.reason}` : ""}
-              </UnavailableState>
+              <div className="pt-3 border-t border-(--border)">
+                <div className="text-[11px] text-(--text-faint) mb-1.5">CFTC / Institutional Positioning</div>
+                {data.institutional.data ? (
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex items-center gap-2 mb-1">
+                      <DataFreshnessTag freshness={data.institutional.freshness} lastUpdated={data.institutional.lastUpdated ?? undefined} />
+                    </div>
+                    <Row label="Net positioning" value={`${data.institutional.data.direction} (${data.institutional.data.strength}) · ${data.institutional.data.netPositioning.toLocaleString()}`} />
+                    <Row label="Weekly change" value={formatSigned(data.institutional.data.netWeeklyChange, 0)} />
+                    <Row label="Long % / Short %" value={`${data.institutional.data.pctLong.toFixed(0)}% / ${data.institutional.data.pctShort.toFixed(0)}%`} />
+                    <Row label="Historical percentile (1y)" value={`${data.institutional.data.reportDate.slice(0, 10)}`} />
+                    <Row label="Latest COT change" value={cotChangeLabel(data.institutional.data)} />
+                    <p className="text-[10px] text-(--text-faint) pt-1">Source: {data.institutional.source}</p>
+                  </div>
+                ) : (
+                  <UnavailableState>
+                    {unavailableLeadWord(data.institutional.freshness)}
+                    {data.institutional.reason ? ` — ${data.institutional.reason}` : ""}
+                  </UnavailableState>
+                )}
+              </div>
+            </div>
+          </SectionShell>
+
+          <div id="sc-macro" className="scroll-mt-24">
+            {data.currencyComparison && (
+              <SectionShell title="Currency Comparison">
+                <CurrencyComparisonView data={data.currencyComparison} />
+              </SectionShell>
             )}
-          </SectionShell>
 
-          <SectionShell title="Economic Growth">
-            <IndicatorSectionView section={data.economicGrowth} />
-          </SectionShell>
+            <SectionShell title="Economic Growth">
+              <IndicatorSectionView section={data.economicGrowth} />
+            </SectionShell>
 
-          <SectionShell title="Inflation">
-            <IndicatorSectionView section={data.inflation} />
-          </SectionShell>
+            <SectionShell title="Inflation">
+              <IndicatorSectionView section={data.inflation} />
+            </SectionShell>
 
-          <SectionShell title="Jobs Market">
-            <IndicatorSectionView section={data.jobsMarket} />
-          </SectionShell>
+            <SectionShell title="Jobs Market">
+              <IndicatorSectionView section={data.jobsMarket} />
+            </SectionShell>
+          </div>
 
-          <SectionShell title="Interest Rates">
+          <SectionShell title="Interest Rates" id="sc-rates">
             <InterestRatesView section={data.interestRates} />
-          </SectionShell>
-
-          <SectionShell title="News & Geopolitical Risk">
-            <TechnicalsRows rows={newsRows} />
-          </SectionShell>
-
-          <SectionShell title="Retail / Crowd Sentiment">
-            {data.retail.data ? (
-              <div className="space-y-1.5 text-xs" title={retailFactor?.explanation}>
-                <div className="flex items-center gap-2 mb-1">
-                  <DataFreshnessTag freshness={data.retail.freshness} lastUpdated={data.retail.lastUpdated ?? undefined} />
-                  {retailFactor && <StatusBadge sentiment={retailFactor.contribution > 0 ? "Bullish" : retailFactor.contribution < 0 ? "Bearish" : "Neutral"} />}
-                </div>
-                <Row label="Long % / Short %" value={`${data.retail.data.pctLong.toFixed(0)}% / ${data.retail.data.pctShort.toFixed(0)}%`} />
-                <p className="text-[10px] text-(--text-faint) pt-1">Source: {data.retail.source}</p>
-              </div>
-            ) : (
-              <UnavailableState>UNAVAILABLE — verified retail sentiment provider not connected yet</UnavailableState>
-            )}
           </SectionShell>
 
           {/* Customer-facing label deliberately drops the internal "V2
@@ -454,11 +670,19 @@ export function Scorecard({
               tagged "Preview" so this accumulating-data section reads as an
               intentional early look, not an unfinished part of the V1
               Scorecard above it. Same underlying data either way. */}
-          <SectionShell title="Economic Surprise Index" badge="Preview" compact>
+          <SectionShell title="Economic Surprise Intelligence" badge="Preview" compact>
             <SurpriseIndexTable section={data.surpriseIndex} symbol={instrument.symbol} />
+          </SectionShell>
+
+          <SectionShell title="News & Market Context" id="sc-news">
+            <NewsContextView context={data.newsContext} symbol={instrument.symbol} />
           </SectionShell>
         </div>
       </Card>
+
+      <p className="text-[11px] text-(--text-faint) leading-relaxed px-1">
+        The Scorecard combines market, economic, positioning and technical context to help you understand current conditions. It does not guarantee future market direction.
+      </p>
     </div>
   );
 }
