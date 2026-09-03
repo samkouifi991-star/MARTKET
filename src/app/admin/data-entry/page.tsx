@@ -12,8 +12,9 @@ import { DataEntryClient } from "./DataEntryClient";
 export const metadata = { title: "Manual Data Entry — Admin — Market Intelligence AI" };
 export const dynamic = "force-dynamic";
 
-export default async function DataEntryPage() {
+export default async function DataEntryPage({ searchParams }: { searchParams: Promise<{ currency?: string; event?: string }> }) {
   await requireAdmin();
+  const { currency, event } = await searchParams;
 
   return (
     <div className="space-y-6">
@@ -30,7 +31,7 @@ export default async function DataEntryPage() {
       {isDemoOnly() ? (
         <p className="text-sm text-(--text-faint)">Becomes live once DATA_MODE is set to hybrid or live and a database is connected.</p>
       ) : (
-        <DataEntryClient />
+        <DataEntryClient initialCurrency={currency} initialEvent={event} />
       )}
     </div>
   );

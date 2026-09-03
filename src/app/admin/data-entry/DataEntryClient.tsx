@@ -23,7 +23,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function EconomicReleaseForm() {
+function EconomicReleaseForm({ initialCurrency, initialEvent }: { initialCurrency?: string; initialEvent?: string }) {
   const [state, formAction, pending] = useActionState<ManualEntryActionState, FormData>(submitManualEconomicRelease, undefined);
 
   return (
@@ -39,7 +39,7 @@ function EconomicReleaseForm() {
       >
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Currency">
-            <select name="currency" required defaultValue="USD" className={inputClass}>
+            <select name="currency" required defaultValue={initialCurrency && (TRACKED_CURRENCIES as readonly string[]).includes(initialCurrency) ? initialCurrency : "USD"} className={inputClass}>
               {TRACKED_CURRENCIES.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
@@ -55,7 +55,7 @@ function EconomicReleaseForm() {
           </Field>
           <div className="sm:col-span-2">
             <Field label="Event name (must match this platform's known indicator names to be surprise-scored, e.g. “CPI m/m”)">
-              <input name="event" required placeholder="e.g. CPI m/m" className={inputClass} />
+              <input name="event" required defaultValue={initialEvent ?? ""} placeholder="e.g. CPI m/m" className={inputClass} />
             </Field>
           </div>
           <Field label="Release date">
@@ -150,7 +150,7 @@ function NewsEntryForm() {
   );
 }
 
-export function DataEntryClient() {
+export function DataEntryClient({ initialCurrency, initialEvent }: { initialCurrency?: string; initialEvent?: string } = {}) {
   const [tab, setTab] = useState<"economic" | "news">("economic");
 
   return (
@@ -163,7 +163,7 @@ export function DataEntryClient() {
         active={tab}
         onChange={(key) => setTab(key as "economic" | "news")}
       />
-      {tab === "economic" ? <EconomicReleaseForm /> : <NewsEntryForm />}
+      {tab === "economic" ? <EconomicReleaseForm initialCurrency={initialCurrency} initialEvent={initialEvent} /> : <NewsEntryForm />}
     </div>
   );
 }

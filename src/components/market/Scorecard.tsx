@@ -15,7 +15,7 @@ import { Card } from "@/components/ui/Card";
 import { DataFreshnessTag, unavailableLeadWord, DATA_FRESHNESS_LABELS } from "@/components/ui/DataFreshnessTag";
 import { PriceScoreOverlayChart } from "@/components/charts/PriceScoreOverlayChart";
 import { filterToRecentWindow } from "@/lib/time";
-import { IndicatorRow, IndicatorSection, InterestRatesSection, MacroStateRow, NewsContextSection, ScorecardData, ScoreDriverRow, TechnicalsRow, cotChangeLabel } from "@/lib/pipeline/scorecard";
+import { IndicatorRow, IndicatorSection, IndicatorSectionRow, InterestRatesSection, MacroStateRow, NewsContextSection, ScorecardData, ScoreDriverRow, TechnicalsRow, cotChangeLabel } from "@/lib/pipeline/scorecard";
 import { UnavailableState } from "@/components/ui/UnavailableState";
 import { HEATMAP_LABEL_CLASSES, HeatmapLabel } from "@/lib/pipeline/economic-heatmap";
 import { pairDirectionLabel } from "@/lib/pipeline/forex-scorecard";
@@ -106,21 +106,38 @@ type MacroTableRow = {
   surprise: number | null;
   date: string;
   source: string;
+  // True for a FRED macro-state fallback row (no calendar release exists
+  // for this indicator yet) — rendered with a small "Macro State" badge so
+  // it reads as "real data, different kind" rather than looking identical
+  // to a genuine Forex Factory/manual/Zapier release.
+  isMacroState: boolean;
 };
 
 function fromIndicatorRow(r: IndicatorRow): MacroTableRow {
-  return { key: r.indicatorKey, label: r.label, classification: r.classification, actual: r.actual, forecast: r.forecast, previous: r.previous, revisedPrevious: r.revisedPrevious, surprise: r.surprise, date: r.date, source: r.source };
+  return { key: r.indicatorKey, label: r.label, classification: r.classification, actual: r.actual, forecast: r.forecast, previous: r.previous, revisedPrevious: r.revisedPrevious, surprise: r.surprise, date: r.date, source: r.source, isMacroState: false };
 }
 
 function fromMacroStateRow(r: MacroStateRow): MacroTableRow {
-  return { key: r.label, label: r.label, classification: r.classification, actual: r.value, forecast: null, previous: r.previousValue, revisedPrevious: null, surprise: null, date: r.date, source: r.source };
+  return { key: r.label, label: r.label, classification: r.classification, actual: r.value, forecast: null, previous: r.previousValue, revisedPrevious: null, surprise: null, date: r.date, source: r.source, isMacroState: true };
+}
+
+function fromSectionRow(r: IndicatorSectionRow): MacroTableRow {
+  return r.source === "calendar" ? fromIndicatorRow(r.row) : fromMacroStateRow(r.row);
+}
+
+function MacroStateBadge() {
+  return (
+    <span className="inline-flex items-center rounded px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide bg-sky-500/10 text-sky-400" title="No calendar release stored for this indicator yet — showing the underlying FRED macro trend instead (Forecast/Surprise not applicable).">
+      Macro State
+    </span>
+  );
 }
 
 // Indicator | Bias | Actual | Forecast | Previous | Surprise | Date — one
 // table shape for every macro section (Growth/Inflation/Jobs Market/
-// Interest Rates release rows), real calendar releases and the Macro State
-// fallback alike. Forecast/Surprise show "—", never a fabricated number,
-// when the underlying data has none.
+// Interest Rates release rows). Each row is independently either a real
+// calendar release or a FRED macro-state fallback (badged) — Forecast/
+// Surprise show "—", never a fabricated number, when the row has none.
 function IndicatorTable({ rows }: { rows: MacroTableRow[] }) {
   if (rows.length === 0) return <UnavailableState>UNAVAILABLE — no released indicators are currently stored for this category.</UnavailableState>;
   return (
@@ -144,7 +161,12 @@ function IndicatorTable({ rows }: { rows: MacroTableRow[] }) {
               className="border-t border-(--border)"
               title={r.revisedPrevious !== null ? `${r.source} — revised previous: ${fmtNum(r.revisedPrevious)}` : r.source}
             >
-              <td className="py-1.5 pr-2 whitespace-nowrap">{r.label}</td>
+              <td className="py-1.5 pr-2 whitespace-nowrap">
+                <span className="flex items-center gap-1.5">
+                  {r.label}
+                  {r.isMacroState && <MacroStateBadge />}
+                </span>
+              </td>
               <td className="py-1.5 pr-2">
                 <StatusBadge sentiment={r.classification} />
               </td>
@@ -163,21 +185,14 @@ function IndicatorTable({ rows }: { rows: MacroTableRow[] }) {
   );
 }
 
-// Renders the calendar-release table when real releases exist; otherwise
-// falls back to the Macro State view (real FRED level + period-over-period
-// trend, see lib/pipeline/scorecard.ts's resolveMacroStateRow) in the SAME
-// table shape, with Forecast/Surprise columns reading "—" instead of a
-// fabricated comparison; "unavailable" only when neither has any real data
-// for this country/indicator.
+// A category now shows EVERY indicator we have real data for — some rows
+// real calendar releases, others FRED macro-state fallbacks, side by side
+// in one table (badged per row, see MacroStateBadge) — rather than the
+// category as a whole being "all calendar" or "all macro-state". Only
+// "unavailable" when NEITHER source has anything for this country/category.
 function IndicatorSectionView({ section }: { section: IndicatorSection }) {
-  if (section.kind === "calendar") return <IndicatorTable rows={section.rows.map(fromIndicatorRow)} />;
   if (section.kind === "unavailable") return <UnavailableState>UNAVAILABLE — {section.reason}</UnavailableState>;
-  return (
-    <div className="space-y-2">
-      <p className="text-[11px] text-(--text-faint)">No calendar release stored for this category yet — showing the underlying macro trend instead (Forecast/Surprise not applicable).</p>
-      <IndicatorTable rows={section.rows.map(fromMacroStateRow)} />
-    </div>
-  );
+  return <IndicatorTable rows={section.rows.map(fromSectionRow)} />;
 }
 
 // Compact positive/negative driver list — a pure re-sort/re-label of the
@@ -275,7 +290,7 @@ function InterestRatesView({ section }: { section: InterestRatesSection }) {
     );
   }
 
-  const { policyRate, differential, yield2y, releases } = section;
+  const { policyRate, differential, yield2y, yield10y, releases } = section;
   return (
     <div className="space-y-4">
       <dl className="space-y-1.5 text-xs">
@@ -292,6 +307,10 @@ function InterestRatesView({ section }: { section: InterestRatesSection }) {
         <div className="flex items-center justify-between gap-2" title={yield2y.source}>
           <dt className="text-(--text-faint)">2Y yield</dt>
           <dd className="tabular-nums font-medium">{yield2y.data ? `${yield2y.data.rate.toFixed(2)}% (${yield2y.data.date})` : "unavailable"}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-2" title={yield10y.source}>
+          <dt className="text-(--text-faint)">10Y yield</dt>
+          <dd className="tabular-nums font-medium">{yield10y.data ? `${yield10y.data.rate.toFixed(2)}% (${yield10y.data.date})` : "unavailable"}</dd>
         </div>
       </dl>
       <RateDecisionReleases releases={releases} />
@@ -626,15 +645,15 @@ export function Scorecard({
               </SectionShell>
             )}
 
-            <SectionShell title="Economic Growth" badge={data.economicGrowth.kind === "macro-state" ? "Macro State" : undefined}>
+            <SectionShell title="Economic Growth">
               <IndicatorSectionView section={data.economicGrowth} />
             </SectionShell>
 
-            <SectionShell title="Inflation" badge={data.inflation.kind === "macro-state" ? "Macro State" : undefined}>
+            <SectionShell title="Inflation">
               <IndicatorSectionView section={data.inflation} />
             </SectionShell>
 
-            <SectionShell title="Jobs Market" badge={data.jobsMarket.kind === "macro-state" ? "Macro State" : undefined}>
+            <SectionShell title="Jobs Market">
               <IndicatorSectionView section={data.jobsMarket} />
             </SectionShell>
           </div>

@@ -252,6 +252,50 @@ export async function getLatestEconomicEventsByIndicators(countries: string[], i
   return result;
 }
 
+export type EconomicEventCoverageRow = { country: string; indicatorKey: string; latestDate: string };
+
+/** Admin "Economic Data Coverage" diagnostic — ONE grouped aggregate query
+ * across the whole economic_events table (never per indicator/currency),
+ * returning the latest RELEASED date for every (country, indicatorKey)
+ * pair that has ever been classified. The table is small (real calendar
+ * releases only accumulate as they're manually entered or arrive via
+ * Zapier), so an unfiltered GROUP BY here is bounded by real data volume,
+ * not a full-table-scan risk. */
+export async function getEconomicEventCoverage(): Promise<EconomicEventCoverageRow[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      country: economicEvents.country,
+      indicatorKey: economicEvents.indicatorKey,
+      latestDate: sql<string>`max(${economicEvents.dateTime})`,
+    })
+    .from(economicEvents)
+    .where(and(isNotNull(economicEvents.indicatorKey), isNotNull(economicEvents.actual)))
+    .groupBy(economicEvents.country, economicEvents.indicatorKey);
+  return rows.map((r) => ({ country: r.country, indicatorKey: r.indicatorKey!, latestDate: new Date(r.latestDate).toISOString() }));
+}
+
+export type EconomicIndicatorCoverageRow = { country: string; indicator: string; latestDate: string };
+
+/** Same "Economic Data Coverage" diagnostic, for the FRED macro-state side
+ * (economic_indicators) — ONE grouped aggregate query, mirroring
+ * getEconomicEventCoverage above. Every row in this table already passed
+ * through the FRED cron's own `verified: true` gate (services/market-data/
+ * fred-series.ts) before ever being written, so nothing here needs
+ * re-validating — it's simply "what did we actually fetch and store." */
+export async function getEconomicIndicatorCoverage(): Promise<EconomicIndicatorCoverageRow[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      country: economicIndicators.country,
+      indicator: economicIndicators.indicator,
+      latestDate: sql<string>`max(${economicIndicators.date})`,
+    })
+    .from(economicIndicators)
+    .groupBy(economicIndicators.country, economicIndicators.indicator);
+  return rows.map((r) => ({ country: r.country, indicator: r.indicator, latestDate: new Date(r.latestDate).toISOString() }));
+}
+
 export async function insertNewsArticle(article: NormalizedNewsArticle, analysis: { interpretation: string; importance: number; confidence: number; reason: string }): Promise<void> {
   const db = getDb();
   await db

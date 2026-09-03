@@ -171,15 +171,30 @@ describe("buildScorecardData — institutional vs retail sentiment stay distinct
   });
 });
 
+// A category's IndicatorSection is now { kind: "rows", rows: IndicatorSectionRow[] }
+// — each row independently tagged source: "calendar" | "macro-state" — or
+// { kind: "unavailable" } only when NEITHER source has anything. These
+// helpers keep the tests below readable.
+function calendarRow(section: import("./scorecard").IndicatorSection, indicatorKey: string) {
+  if (section.kind !== "rows") throw new Error("expected rows");
+  const entry = section.rows.find((r) => r.source === "calendar" && r.row.indicatorKey === indicatorKey);
+  return entry?.source === "calendar" ? entry.row : undefined;
+}
+
+function macroStateRow(section: import("./scorecard").IndicatorSection, label: string) {
+  if (section.kind !== "rows") throw new Error("expected rows");
+  const entry = section.rows.find((r) => r.source === "macro-state" && r.row.label === label);
+  return entry?.source === "macro-state" ? entry.row : undefined;
+}
+
 describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", () => {
   it("a fixture with forecast: null never gets a Bullish/Bearish classification, and surprise is null, but Previous still shows", async () => {
     vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
       eventsMap({ "US:gdp": { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.1, previous: 1.9, forecast: null, importanceTier: "HIGH" } })
     );
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    expect(data.economicGrowth.kind).toBe("calendar");
-    if (data.economicGrowth.kind !== "calendar") throw new Error("unreachable");
-    const gdpRow = data.economicGrowth.rows.find((r) => r.indicatorKey === "gdp");
+    expect(data.economicGrowth.kind).toBe("rows");
+    const gdpRow = calendarRow(data.economicGrowth, "gdp");
     expect(gdpRow).toBeDefined();
     expect(gdpRow!.classification).toBeNull();
     expect(gdpRow!.forecast).toBeNull();
@@ -200,8 +215,7 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
       eventsMap({ "US:gdp": { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 3.0, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" } })
     );
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    if (data.economicGrowth.kind !== "calendar") throw new Error("unreachable");
-    const gdpRow = data.economicGrowth.rows.find((r) => r.indicatorKey === "gdp")!;
+    const gdpRow = calendarRow(data.economicGrowth, "gdp")!;
     expect(gdpRow.classification).toBe("Bearish");
     expect(gdpRow.surprise).toBeCloseTo(1.0);
   });
@@ -211,9 +225,7 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
       eventsMap({ "US:spGlobalManufacturingPmi": { event: "S&P Global Manufacturing PMI", dateTime: "2027-02-01T00:00:00.000Z", actual: 51.2, previous: 50.8, forecast: 50.9, importanceTier: "MEDIUM" } })
     );
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    if (data.economicGrowth.kind !== "calendar") throw new Error("unreachable");
-    const pmiRow = data.economicGrowth.rows.find((r) => r.label === "Manufacturing PMI")!;
-    expect(pmiRow.indicatorKey).toBe("spGlobalManufacturingPmi");
+    const pmiRow = calendarRow(data.economicGrowth, "spGlobalManufacturingPmi")!;
     expect(pmiRow.actual).toBe(51.2);
   });
 
@@ -226,14 +238,93 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
       })
     );
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    if (data.inflation.kind !== "calendar") throw new Error("unreachable");
-    expect(data.inflation.rows.map((r) => r.indicatorKey).sort()).toEqual(["corePce", "corePpi", "cpi"]);
+    if (data.inflation.kind !== "rows") throw new Error("expected rows");
+    const calendarKeys = data.inflation.rows.filter((r) => r.source === "calendar").map((r) => (r.source === "calendar" ? r.row.indicatorKey : null));
+    expect(calendarKeys.sort()).toEqual(["corePce", "corePpi", "cpi"]);
+  });
+
+  it("shows Industrial Production (new FRED-backed Growth row) when a verified series exists, without a calendar release", async () => {
+    vi.mocked(getFredSeriesWithFallback).mockImplementation(async (_country, indicator) => ({
+      provider: "fred",
+      source: "FRED",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: "2026-07-01",
+      nextExpectedUpdate: null,
+      value: indicator === "industrialProduction" ? [{ date: "2026-05-01", value: 100 }, { date: "2026-06-01", value: 101 }, { date: "2026-07-01", value: 103 }] : null,
+    }));
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    const row = macroStateRow(data.economicGrowth, "Industrial Production");
+    expect(row).toBeDefined();
+    expect(row!.value).toBe(103);
+  });
+
+  it("a category can mix a real calendar release for one indicator with a FRED macro-state row for another, side by side", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({ "US:gdp": { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.1, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" } })
+    );
+    vi.mocked(getFredSeriesWithFallback).mockResolvedValue({
+      provider: "fred",
+      source: "FRED",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: "2026-07-01",
+      nextExpectedUpdate: null,
+      value: [{ date: "2026-05-01", value: 100 }, { date: "2026-06-01", value: 101 }, { date: "2026-07-01", value: 103 }],
+    });
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    if (data.economicGrowth.kind !== "rows") throw new Error("expected rows");
+    expect(calendarRow(data.economicGrowth, "gdp")).toBeDefined();
+    expect(macroStateRow(data.economicGrowth, "Retail Sales MoM")).toBeDefined();
+    expect(macroStateRow(data.economicGrowth, "Industrial Production")).toBeDefined();
+  });
+
+  it("never assigns NFP a FRED fallback — the stored FRED series is a payroll LEVEL, not the monthly change figure traders mean by NFP", async () => {
+    vi.mocked(getFredSeriesWithFallback).mockResolvedValue({
+      provider: "fred",
+      source: "FRED",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: "2026-07-01",
+      nextExpectedUpdate: null,
+      value: [{ date: "2026-05-01", value: 150000 }, { date: "2026-06-01", value: 151000 }, { date: "2026-07-01", value: 152000 }],
+    });
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    if (data.jobsMarket.kind !== "rows") throw new Error("expected rows");
+    expect(data.jobsMarket.rows.some((r) => (r.source === "calendar" ? r.row.indicatorKey === "nfp" : r.row.label === "Non-Farm Payrolls"))).toBe(false);
+  });
+
+  it("Labor Force Participation uses non-inverted (growth-like) polarity — rising participation reads the same direction as a growth beat, not like unemployment", async () => {
+    vi.mocked(getFredSeriesWithFallback).mockImplementation(async (_country, indicator) => ({
+      provider: "fred",
+      source: "FRED",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: "2026-07-01",
+      nextExpectedUpdate: null,
+      value: indicator === "laborParticipation" ? [{ date: "2026-05-01", value: 62.0 }, { date: "2026-06-01", value: 62.2 }, { date: "2026-07-01", value: 62.5 }] : null,
+    }));
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    const row = macroStateRow(data.jobsMarket, "Labor Force Participation");
+    expect(row).toBeDefined();
+    // Rising participation = stronger economy = bearish for gold, the SAME
+    // direction a real GDP/growth beat produces — NOT inverted the way
+    // unemploymentRate/jobless claims correctly are.
+    expect(row!.classification).toBe("Bearish");
   });
 
   it("reads exactly one batched events query per Scorecard render, not one per indicator", async () => {
     vi.mocked(getLatestEconomicEventsByIndicators).mockClear();
     await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
     expect(getLatestEconomicEventsByIndicators).toHaveBeenCalledTimes(1);
+  });
+
+  it("never makes a live FRED call from the render path for macro-state rows — always storage-only", async () => {
+    vi.mocked(getFredSeriesWithFallback).mockClear();
+    await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    const calls = vi.mocked(getFredSeriesWithFallback).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(call[3]).toBe(true);
   });
 });
 
@@ -242,7 +333,7 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
     return values.map((value, i) => ({ date: `2026-0${i + 1}-01`, value }));
   }
 
-  it("falls back to a real FRED-backed Macro State row for Growth when no calendar release exists", async () => {
+  it("falls back to a real FRED-backed Macro State row for GDP when no calendar release exists", async () => {
     vi.mocked(getFredSeriesWithFallback).mockImplementation(async (_country, indicator) => ({
       provider: "fred",
       source: "FRED (Federal Reserve Economic Data)",
@@ -253,18 +344,17 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
       value: indicator === "gdpGrowth" ? fredSeries([2.0, 2.2, 2.6]) : null,
     }));
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    expect(data.economicGrowth.kind).toBe("macro-state");
-    if (data.economicGrowth.kind !== "macro-state") throw new Error("unreachable");
-    expect(data.economicGrowth.rows).toHaveLength(1);
-    const row = data.economicGrowth.rows[0];
-    expect(row.value).toBe(2.6);
-    expect(row.previousValue).toBe(2.2);
-    expect(row.changeAbs).toBeCloseTo(0.4);
+    expect(data.economicGrowth.kind).toBe("rows");
+    const row = macroStateRow(data.economicGrowth, "GDP Growth QoQ");
+    expect(row).toBeDefined();
+    expect(row!.value).toBe(2.6);
+    expect(row!.previousValue).toBe(2.2);
+    expect(row!.changeAbs).toBeCloseTo(0.4);
     // Gold: growth accelerating is a headwind (inverted polarity), same
     // convention classifyIndicatorSurprise already applies to a real
     // calendar growth beat.
-    expect(row.classification).toBe("Bearish");
-    expect(row.source).toBe("FRED (Federal Reserve Economic Data)");
+    expect(row!.classification).toBe("Bearish");
+    expect(row!.source).toBe("FRED (Federal Reserve Economic Data)");
   });
 
   it("never fabricates a Macro State row when FRED has fewer than 3 real observations either — reports unavailable instead", async () => {
@@ -281,7 +371,7 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
     expect(data.economicGrowth.kind).toBe("unavailable");
   });
 
-  it("prefers real calendar release rows over the Macro State fallback whenever both exist", async () => {
+  it("prefers a real calendar release over the Macro State fallback for the SAME indicator, even while a sibling indicator in the same category still shows macro-state", async () => {
     vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
       eventsMap({ "US:gdp": { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.1, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" } })
     );
@@ -295,7 +385,11 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
       value: fredSeries([2.0, 2.2, 2.6]),
     });
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    expect(data.economicGrowth.kind).toBe("calendar");
+    expect(calendarRow(data.economicGrowth, "gdp")).toBeDefined();
+    expect(macroStateRow(data.economicGrowth, "GDP Growth QoQ")).toBeUndefined();
+    // Retail Sales has no calendar release in this fixture, so it still
+    // falls back to its own macro-state row using the same FRED mock.
+    expect(macroStateRow(data.economicGrowth, "Retail Sales MoM")).toBeDefined();
   });
 
   it("computes an unemployment-rate Macro State row with jobs-kind polarity (falling unemployment reads Bearish for gold)", async () => {
@@ -309,9 +403,9 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
       value: indicator === "unemploymentRate" ? fredSeries([4.2, 4.0, 3.8]) : null,
     }));
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    expect(data.jobsMarket.kind).toBe("macro-state");
-    if (data.jobsMarket.kind !== "macro-state") throw new Error("unreachable");
-    expect(data.jobsMarket.rows[0].classification).toBe("Bearish"); // falling unemployment = stronger economy = bearish for gold
+    const row = macroStateRow(data.jobsMarket, "Unemployment Rate");
+    expect(row).toBeDefined();
+    expect(row!.classification).toBe("Bearish"); // falling unemployment = stronger economy = bearish for gold
   });
 });
 
@@ -433,6 +527,21 @@ describe("buildScorecardData — Interest Rates section", () => {
     const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
     if (data.interestRates.kind !== "generic") throw new Error("unreachable");
     expect(data.interestRates.releases).toEqual([]);
+  });
+
+  it("includes a 10Y yield alongside the existing 2Y yield for the generic (non-gold) section", async () => {
+    vi.mocked(getFredSeriesWithFallback).mockImplementation(async (_country, indicator) => ({
+      provider: "fred",
+      source: "FRED",
+      status: "live",
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: new Date().toISOString(),
+      nextExpectedUpdate: null,
+      value: indicator === "yield10y" ? [{ date: "2027-01-01", value: 4.2 }] : null,
+    }));
+    const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    if (data.interestRates.kind !== "generic") throw new Error("unreachable");
+    expect(data.interestRates.yield10y.data).toEqual({ rate: 4.2, date: "2027-01-01" });
   });
 });
 

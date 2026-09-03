@@ -31,6 +31,7 @@ import {
   Settings,
   ShieldCheck,
   PenSquare,
+  ClipboardCheck,
   Inbox,
   Activity,
   X,
@@ -123,6 +124,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Admin Home", href: "/admin", icon: ShieldCheck },
       { label: "Data Entry", href: "/admin/data-entry", icon: PenSquare },
+      { label: "Economic Coverage", href: "/admin/economic-coverage", icon: ClipboardCheck },
       { label: "Incoming Data", href: "/admin/incoming-data", icon: Inbox },
       { label: "Pipeline Health", href: "/admin/pipeline-health", icon: Activity },
       { label: "Scoring Configuration", href: "/admin/scoring-configuration", icon: SlidersHorizontal },

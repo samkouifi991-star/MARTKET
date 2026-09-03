@@ -46,7 +46,7 @@ vi.mock("../client", () => ({
   }),
 }));
 
-type FakeQuery<T> = Promise<T[]> & { where: () => FakeQuery<T>; orderBy: (dir?: unknown) => FakeQuery<T>; limit: (n: number) => FakeQuery<T> };
+type FakeQuery<T> = Promise<T[]> & { where: () => FakeQuery<T>; orderBy: (dir?: unknown) => FakeQuery<T>; limit: (n: number) => FakeQuery<T>; groupBy: (...cols: unknown[]) => FakeQuery<T> };
 
 // drizzle's desc(col)/asc(col) both compile to a `sql` tagged-template
 // fragment (see drizzle-orm/sql/expressions/select.js: `sql`${column} desc``)
@@ -83,10 +83,16 @@ function makeQuery<T>(data: T[]): FakeQuery<T> {
     );
   };
   promise.limit = (n: number) => makeQuery(data.slice(0, n));
+  // getEconomicEventCoverage/getEconomicIndicatorCoverage's .select({...
+  // sql`max(...)` ...}).groupBy(...) is not actually executed by this fake
+  // (no real SQL engine) — test fixtures must already be shaped exactly
+  // like the query's post-aggregation projection; groupBy is a no-op here,
+  // same convention as where() above.
+  promise.groupBy = () => makeQuery(data);
   return promise;
 }
 
-import { getLatestEconomicEventsByIndicators, upsertCandles, getLatestStoredCandles } from "./market-data";
+import { getLatestEconomicEventsByIndicators, getEconomicEventCoverage, getEconomicIndicatorCoverage, upsertCandles, getLatestStoredCandles } from "./market-data";
 import { NormalizedCandle } from "@/services/types";
 
 describe("getLatestEconomicEventsByIndicators", () => {
@@ -144,6 +150,48 @@ describe("getLatestEconomicEventsByIndicators", () => {
     };
     const result = await getLatestEconomicEventsByIndicators(["US"], ["cpi"]);
     expect(result.size).toBe(0);
+  });
+});
+
+describe("getEconomicEventCoverage", () => {
+  it("returns one row per (country, indicatorKey) pair with a classified, released event", async () => {
+    selectResults = {
+      economic_events: [
+        { country: "US", indicatorKey: "cpi", latestDate: "2026-09-15T13:30:00.000Z" },
+        { country: "GB", indicatorKey: "boeRateDecision", latestDate: "2027-01-30T12:00:00.000Z" },
+      ],
+    };
+    const result = await getEconomicEventCoverage();
+    expect(result).toEqual([
+      { country: "US", indicatorKey: "cpi", latestDate: "2026-09-15T13:30:00.000Z" },
+      { country: "GB", indicatorKey: "boeRateDecision", latestDate: "2027-01-30T12:00:00.000Z" },
+    ]);
+  });
+
+  it("returns an empty array when nothing has ever been classified (never a fabricated row)", async () => {
+    selectResults = { economic_events: [] };
+    expect(await getEconomicEventCoverage()).toEqual([]);
+  });
+});
+
+describe("getEconomicIndicatorCoverage", () => {
+  it("returns one row per (country, indicator) pair with at least one stored FRED observation", async () => {
+    selectResults = {
+      economic_indicators: [
+        { country: "US", indicator: "gdpGrowth", latestDate: "2026-04-01T00:00:00.000Z" },
+        { country: "JP", indicator: "cpi", latestDate: "2021-06-01T00:00:00.000Z" },
+      ],
+    };
+    const result = await getEconomicIndicatorCoverage();
+    expect(result).toEqual([
+      { country: "US", indicator: "gdpGrowth", latestDate: "2026-04-01T00:00:00.000Z" },
+      { country: "JP", indicator: "cpi", latestDate: "2021-06-01T00:00:00.000Z" },
+    ]);
+  });
+
+  it("returns an empty array when no FRED series has ever been fetched (never a fabricated row)", async () => {
+    selectResults = { economic_indicators: [] };
+    expect(await getEconomicIndicatorCoverage()).toEqual([]);
   });
 });
 

@@ -122,7 +122,18 @@ export type IndicatorRow = {
   source: string;
 };
 
-type IndicatorRowDef = { label: string; keys: EconomicIndicatorKey[] };
+// `fredFallback` is only set where a genuinely verified FRED series exists
+// for this exact concept (per the real coverage audit against production —
+// see conversation history) — omitted entirely rather than guessed where
+// none does (e.g. Manufacturing/Services PMI, Consumer Confidence, ADP,
+// JOLTS, Wage Growth have no FRED equivalent in this codebase at all).
+// `trendKind` governs classifyMacroTrend's sign convention (see
+// indicator-classification.ts): "jobs" inverts (higher = weaker, correct
+// for unemploymentRate/initialClaims), "growth"/"inflation" don't. NFP
+// deliberately has NO fredFallback — FRED's "payrolls" is a raw
+// employment LEVEL, not the monthly CHANGE figure "NFP" means to traders;
+// showing it as if it were NFP would be misleading, not merely stale.
+type IndicatorRowDef = { label: string; keys: EconomicIndicatorKey[]; fredFallback?: { key: FredIndicatorKey; trendKind: MacroTrendKind } };
 
 // FX pairs get their base currency's country as the "primary" macro read —
 // the same country macro.ts's own generic model treats as primary for
@@ -135,36 +146,43 @@ export function primaryMacroCountry(instrument: Instrument): string {
 }
 
 const GROWTH_INDICATORS: IndicatorRowDef[] = [
-  { label: "GDP Growth QoQ", keys: ["gdp"] },
+  { label: "GDP Growth QoQ", keys: ["gdp"], fredFallback: { key: "gdpGrowth", trendKind: "growth" } },
   { label: "Manufacturing PMI", keys: ["ismManufacturing", "spGlobalManufacturingPmi"] },
   { label: "Services PMI", keys: ["ismServices", "spGlobalServicesPmi"] },
-  { label: "Retail Sales MoM", keys: ["retailSales"] },
+  { label: "Retail Sales MoM", keys: ["retailSales"], fredFallback: { key: "retailSales", trendKind: "growth" } },
   { label: "Consumer Confidence", keys: ["consumerConfidence", "michiganSentiment"] },
+  { label: "Industrial Production", keys: ["industrialProduction"], fredFallback: { key: "industrialProduction", trendKind: "growth" } },
 ];
 
 const INFLATION_INDICATORS: IndicatorRowDef[] = [
-  { label: "CPI YoY", keys: ["cpi"] },
-  { label: "Core CPI YoY", keys: ["coreCpi"] },
-  { label: "PPI YoY", keys: ["ppi"] },
+  { label: "CPI YoY", keys: ["cpi"], fredFallback: { key: "cpi", trendKind: "inflation" } },
+  { label: "Core CPI YoY", keys: ["coreCpi"], fredFallback: { key: "coreCpi", trendKind: "inflation" } },
+  { label: "PPI YoY", keys: ["ppi"], fredFallback: { key: "ppi", trendKind: "inflation" } },
   { label: "Core PPI YoY", keys: ["corePpi"] },
-  { label: "PCE YoY", keys: ["pce"] },
-  { label: "Core PCE YoY", keys: ["corePce"] },
+  { label: "PCE YoY", keys: ["pce"], fredFallback: { key: "pce", trendKind: "inflation" } },
+  { label: "Core PCE YoY", keys: ["corePce"], fredFallback: { key: "corePce", trendKind: "inflation" } },
 ];
 
 const JOBS_INDICATORS: IndicatorRowDef[] = [
   { label: "Non-Farm Payrolls", keys: ["nfp"] },
-  { label: "Unemployment Rate", keys: ["unemploymentRate"] },
-  { label: "Weekly Jobless Claims", keys: ["joblessClaims"] },
+  { label: "Unemployment Rate", keys: ["unemploymentRate"], fredFallback: { key: "unemploymentRate", trendKind: "jobs" } },
+  { label: "Weekly Jobless Claims", keys: ["joblessClaims"], fredFallback: { key: "initialClaims", trendKind: "jobs" } },
   { label: "ADP Employment", keys: ["adpEmployment"] },
   { label: "JOLTS Job Openings", keys: ["jolts"] },
   { label: "Average Hourly Earnings", keys: ["avgHourlyEarnings"] },
+  // trendKind "growth" (not "jobs") is deliberate: participation rising is
+  // conventionally a stronger-economy signal (more people working/looking
+  // for work), the same non-inverted polarity as a growth beat — "jobs"
+  // would incorrectly invert it the way it correctly does for
+  // unemploymentRate/initialClaims (where higher genuinely means weaker).
+  { label: "Labor Force Participation", keys: [], fredFallback: { key: "laborParticipation", trendKind: "growth" } },
 ];
 
 // Central-bank rate-decision release per country, for the Interest Rates
 // section's release-style rows (Fed Funds Rate/BoE/BoJ/... Actual/
 // Forecast/Previous/Surprise) — reuses the SAME rate-decision indicatorKeys
 // indicator-taxonomy.ts already classifies calendar events into.
-const RATE_DECISION_BY_COUNTRY: Partial<Record<string, { key: EconomicIndicatorKey; label: string }>> = {
+export const RATE_DECISION_BY_COUNTRY: Partial<Record<string, { key: EconomicIndicatorKey; label: string }>> = {
   US: { key: "fedRateDecision", label: "Fed Funds Rate" },
   EU: { key: "ecbRateDecision", label: "ECB Rate Decision" },
   GB: { key: "boeRateDecision", label: "BoE Rate Decision" },
@@ -196,21 +214,13 @@ function toIndicatorRow(instrument: Instrument, label: string, key: EconomicIndi
  * spGlobalManufacturingPmi) against the already-fetched batched events map
  * and returns the first with a real stored release. Pure/synchronous — the
  * one DB read for every indicator this Scorecard needs already happened in
- * buildScorecardData's single getLatestEconomicEventsByIndicators call.
- * Rows with no data from any candidate are omitted entirely — never a
- * fabricated placeholder row. */
-function resolveIndicatorRows(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, defs: IndicatorRowDef[]): IndicatorRow[] {
-  const rows: IndicatorRow[] = [];
-  for (const def of defs) {
-    for (const key of def.keys) {
-      const stored = events.get(`${country}:${key}`);
-      if (stored) {
-        rows.push(toIndicatorRow(instrument, def.label, key, stored, classifyIndicatorSurprise(instrument, key, stored.actual, stored.forecast)));
-        break;
-      }
-    }
+ * buildScorecardData's single getLatestEconomicEventsByIndicators call. */
+function lookupCalendarRow(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, def: IndicatorRowDef): IndicatorRow | null {
+  for (const key of def.keys) {
+    const stored = events.get(`${country}:${key}`);
+    if (stored) return toIndicatorRow(instrument, def.label, key, stored, classifyIndicatorSurprise(instrument, key, stored.actual, stored.forecast));
   }
-  return rows;
+  return null;
 }
 
 /** Release-style rows for whichever countries' central-bank rate decisions
@@ -254,12 +264,24 @@ export type MacroStateRow = {
   source: string;
 };
 
-export type IndicatorSection = { kind: "calendar"; rows: IndicatorRow[] } | { kind: "macro-state"; rows: MacroStateRow[] } | { kind: "unavailable"; reason: string };
+// Each row is independently EITHER a real calendar release (preferred —
+// Forex Factory / manual admin entry / Zapier) OR the FRED macro-state
+// fallback for that SAME indicator (only when no calendar release exists
+// for it yet) — never both, never neither shown as a fabricated blend. A
+// whole category can show a mix: e.g. USD CPI as a live calendar release
+// while USD Core CPI still shows its FRED macro-state row, side by side.
+export type IndicatorSectionRow = { source: "calendar"; row: IndicatorRow } | { source: "macro-state"; row: MacroStateRow };
+export type IndicatorSection = { kind: "rows"; rows: IndicatorSectionRow[] } | { kind: "unavailable"; reason: string };
 
 type MacroStateDef = { label: string; fredKey: FredIndicatorKey; trendKind: MacroTrendKind };
 
-async function resolveMacroStateRow(instrument: Instrument, country: string, def: MacroStateDef, storageOnly: boolean): Promise<MacroStateRow | { reason: string }> {
-  const result = await getFredSeriesWithFallback(country, def.fredKey, 24, storageOnly);
+// Always storage-only (the literal `true` below, never the caller's own
+// storageOnly flag) — this macro-state row is purely supplementary
+// Scorecard display, never a scoring input, so it must never trigger a
+// live FRED API call from the render path. See buildScorecardData's
+// batched-events comment for the same principle applied to calendar data.
+async function resolveMacroStateRow(instrument: Instrument, country: string, def: MacroStateDef): Promise<MacroStateRow | { reason: string }> {
+  const result = await getFredSeriesWithFallback(country, def.fredKey, 24, true);
   const usable = (result.status === "live" || result.status === "delayed" || result.status === "stale") && result.value && result.value.length > 0;
   if (!usable) return { reason: result.error ?? `No verified FRED series configured for ${country}/${def.fredKey}` };
 
@@ -280,13 +302,22 @@ async function resolveMacroStateRow(instrument: Instrument, country: string, def
   };
 }
 
-function resolveIndicatorSection(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, defs: IndicatorRowDef[], macroFallback: MacroStateDef, storageOnly: boolean): Promise<IndicatorSection> {
-  const rows = resolveIndicatorRows(events, instrument, country, defs);
-  if (rows.length > 0) return Promise.resolve({ kind: "calendar", rows });
+async function resolveIndicatorRow(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, def: IndicatorRowDef): Promise<IndicatorSectionRow | null> {
+  const calendarRow = lookupCalendarRow(events, instrument, country, def);
+  if (calendarRow) return { source: "calendar", row: calendarRow };
 
-  return resolveMacroStateRow(instrument, country, macroFallback, storageOnly).then((macroRow) =>
-    "reason" in macroRow ? { kind: "unavailable", reason: macroRow.reason } : { kind: "macro-state", rows: [macroRow] }
-  );
+  if (def.fredFallback) {
+    const macroRow = await resolveMacroStateRow(instrument, country, { label: def.label, fredKey: def.fredFallback.key, trendKind: def.fredFallback.trendKind });
+    if (!("reason" in macroRow)) return { source: "macro-state", row: macroRow };
+  }
+  return null;
+}
+
+async function resolveIndicatorSection(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, defs: IndicatorRowDef[]): Promise<IndicatorSection> {
+  const resolved = await Promise.all(defs.map((def) => resolveIndicatorRow(events, instrument, country, def)));
+  const rows = resolved.filter((r): r is IndicatorSectionRow => r !== null);
+  if (rows.length === 0) return { kind: "unavailable", reason: `No released calendar indicators or verified FRED macro-state series are currently stored for ${country} in this category.` };
+  return { kind: "rows", rows };
 }
 
 // ---- Interest Rates section ----
@@ -308,11 +339,14 @@ export type InterestRatesSection =
       policyRate: CardResult<{ rate: number; date: string }>;
       differential: CardResult<{ baseRate: number; quoteRate: number; diffPts: number }> | null;
       yield2y: CardResult<{ rate: number; date: string }>;
+      yield10y: CardResult<{ rate: number; date: string }>;
       releases: IndicatorRow[];
     };
 
-async function resolveLatestFredPoint(country: string, indicator: "policyRate" | "yield2y", storageOnly: boolean): Promise<CardResult<{ rate: number; date: string }>> {
-  const result = await getFredSeriesWithFallback(country, indicator, 6, storageOnly);
+// Always storage-only, same principle as resolveMacroStateRow above — this
+// is Scorecard display, not a scoring input.
+async function resolveLatestFredPoint(country: string, indicator: "policyRate" | "yield2y" | "yield10y"): Promise<CardResult<{ rate: number; date: string }>> {
+  const result = await getFredSeriesWithFallback(country, indicator, 6, true);
   const usable = (result.status === "live" || result.status === "delayed" || result.status === "stale") && result.value && result.value.length > 0;
   if (!usable) {
     return { data: null, freshness: result.status === "error" ? "error" : "unavailable", source: result.source, lastUpdated: null, reason: result.error };
@@ -331,10 +365,11 @@ async function resolveInterestRatesSection(instrument: Instrument, country: stri
     const [base, quote] = instrument.currencies;
     const baseCountry = CCY_TO_COUNTRY[base];
     const quoteCountry = CCY_TO_COUNTRY[quote];
-    const [baseRate, quoteRate, yield2y] = await Promise.all([
-      resolveLatestFredPoint(baseCountry, "policyRate", storageOnly),
-      resolveLatestFredPoint(quoteCountry, "policyRate", storageOnly),
-      resolveLatestFredPoint(country, "yield2y", storageOnly),
+    const [baseRate, quoteRate, yield2y, yield10y] = await Promise.all([
+      resolveLatestFredPoint(baseCountry, "policyRate"),
+      resolveLatestFredPoint(quoteCountry, "policyRate"),
+      resolveLatestFredPoint(country, "yield2y"),
+      resolveLatestFredPoint(country, "yield10y"),
     ]);
     const differential: CardResult<{ baseRate: number; quoteRate: number; diffPts: number }> =
       baseRate.data && quoteRate.data
@@ -345,11 +380,11 @@ async function resolveInterestRatesSection(instrument: Instrument, country: stri
             lastUpdated: baseRate.lastUpdated,
           }
         : { data: null, freshness: "unavailable", source: "FRED policy rates", lastUpdated: null, reason: "Missing verified policy-rate series for one or both currencies" };
-    return { kind: "generic", policyRate: baseRate, differential, yield2y, releases: resolveRateDecisionRows(events, instrument, [baseCountry, quoteCountry]) };
+    return { kind: "generic", policyRate: baseRate, differential, yield2y, yield10y, releases: resolveRateDecisionRows(events, instrument, [baseCountry, quoteCountry]) };
   }
 
-  const [policyRate, yield2y] = await Promise.all([resolveLatestFredPoint(country, "policyRate", storageOnly), resolveLatestFredPoint(country, "yield2y", storageOnly)]);
-  return { kind: "generic", policyRate, differential: null, yield2y, releases: resolveRateDecisionRows(events, instrument, [country]) };
+  const [policyRate, yield2y, yield10y] = await Promise.all([resolveLatestFredPoint(country, "policyRate"), resolveLatestFredPoint(country, "yield2y"), resolveLatestFredPoint(country, "yield10y")]);
+  return { kind: "generic", policyRate, differential: null, yield2y, yield10y, releases: resolveRateDecisionRows(events, instrument, [country]) };
 }
 
 // ---- Currency Comparison (FX-only) ----
@@ -468,9 +503,9 @@ export async function buildScorecardData(instrument: Instrument, score: MarketSc
   const events = await getLatestEconomicEventsByIndicators(countries, indicatorKeys);
 
   const [economicGrowth, inflation, jobsMarket, interestRates, currencyComparison, newsContext] = await Promise.all([
-    resolveIndicatorSection(events, instrument, country, GROWTH_INDICATORS, { label: "GDP Growth Rate (QoQ)", fredKey: "gdpGrowth", trendKind: "growth" }, storageOnly),
-    resolveIndicatorSection(events, instrument, country, INFLATION_INDICATORS, { label: "CPI (Index level)", fredKey: "cpi", trendKind: "inflation" }, storageOnly),
-    resolveIndicatorSection(events, instrument, country, JOBS_INDICATORS, { label: "Unemployment Rate", fredKey: "unemploymentRate", trendKind: "jobs" }, storageOnly),
+    resolveIndicatorSection(events, instrument, country, GROWTH_INDICATORS),
+    resolveIndicatorSection(events, instrument, country, INFLATION_INDICATORS),
+    resolveIndicatorSection(events, instrument, country, JOBS_INDICATORS),
     resolveInterestRatesSection(instrument, country, events, storageOnly),
     resolveCurrencyComparison(instrument, storageOnly),
     resolveNewsContext(instrument),
