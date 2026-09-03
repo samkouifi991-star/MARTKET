@@ -5,8 +5,6 @@ import { InstitutionalCardData, LiveMarketDetail } from "./market-detail";
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
 
 vi.mock("@/db/queries/market-data");
-vi.mock("@/db/queries/release-tracking");
-vi.mock("@/db/queries/economic-releases");
 vi.mock("@/services/market-data/last-known-good");
 vi.mock("./gold-macro", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./gold-macro")>();
@@ -17,13 +15,19 @@ vi.mock("./forex-scorecard", async (importOriginal) => {
   return { ...actual, buildForexScorecard: vi.fn() };
 });
 
-import { getLatestEconomicEventByIndicator, getRecentNews, getUpcomingHighImpactEvents } from "@/db/queries/market-data";
-import { getRecentReleaseTracking, ReleaseTrackingRow } from "@/db/queries/release-tracking";
-import { getSurpriseById, SurpriseRow } from "@/db/queries/economic-releases";
+import { getLatestEconomicEventsByIndicators, getRecentNews, getUpcomingHighImpactEvents, StoredEconomicEventRow } from "@/db/queries/market-data";
 import { getFredSeriesWithFallback } from "@/services/market-data/last-known-good";
 import { computeGoldMacroRegime } from "./gold-macro";
 import { buildForexScorecard } from "./forex-scorecard";
 import { buildScorecardData, cotChangeLabel } from "./scorecard";
+
+// Builds the Map getLatestEconomicEventsByIndicators returns, keyed
+// "country:indicatorKey" — mirrors exactly what buildScorecardData's one
+// batched read produces, so a test only has to say which (country,
+// indicatorKey) pairs have a real stored release.
+function eventsMap(entries: Record<string, Omit<StoredEconomicEventRow, "revisedPrevious"> & { revisedPrevious?: number | null }>): Map<string, StoredEconomicEventRow> {
+  return new Map(Object.entries(entries).map(([key, row]) => [key, { revisedPrevious: null, ...row }]));
+}
 
 const GOLD: Instrument = { symbol: "XAUUSD", name: "Gold", assetClass: "Commodities", decimals: 2 };
 const GBPUSD: Instrument = { symbol: "GBPUSD", name: "British Pound / US Dollar", assetClass: "Forex", currencies: ["GBP", "USD"], decimals: 4 };
@@ -55,52 +59,8 @@ function fixtureLiveDetail(overrides: Partial<LiveMarketDetail> = {}): LiveMarke
   };
 }
 
-function fixtureReleaseTrackingRow(overrides: Partial<ReleaseTrackingRow> = {}): ReleaseTrackingRow {
-  return {
-    id: 1,
-    releaseKey: "fmp:US:cpi:2027-01-01T13:30:00.000Z",
-    provider: "fmp",
-    country: "US",
-    indicatorKey: "cpi",
-    rawEvent: "CPI YoY",
-    importanceTier: "HIGH",
-    scheduledAt: "2027-01-01T13:30:00.000Z",
-    state: "processed",
-    forecast: 3.2,
-    previous: 3.1,
-    actual: 3.4,
-    revisedPrevious: null,
-    firstDetectedAt: "2027-01-01T13:31:00.000Z",
-    processedAt: "2027-01-01T13:35:00.000Z",
-    lastRevisedAt: null,
-    surpriseId: 1,
-    affectedMarkets: ["XAUUSD", "EURUSD"],
-    ...overrides,
-  };
-}
-
-function fixtureSurpriseRow(overrides: Partial<SurpriseRow> = {}): SurpriseRow {
-  return {
-    id: 1,
-    indicatorKey: "cpi",
-    country: "US",
-    releaseDateTime: "2027-01-01T13:30:00.000Z",
-    actual: 3.4,
-    forecast: 3.2,
-    previous: 3.1,
-    revisedPrevious: null,
-    surprise: 0.2,
-    surpriseZ: 1.1,
-    effectiveSurprise: 0.2,
-    importanceTier: "HIGH",
-    ...overrides,
-  };
-}
-
 beforeEach(() => {
-  vi.mocked(getLatestEconomicEventByIndicator).mockResolvedValue(null);
-  vi.mocked(getRecentReleaseTracking).mockResolvedValue([]);
-  vi.mocked(getSurpriseById).mockResolvedValue(null);
+  vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(new Map());
   vi.mocked(getFredSeriesWithFallback).mockResolvedValue({
     provider: "fred",
     source: "FRED",
@@ -212,11 +172,10 @@ describe("buildScorecardData — institutional vs retail sentiment stay distinct
 });
 
 describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", () => {
-  it("a fixture with forecast: null never gets a Bullish/Bearish classification, and surprise is null", async () => {
-    vi.mocked(getLatestEconomicEventByIndicator).mockImplementation(async (_country, key) => {
-      if (key === "gdp") return { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.1, previous: 1.9, forecast: null, importanceTier: "HIGH" };
-      return null;
-    });
+  it("a fixture with forecast: null never gets a Bullish/Bearish classification, and surprise is null, but Previous still shows", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({ "US:gdp": { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.1, previous: 1.9, forecast: null, importanceTier: "HIGH" } })
+    );
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
     expect(data.economicGrowth.kind).toBe("calendar");
     if (data.economicGrowth.kind !== "calendar") throw new Error("unreachable");
@@ -226,10 +185,10 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
     expect(gdpRow!.forecast).toBeNull();
     expect(gdpRow!.surprise).toBeNull();
     expect(gdpRow!.actual).toBe(2.1);
+    expect(gdpRow!.previous).toBe(1.9);
   });
 
   it("falls back to 'unavailable' (never a fabricated stub) when neither the calendar nor FRED has any real data for this country", async () => {
-    vi.mocked(getLatestEconomicEventByIndicator).mockResolvedValue(null);
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
     expect(data.economicGrowth.kind).toBe("unavailable");
     expect(data.inflation.kind).toBe("unavailable");
@@ -237,10 +196,9 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
   });
 
   it("classifies a real actual+forecast pair, inverted for gold on a growth beat", async () => {
-    vi.mocked(getLatestEconomicEventByIndicator).mockImplementation(async (_country, key) => {
-      if (key === "gdp") return { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 3.0, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" };
-      return null;
-    });
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({ "US:gdp": { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 3.0, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" } })
+    );
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
     if (data.economicGrowth.kind !== "calendar") throw new Error("unreachable");
     const gdpRow = data.economicGrowth.rows.find((r) => r.indicatorKey === "gdp")!;
@@ -249,16 +207,33 @@ describe("buildScorecardData — Growth/Inflation/Jobs rows never fabricate", ()
   });
 
   it("falls back to the secondary indicatorKey when the primary has no stored release yet", async () => {
-    vi.mocked(getLatestEconomicEventByIndicator).mockImplementation(async (_country, key) => {
-      if (key === "ismManufacturing") return null;
-      if (key === "spGlobalManufacturingPmi") return { event: "S&P Global Manufacturing PMI", dateTime: "2027-02-01T00:00:00.000Z", actual: 51.2, previous: 50.8, forecast: 50.9, importanceTier: "MEDIUM" };
-      return null;
-    });
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({ "US:spGlobalManufacturingPmi": { event: "S&P Global Manufacturing PMI", dateTime: "2027-02-01T00:00:00.000Z", actual: 51.2, previous: 50.8, forecast: 50.9, importanceTier: "MEDIUM" } })
+    );
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
     if (data.economicGrowth.kind !== "calendar") throw new Error("unreachable");
     const pmiRow = data.economicGrowth.rows.find((r) => r.label === "Manufacturing PMI")!;
     expect(pmiRow.indicatorKey).toBe("spGlobalManufacturingPmi");
     expect(pmiRow.actual).toBe(51.2);
+  });
+
+  it("shows every stored inflation release, including the newly-added Core PPI and Core PCE rows — never limited to one row", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({
+        "US:cpi": { event: "CPI YoY", dateTime: "2027-01-14T00:00:00.000Z", actual: 3.1, previous: 3.2, forecast: 3.0, importanceTier: "HIGH" },
+        "US:corePpi": { event: "Core PPI YoY", dateTime: "2027-01-16T00:00:00.000Z", actual: 2.4, previous: 2.5, forecast: 2.3, importanceTier: "MEDIUM" },
+        "US:corePce": { event: "Core PCE YoY", dateTime: "2027-01-31T00:00:00.000Z", actual: 2.8, previous: 2.9, forecast: 2.7, importanceTier: "HIGH" },
+      })
+    );
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    if (data.inflation.kind !== "calendar") throw new Error("unreachable");
+    expect(data.inflation.rows.map((r) => r.indicatorKey).sort()).toEqual(["corePce", "corePpi", "cpi"]);
+  });
+
+  it("reads exactly one batched events query per Scorecard render, not one per indicator", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockClear();
+    await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(getLatestEconomicEventsByIndicators).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -268,7 +243,6 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
   }
 
   it("falls back to a real FRED-backed Macro State row for Growth when no calendar release exists", async () => {
-    vi.mocked(getLatestEconomicEventByIndicator).mockResolvedValue(null);
     vi.mocked(getFredSeriesWithFallback).mockImplementation(async (_country, indicator) => ({
       provider: "fred",
       source: "FRED (Federal Reserve Economic Data)",
@@ -294,7 +268,6 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
   });
 
   it("never fabricates a Macro State row when FRED has fewer than 3 real observations either — reports unavailable instead", async () => {
-    vi.mocked(getLatestEconomicEventByIndicator).mockResolvedValue(null);
     vi.mocked(getFredSeriesWithFallback).mockResolvedValue({
       provider: "fred",
       source: "FRED",
@@ -309,10 +282,9 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
   });
 
   it("prefers real calendar release rows over the Macro State fallback whenever both exist", async () => {
-    vi.mocked(getLatestEconomicEventByIndicator).mockImplementation(async (_country, key) => {
-      if (key === "gdp") return { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.1, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" };
-      return null;
-    });
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({ "US:gdp": { event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.1, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" } })
+    );
     vi.mocked(getFredSeriesWithFallback).mockResolvedValue({
       provider: "fred",
       source: "FRED",
@@ -327,7 +299,6 @@ describe("buildScorecardData — Macro State fallback (Phase 3: never leave Grow
   });
 
   it("computes an unemployment-rate Macro State row with jobs-kind polarity (falling unemployment reads Bearish for gold)", async () => {
-    vi.mocked(getLatestEconomicEventByIndicator).mockResolvedValue(null);
     vi.mocked(getFredSeriesWithFallback).mockImplementation(async (_country, indicator) => ({
       provider: "fred",
       source: "FRED",
@@ -434,31 +405,34 @@ describe("buildScorecardData — Interest Rates section", () => {
       expect(data.interestRates.differential?.data).toEqual({ baseRate: 5.25, quoteRate: 4.5, diffPts: 0.75 });
     }
   });
-});
 
-describe("buildScorecardData — Economic Surprise Index (V2 shadow)", () => {
-  it("filters release-tracking rows to only this symbol's affected markets", async () => {
-    vi.mocked(getRecentReleaseTracking).mockResolvedValue([
-      fixtureReleaseTrackingRow({ affectedMarkets: ["XAUUSD"], surpriseId: 1 }),
-      fixtureReleaseTrackingRow({ id: 2, affectedMarkets: ["USDJPY"], surpriseId: 2 }),
-    ]);
-    vi.mocked(getSurpriseById).mockImplementation(async (id) => fixtureSurpriseRow({ id }));
+  it("includes a Fed Funds Rate release row when one is stored for the country in scope, with no fabricated Bias", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({ "US:fedRateDecision": { event: "Fed Funds Rate", dateTime: "2027-01-29T19:00:00.000Z", actual: 4.5, previous: 4.75, forecast: 4.5, importanceTier: "HIGH" } })
+    );
     const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    expect(data.surpriseIndex.rows).toHaveLength(1);
+    expect(data.interestRates.kind).toBe("gold-drivers");
+    if (data.interestRates.kind !== "gold-drivers") throw new Error("unreachable");
+    expect(data.interestRates.releases).toHaveLength(1);
+    expect(data.interestRates.releases[0]).toMatchObject({ label: "Fed Funds Rate", actual: 4.5, previous: 4.75, forecast: 4.5, classification: null });
   });
 
-  it("labels the section limited when there's not much real V2 history yet (expected today)", async () => {
-    vi.mocked(getRecentReleaseTracking).mockResolvedValue([]);
-    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    expect(data.surpriseIndex.rows).toHaveLength(0);
-    expect(data.surpriseIndex.limited).toBe(true);
+  it("includes both base and quote central-bank rate-decision releases for an FX pair", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({
+        "GB:boeRateDecision": { event: "BoE Rate Decision", dateTime: "2027-01-30T12:00:00.000Z", actual: 4.0, previous: 4.25, forecast: 4.0, importanceTier: "HIGH" },
+        "US:fedRateDecision": { event: "Fed Funds Rate", dateTime: "2027-01-29T19:00:00.000Z", actual: 4.5, previous: 4.75, forecast: 4.5, importanceTier: "HIGH" },
+      })
+    );
+    const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    if (data.interestRates.kind !== "generic") throw new Error("unreachable");
+    expect(data.interestRates.releases.map((r) => r.label).sort()).toEqual(["BoE Rate Decision", "Fed Funds Rate"]);
   });
 
-  it("never invents a row when a tracking row's surprise cannot be found", async () => {
-    vi.mocked(getRecentReleaseTracking).mockResolvedValue([fixtureReleaseTrackingRow({ affectedMarkets: ["XAUUSD"], surpriseId: 99 })]);
-    vi.mocked(getSurpriseById).mockResolvedValue(null);
-    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
-    expect(data.surpriseIndex.rows).toHaveLength(0);
+  it("omits release rows entirely (never an empty table) when no rate-decision release is stored", async () => {
+    const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    if (data.interestRates.kind !== "generic") throw new Error("unreachable");
+    expect(data.interestRates.releases).toEqual([]);
   });
 });
 

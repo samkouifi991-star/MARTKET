@@ -8,7 +8,7 @@
 // last-known-good.ts): when a live provider call fails, the display/scoring
 // pipeline needs to read back exactly what was last actually stored, not
 // just append to it.
-import { and, desc, eq, gte, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import { marketPrices, marketCandles, institutionalPositioning, retailSentiment, economicIndicators, economicEvents, newsArticles } from "../schema";
 import { FredSeriesPoint, NormalizedCandle, NormalizedEconomicEvent, NormalizedNewsArticle, NormalizedQuote } from "@/services/types";
@@ -209,29 +209,47 @@ export type StoredEconomicEventRow = {
   actual: number;
   previous: number | null;
   forecast: number | null;
+  revisedPrevious: number | null;
   importanceTier: string | null;
 };
 
-/** The most recently RELEASED (actual IS NOT NULL) stored calendar event
- * for a given country/indicatorKey pair — the market scorecard's Economic
- * Growth/Inflation/Jobs Market rows read this (never a live FMP call from
- * the render path, matching this project's storage-first rule everywhere
- * else). Reads economic_events, V1's own table (indicatorKey is a nullable
+const LATEST_EVENTS_BATCH_SCAN_LIMIT = 500;
+
+/** One batched read for every (country, indicatorKey) pair the market
+ * scorecard's Economic Growth/Inflation/Jobs Market/Interest Rates sections
+ * need for a single page render — replaces what used to be a separate
+ * per-indicator query (up to ~20 round trips for a full Scorecard) with
+ * exactly one, per the Supabase egress-observation constraint. Reads
+ * economic_events, V1's own table (indicatorKey is a nullable
  * V2-classification column backfilled onto it, not a separate V2 table —
  * see updateEconomicEventClassification above) — this is real calendar
- * history, not fabricated. Returns null, never a stub row, when nothing
- * classified as this indicator has been released yet for this country. */
-export async function getLatestEconomicEventByIndicator(country: string, indicatorKey: EconomicIndicatorKey): Promise<StoredEconomicEventRow | null> {
+ * history, not fabricated. Rows are scanned in dateTime-descending order
+ * and the first occurrence of each (country, indicatorKey) pair wins, so no
+ * per-pair query or window function is needed; a pair with no stored
+ * release simply has no entry in the returned map (never a fabricated stub
+ * row). The scan is bounded (LATEST_EVENTS_BATCH_SCAN_LIMIT) rather than
+ * unbounded — a pair whose most recent release falls outside that window
+ * would be missed, but at one release per pair roughly every 1-4 weeks,
+ * 500 rows comfortably covers the ~20 pairs a single Scorecard needs. */
+export async function getLatestEconomicEventsByIndicators(countries: string[], indicatorKeys: EconomicIndicatorKey[]): Promise<Map<string, StoredEconomicEventRow>> {
+  const result = new Map<string, StoredEconomicEventRow>();
+  if (countries.length === 0 || indicatorKeys.length === 0) return result;
+
   const db = getDb();
   const rows = await db
     .select()
     .from(economicEvents)
-    .where(and(eq(economicEvents.country, country), eq(economicEvents.indicatorKey, indicatorKey), isNotNull(economicEvents.actual)))
+    .where(and(inArray(economicEvents.country, countries), inArray(economicEvents.indicatorKey, indicatorKeys), isNotNull(economicEvents.actual)))
     .orderBy(desc(economicEvents.dateTime))
-    .limit(1);
-  const r = rows[0];
-  if (!r || r.actual === null) return null;
-  return { event: r.event, dateTime: r.dateTime.toISOString(), actual: r.actual, previous: r.previous, forecast: r.forecast, importanceTier: r.importanceTier };
+    .limit(LATEST_EVENTS_BATCH_SCAN_LIMIT);
+
+  for (const r of rows) {
+    if (r.actual === null || !r.indicatorKey) continue;
+    const key = `${r.country}:${r.indicatorKey}`;
+    if (result.has(key)) continue; // rows are date-desc — first occurrence per pair is already the latest
+    result.set(key, { event: r.event, dateTime: r.dateTime.toISOString(), actual: r.actual, previous: r.previous, forecast: r.forecast, revisedPrevious: r.revisedPrevious, importanceTier: r.importanceTier });
+  }
+  return result;
 }
 
 export async function insertNewsArticle(article: NormalizedNewsArticle, analysis: { interpretation: string; importance: number; confidence: number; reason: string }): Promise<void> {

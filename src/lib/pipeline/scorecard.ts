@@ -13,9 +13,7 @@ import { DataFreshness, Instrument, MarketScore, ScoreFactor, ScoreFactorKey } f
 import { FactorSentiment, factorSentiment } from "@/lib/format";
 import { CCY_TO_COUNTRY, factorLabel } from "@/lib/scoring";
 import { EconomicIndicatorKey } from "@/services/economic-calendar/indicator-taxonomy";
-import { getLatestEconomicEventByIndicator } from "@/db/queries/market-data";
-import { getRecentReleaseTracking } from "@/db/queries/release-tracking";
-import { getSurpriseById } from "@/db/queries/economic-releases";
+import { getLatestEconomicEventsByIndicators, StoredEconomicEventRow } from "@/db/queries/market-data";
 import { getFredSeriesWithFallback } from "@/services/market-data/last-known-good";
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
 import { FredIndicatorKey } from "@/services/market-data/fred-series";
@@ -103,13 +101,22 @@ function buildTechnicalsRows(factors: ScoreFactor[]): TechnicalsRow[] {
   return rows;
 }
 
-// ---- Economic Growth / Inflation / Jobs Market — real calendar rows ----
+// ---- Economic Growth / Inflation / Jobs Market / Interest Rates — real
+// calendar rows ----
+// Forecast/Previous/RevisedPrevious are exactly what economic_events stores
+// (Forex Factory calendar / manual admin entry / Zapier email ingestion —
+// see lib/ingestion — all write through the same table and columns) —
+// never derived, never guessed. `forecast`/`previous` are null (rendered as
+// "—", never a fabricated number) when the underlying release genuinely
+// carries no forecast/previous value.
 export type IndicatorRow = {
   label: string;
   indicatorKey: EconomicIndicatorKey;
-  classification: IndicatorClassification | null; // null when forecast is unavailable — never fabricated
+  classification: IndicatorClassification | null; // null when forecast is unavailable, or (rate decisions) when no established asset-specific transmission model exists — never fabricated
   actual: number;
   forecast: number | null;
+  previous: number | null;
+  revisedPrevious: number | null;
   surprise: number | null; // actual - forecast; null when forecast is null
   date: string; // ISO
   source: string;
@@ -139,7 +146,9 @@ const INFLATION_INDICATORS: IndicatorRowDef[] = [
   { label: "CPI YoY", keys: ["cpi"] },
   { label: "Core CPI YoY", keys: ["coreCpi"] },
   { label: "PPI YoY", keys: ["ppi"] },
+  { label: "Core PPI YoY", keys: ["corePpi"] },
   { label: "PCE YoY", keys: ["pce"] },
+  { label: "Core PCE YoY", keys: ["corePce"] },
 ];
 
 const JOBS_INDICATORS: IndicatorRowDef[] = [
@@ -151,34 +160,76 @@ const JOBS_INDICATORS: IndicatorRowDef[] = [
   { label: "Average Hourly Earnings", keys: ["avgHourlyEarnings"] },
 ];
 
-/** Tries each candidate indicatorKey in order (a primary vendor-naming
+// Central-bank rate-decision release per country, for the Interest Rates
+// section's release-style rows (Fed Funds Rate/BoE/BoJ/... Actual/
+// Forecast/Previous/Surprise) — reuses the SAME rate-decision indicatorKeys
+// indicator-taxonomy.ts already classifies calendar events into.
+const RATE_DECISION_BY_COUNTRY: Partial<Record<string, { key: EconomicIndicatorKey; label: string }>> = {
+  US: { key: "fedRateDecision", label: "Fed Funds Rate" },
+  EU: { key: "ecbRateDecision", label: "ECB Rate Decision" },
+  GB: { key: "boeRateDecision", label: "BoE Rate Decision" },
+  JP: { key: "bojRateDecision", label: "BoJ Rate Decision" },
+  CH: { key: "snbRateDecision", label: "SNB Rate Decision" },
+  CA: { key: "bocRateDecision", label: "BoC Rate Decision" },
+  AU: { key: "rbaRateDecision", label: "RBA Rate Decision" },
+  NZ: { key: "rbnzRateDecision", label: "RBNZ Rate Decision" },
+};
+
+function toIndicatorRow(instrument: Instrument, label: string, key: EconomicIndicatorKey, stored: StoredEconomicEventRow, classification: IndicatorClassification | null): IndicatorRow {
+  return {
+    label,
+    indicatorKey: key,
+    classification,
+    actual: stored.actual,
+    forecast: stored.forecast,
+    previous: stored.previous,
+    revisedPrevious: stored.revisedPrevious,
+    surprise: stored.forecast !== null ? stored.actual - stored.forecast : null,
+    date: stored.dateTime,
+    source: `Economic calendar — ${stored.event}`,
+  };
+}
+
+/** Looks up each candidate indicatorKey in order (a primary vendor-naming
  * convention, e.g. ismManufacturing, falling back to an equivalent when the
  * primary hasn't been released/classified yet, e.g.
- * spGlobalManufacturingPmi) and returns the first with a real stored
- * release. Rows with no data from any candidate are omitted entirely —
- * never a fabricated placeholder row. */
-async function resolveIndicatorRows(instrument: Instrument, country: string, defs: IndicatorRowDef[]): Promise<IndicatorRow[]> {
-  const resolved = await Promise.all(
-    defs.map(async (def): Promise<IndicatorRow | null> => {
-      for (const key of def.keys) {
-        const stored = await getLatestEconomicEventByIndicator(country, key);
-        if (stored) {
-          return {
-            label: def.label,
-            indicatorKey: key,
-            classification: classifyIndicatorSurprise(instrument, key, stored.actual, stored.forecast),
-            actual: stored.actual,
-            forecast: stored.forecast,
-            surprise: stored.forecast !== null ? stored.actual - stored.forecast : null,
-            date: stored.dateTime,
-            source: `FMP Economic Calendar — ${stored.event}`,
-          };
-        }
+ * spGlobalManufacturingPmi) against the already-fetched batched events map
+ * and returns the first with a real stored release. Pure/synchronous — the
+ * one DB read for every indicator this Scorecard needs already happened in
+ * buildScorecardData's single getLatestEconomicEventsByIndicators call.
+ * Rows with no data from any candidate are omitted entirely — never a
+ * fabricated placeholder row. */
+function resolveIndicatorRows(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, defs: IndicatorRowDef[]): IndicatorRow[] {
+  const rows: IndicatorRow[] = [];
+  for (const def of defs) {
+    for (const key of def.keys) {
+      const stored = events.get(`${country}:${key}`);
+      if (stored) {
+        rows.push(toIndicatorRow(instrument, def.label, key, stored, classifyIndicatorSurprise(instrument, key, stored.actual, stored.forecast)));
+        break;
       }
-      return null;
-    })
-  );
-  return resolved.filter((r): r is IndicatorRow => r !== null);
+    }
+  }
+  return rows;
+}
+
+/** Release-style rows for whichever countries' central-bank rate decisions
+ * are in scope for this instrument (FX: base + quote; everything else: its
+ * one primary country) — same batched events map, no extra query. No Bias
+ * is assigned: unlike growth/inflation/jobs, this codebase has no
+ * established asset-specific transmission model for a rate-decision
+ * surprise (hawkish/dovish is not simply "actual above forecast = strong"),
+ * so `classification` stays null rather than a fabricated guess. */
+function resolveRateDecisionRows(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, countries: string[]): IndicatorRow[] {
+  const rows: IndicatorRow[] = [];
+  for (const c of countries) {
+    const decision = RATE_DECISION_BY_COUNTRY[c];
+    if (!decision) continue;
+    const stored = events.get(`${c}:${decision.key}`);
+    if (!stored) continue;
+    rows.push(toIndicatorRow(instrument, decision.label, decision.key, stored, null));
+  }
+  return rows;
 }
 
 // ---- Macro State fallback (used only when the calendar has no released
@@ -229,13 +280,13 @@ async function resolveMacroStateRow(instrument: Instrument, country: string, def
   };
 }
 
-async function resolveIndicatorSection(instrument: Instrument, country: string, defs: IndicatorRowDef[], macroFallback: MacroStateDef, storageOnly: boolean): Promise<IndicatorSection> {
-  const rows = await resolveIndicatorRows(instrument, country, defs);
-  if (rows.length > 0) return { kind: "calendar", rows };
+function resolveIndicatorSection(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, defs: IndicatorRowDef[], macroFallback: MacroStateDef, storageOnly: boolean): Promise<IndicatorSection> {
+  const rows = resolveIndicatorRows(events, instrument, country, defs);
+  if (rows.length > 0) return Promise.resolve({ kind: "calendar", rows });
 
-  const macroRow = await resolveMacroStateRow(instrument, country, macroFallback, storageOnly);
-  if ("reason" in macroRow) return { kind: "unavailable", reason: macroRow.reason };
-  return { kind: "macro-state", rows: [macroRow] };
+  return resolveMacroStateRow(instrument, country, macroFallback, storageOnly).then((macroRow) =>
+    "reason" in macroRow ? { kind: "unavailable", reason: macroRow.reason } : { kind: "macro-state", rows: [macroRow] }
+  );
 }
 
 // ---- Interest Rates section ----
@@ -245,13 +296,19 @@ async function resolveIndicatorSection(instrument: Instrument, country: string, 
 // Every other instrument gets a simpler current-policy-rate (+ FX
 // differential, + 2Y yield where resolvable) read, storage-first via the
 // same getFredSeriesWithFallback every other macro factor already uses.
+// `releases` (both variants) is the actual central-bank rate-DECISION
+// release, when one is stored for a country in scope — kept separate from
+// `policyRate`/`differential` above, which are FRED's continuously-updated
+// policy-rate LEVEL, not a discrete forecast-vs-actual release event; the
+// two are complementary, never merged into one fabricated number.
 export type InterestRatesSection =
-  | { kind: "gold-drivers"; drivers: GoldMacroDriver[]; freshness: DataFreshness }
+  | { kind: "gold-drivers"; drivers: GoldMacroDriver[]; freshness: DataFreshness; releases: IndicatorRow[] }
   | {
       kind: "generic";
       policyRate: CardResult<{ rate: number; date: string }>;
       differential: CardResult<{ baseRate: number; quoteRate: number; diffPts: number }> | null;
       yield2y: CardResult<{ rate: number; date: string }>;
+      releases: IndicatorRow[];
     };
 
 async function resolveLatestFredPoint(country: string, indicator: "policyRate" | "yield2y", storageOnly: boolean): Promise<CardResult<{ rate: number; date: string }>> {
@@ -264,17 +321,19 @@ async function resolveLatestFredPoint(country: string, indicator: "policyRate" |
   return { data: { rate: latest.value, date: latest.date }, freshness: result.status, source: result.source, lastUpdated: result.sourceUpdatedAt };
 }
 
-async function resolveInterestRatesSection(instrument: Instrument, country: string, storageOnly: boolean): Promise<InterestRatesSection> {
+async function resolveInterestRatesSection(instrument: Instrument, country: string, events: Map<string, StoredEconomicEventRow>, storageOnly: boolean): Promise<InterestRatesSection> {
   if (instrument.symbol === GOLD_SYMBOL) {
     const regime = await computeGoldMacroRegime(60, storageOnly);
-    return { kind: "gold-drivers", drivers: regime.drivers, freshness: regime.interestRatesFreshness };
+    return { kind: "gold-drivers", drivers: regime.drivers, freshness: regime.interestRatesFreshness, releases: resolveRateDecisionRows(events, instrument, [country]) };
   }
 
   if (instrument.currencies) {
     const [base, quote] = instrument.currencies;
+    const baseCountry = CCY_TO_COUNTRY[base];
+    const quoteCountry = CCY_TO_COUNTRY[quote];
     const [baseRate, quoteRate, yield2y] = await Promise.all([
-      resolveLatestFredPoint(CCY_TO_COUNTRY[base], "policyRate", storageOnly),
-      resolveLatestFredPoint(CCY_TO_COUNTRY[quote], "policyRate", storageOnly),
+      resolveLatestFredPoint(baseCountry, "policyRate", storageOnly),
+      resolveLatestFredPoint(quoteCountry, "policyRate", storageOnly),
       resolveLatestFredPoint(country, "yield2y", storageOnly),
     ]);
     const differential: CardResult<{ baseRate: number; quoteRate: number; diffPts: number }> =
@@ -286,66 +345,11 @@ async function resolveInterestRatesSection(instrument: Instrument, country: stri
             lastUpdated: baseRate.lastUpdated,
           }
         : { data: null, freshness: "unavailable", source: "FRED policy rates", lastUpdated: null, reason: "Missing verified policy-rate series for one or both currencies" };
-    return { kind: "generic", policyRate: baseRate, differential, yield2y };
+    return { kind: "generic", policyRate: baseRate, differential, yield2y, releases: resolveRateDecisionRows(events, instrument, [baseCountry, quoteCountry]) };
   }
 
   const [policyRate, yield2y] = await Promise.all([resolveLatestFredPoint(country, "policyRate", storageOnly), resolveLatestFredPoint(country, "yield2y", storageOnly)]);
-  return { kind: "generic", policyRate, differential: null, yield2y };
-}
-
-// ---- Economic Surprise Index (V2 shadow — read-only) ----
-// Reads the exact same V2 queries /admin/scoring-v2's Event Monitor
-// already uses (getRecentReleaseTracking, getSurpriseById) — nothing new
-// is written, nothing feeds back into `score`. affectedMarkets is already
-// populated on each tracking row once a release is processed (see
-// release-watch.ts), so filtering to this symbol needs no extra join.
-export type SurpriseIndexRow = {
-  indicatorKey: EconomicIndicatorKey;
-  country: string;
-  actual: number;
-  forecast: number | null;
-  surprise: number | null;
-  surpriseZ: number | null;
-  importanceTier: string;
-  date: string;
-};
-
-export type SurpriseIndexSection = {
-  rows: SurpriseIndexRow[];
-  // True when there's too little real V2 release history yet to be more
-  // than a preview — the UI must label this "limited/shadow data" rather
-  // than implying a complete surprise index, per spec.
-  limited: boolean;
-};
-
-const SURPRISE_INDEX_TRACKING_SCAN_LIMIT = 200;
-const SURPRISE_INDEX_MAX_ROWS = 10;
-const SURPRISE_INDEX_LIMITED_THRESHOLD = 3;
-
-async function resolveSurpriseIndexSection(symbol: string): Promise<SurpriseIndexSection> {
-  const tracking = await getRecentReleaseTracking(SURPRISE_INDEX_TRACKING_SCAN_LIMIT);
-  const relevant = tracking.filter((r) => r.surpriseId !== null && r.affectedMarkets.includes(symbol)).slice(0, SURPRISE_INDEX_MAX_ROWS);
-
-  const rows = (
-    await Promise.all(
-      relevant.map(async (r): Promise<SurpriseIndexRow | null> => {
-        const surprise = await getSurpriseById(r.surpriseId!);
-        if (!surprise) return null;
-        return {
-          indicatorKey: r.indicatorKey,
-          country: r.country,
-          actual: surprise.actual,
-          forecast: surprise.forecast,
-          surprise: surprise.surprise,
-          surpriseZ: surprise.surpriseZ,
-          importanceTier: r.importanceTier,
-          date: r.processedAt ?? r.scheduledAt,
-        };
-      })
-    )
-  ).filter((r): r is SurpriseIndexRow => r !== null);
-
-  return { rows, limited: rows.length < SURPRISE_INDEX_LIMITED_THRESHOLD };
+  return { kind: "generic", policyRate, differential: null, yield2y, releases: resolveRateDecisionRows(events, instrument, [country]) };
 }
 
 // ---- Currency Comparison (FX-only) ----
@@ -442,19 +446,32 @@ export type ScorecardData = {
   inflation: IndicatorSection;
   jobsMarket: IndicatorSection;
   interestRates: InterestRatesSection;
-  surpriseIndex: SurpriseIndexSection;
   currencyComparison: ForexScorecardData | null;
   newsContext: NewsContextSection;
 };
 
+// All indicatorKeys the Growth/Inflation/Jobs Market tables ever look up,
+// computed once (module load, not per-render) rather than re-flattened on
+// every call.
+const GROWTH_INFLATION_JOBS_KEYS: EconomicIndicatorKey[] = [...GROWTH_INDICATORS, ...INFLATION_INDICATORS, ...JOBS_INDICATORS].flatMap((d) => d.keys);
+
 export async function buildScorecardData(instrument: Instrument, score: MarketScore, live: LiveMarketDetail, storageOnly = false): Promise<ScorecardData> {
   const country = primaryMacroCountry(instrument);
-  const [economicGrowth, inflation, jobsMarket, interestRates, surpriseIndex, currencyComparison, newsContext] = await Promise.all([
-    resolveIndicatorSection(instrument, country, GROWTH_INDICATORS, { label: "GDP Growth Rate (QoQ)", fredKey: "gdpGrowth", trendKind: "growth" }, storageOnly),
-    resolveIndicatorSection(instrument, country, INFLATION_INDICATORS, { label: "CPI (Index level)", fredKey: "cpi", trendKind: "inflation" }, storageOnly),
-    resolveIndicatorSection(instrument, country, JOBS_INDICATORS, { label: "Unemployment Rate", fredKey: "unemploymentRate", trendKind: "jobs" }, storageOnly),
-    resolveInterestRatesSection(instrument, country, storageOnly),
-    resolveSurpriseIndexSection(instrument.symbol),
+  const countries = instrument.currencies ? Array.from(new Set([CCY_TO_COUNTRY[instrument.currencies[0]], CCY_TO_COUNTRY[instrument.currencies[1]]])) : [country];
+  const rateDecisionKeys = countries.map((c) => RATE_DECISION_BY_COUNTRY[c]?.key).filter((k): k is EconomicIndicatorKey => !!k);
+  const indicatorKeys = Array.from(new Set([...GROWTH_INFLATION_JOBS_KEYS, ...rateDecisionKeys]));
+
+  // ONE batched read for every (country, indicatorKey) pair every macro
+  // section below needs — replaces what used to be a separate query per
+  // indicator (up to ~20 round trips for a full Scorecard render). See
+  // getLatestEconomicEventsByIndicators (db/queries/market-data.ts).
+  const events = await getLatestEconomicEventsByIndicators(countries, indicatorKeys);
+
+  const [economicGrowth, inflation, jobsMarket, interestRates, currencyComparison, newsContext] = await Promise.all([
+    resolveIndicatorSection(events, instrument, country, GROWTH_INDICATORS, { label: "GDP Growth Rate (QoQ)", fredKey: "gdpGrowth", trendKind: "growth" }, storageOnly),
+    resolveIndicatorSection(events, instrument, country, INFLATION_INDICATORS, { label: "CPI (Index level)", fredKey: "cpi", trendKind: "inflation" }, storageOnly),
+    resolveIndicatorSection(events, instrument, country, JOBS_INDICATORS, { label: "Unemployment Rate", fredKey: "unemploymentRate", trendKind: "jobs" }, storageOnly),
+    resolveInterestRatesSection(instrument, country, events, storageOnly),
     resolveCurrencyComparison(instrument, storageOnly),
     resolveNewsContext(instrument),
   ]);
@@ -474,7 +491,6 @@ export async function buildScorecardData(instrument: Instrument, score: MarketSc
     inflation,
     jobsMarket,
     interestRates,
-    surpriseIndex,
     currencyComparison,
     newsContext,
   };

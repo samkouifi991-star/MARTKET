@@ -15,7 +15,7 @@ import { Card } from "@/components/ui/Card";
 import { DataFreshnessTag, unavailableLeadWord, DATA_FRESHNESS_LABELS } from "@/components/ui/DataFreshnessTag";
 import { PriceScoreOverlayChart } from "@/components/charts/PriceScoreOverlayChart";
 import { filterToRecentWindow } from "@/lib/time";
-import { IndicatorRow, IndicatorSection, InterestRatesSection, NewsContextSection, ScorecardData, ScoreDriverRow, SurpriseIndexRow, TechnicalsRow, cotChangeLabel } from "@/lib/pipeline/scorecard";
+import { IndicatorRow, IndicatorSection, InterestRatesSection, MacroStateRow, NewsContextSection, ScorecardData, ScoreDriverRow, TechnicalsRow, cotChangeLabel } from "@/lib/pipeline/scorecard";
 import { UnavailableState } from "@/components/ui/UnavailableState";
 import { HEATMAP_LABEL_CLASSES, HeatmapLabel } from "@/lib/pipeline/economic-heatmap";
 import { pairDirectionLabel } from "@/lib/pipeline/forex-scorecard";
@@ -25,18 +25,6 @@ function StatusBadge({ sentiment }: { sentiment: FactorSentiment | null }) {
     return <span className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-(--text-faint) border-(--border)">N/A</span>;
   }
   return <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${factorSentimentBadgeClasses(sentiment)}`}>{sentiment}</span>;
-}
-
-function badgeFromSurprise(row: IndicatorRow | SurpriseIndexRow): FactorSentiment | null {
-  if ("classification" in row) return row.classification;
-  // SurpriseIndexRow has no pre-computed classification (V2's surprise is a
-  // magnitude, not an asset-directional read) — badge by raw surprise sign
-  // only, purely to give the row a visual accent; the numeric columns are
-  // the actual data.
-  if (row.surprise === null) return null;
-  if (row.surprise > 0) return "Bullish";
-  if (row.surprise < 0) return "Bearish";
-  return "Neutral";
 }
 
 // Compact "N contributing factors, X live, Y delayed, Z not applicable"
@@ -99,31 +87,73 @@ function fmtNum(v: number | null, decimals = 2): string {
   return formatSigned(v, decimals);
 }
 
-function IndicatorTable({ rows }: { rows: IndicatorRow[] }) {
+// One shared row shape for the Growth/Inflation/Jobs Market/Interest Rates
+// tables, whether the underlying data is a real calendar release (Forex
+// Factory / manual admin entry / Zapier — economic_events, via IndicatorRow)
+// or the Macro State fallback (a real FRED level + period-over-period
+// change, via MacroStateRow, used only when no calendar release exists at
+// all for that category). Forecast/Surprise are simply absent (rendered
+// "—") for a macro-state row — there is no forecast concept in a raw FRED
+// series, and this never synthesizes one.
+type MacroTableRow = {
+  key: string;
+  label: string;
+  classification: FactorSentiment | null;
+  actual: number;
+  forecast: number | null;
+  previous: number | null;
+  revisedPrevious: number | null;
+  surprise: number | null;
+  date: string;
+  source: string;
+};
+
+function fromIndicatorRow(r: IndicatorRow): MacroTableRow {
+  return { key: r.indicatorKey, label: r.label, classification: r.classification, actual: r.actual, forecast: r.forecast, previous: r.previous, revisedPrevious: r.revisedPrevious, surprise: r.surprise, date: r.date, source: r.source };
+}
+
+function fromMacroStateRow(r: MacroStateRow): MacroTableRow {
+  return { key: r.label, label: r.label, classification: r.classification, actual: r.value, forecast: null, previous: r.previousValue, revisedPrevious: null, surprise: null, date: r.date, source: r.source };
+}
+
+// Indicator | Bias | Actual | Forecast | Previous | Surprise | Date — one
+// table shape for every macro section (Growth/Inflation/Jobs Market/
+// Interest Rates release rows), real calendar releases and the Macro State
+// fallback alike. Forecast/Surprise show "—", never a fabricated number,
+// when the underlying data has none.
+function IndicatorTable({ rows }: { rows: MacroTableRow[] }) {
   if (rows.length === 0) return <UnavailableState>UNAVAILABLE — no released indicators are currently stored for this category.</UnavailableState>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
           <tr className="text-(--text-faint) text-left">
-            <th className="font-medium pb-1 pr-2">Status</th>
-            <th className="font-medium pb-1 pr-2">Event</th>
+            <th className="font-medium pb-1 pr-2">Indicator</th>
+            <th className="font-medium pb-1 pr-2">Bias</th>
             <th className="font-medium pb-1 pr-2 text-right">Actual</th>
             <th className="font-medium pb-1 pr-2 text-right">Forecast</th>
+            <th className="font-medium pb-1 pr-2 text-right">Previous</th>
             <th className="font-medium pb-1 pr-2 text-right">Surprise</th>
             <th className="font-medium pb-1 text-right">Date</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.indicatorKey} className="border-t border-(--border)" title={r.source}>
-              <td className="py-1.5 pr-2">
-                <StatusBadge sentiment={badgeFromSurprise(r)} />
-              </td>
+            <tr
+              key={r.key}
+              className="border-t border-(--border)"
+              title={r.revisedPrevious !== null ? `${r.source} — revised previous: ${fmtNum(r.revisedPrevious)}` : r.source}
+            >
               <td className="py-1.5 pr-2 whitespace-nowrap">{r.label}</td>
+              <td className="py-1.5 pr-2">
+                <StatusBadge sentiment={r.classification} />
+              </td>
               <td className="py-1.5 pr-2 text-right tabular-nums font-medium">{fmtNum(r.actual)}</td>
-              <td className="py-1.5 pr-2 text-right tabular-nums text-(--text-faint)">{r.forecast === null ? "unavailable" : fmtNum(r.forecast)}</td>
-              <td className="py-1.5 pr-2 text-right tabular-nums text-(--text-faint)">{r.surprise === null ? "unavailable" : fmtNum(r.surprise)}</td>
+              <td className="py-1.5 pr-2 text-right tabular-nums text-(--text-faint)">{fmtNum(r.forecast)}</td>
+              <td className="py-1.5 pr-2 text-right tabular-nums text-(--text-faint)">{fmtNum(r.previous)}</td>
+              <td className={`py-1.5 pr-2 text-right tabular-nums font-semibold ${r.surprise === null ? "text-(--text-faint)" : r.surprise > 0 ? "text-emerald-400" : r.surprise < 0 ? "text-rose-400" : "text-(--text-dim)"}`}>
+                {fmtNum(r.surprise)}
+              </td>
               <td className="py-1.5 text-right tabular-nums text-(--text-faint) whitespace-nowrap">{r.date.slice(0, 10)}</td>
             </tr>
           ))}
@@ -135,43 +165,17 @@ function IndicatorTable({ rows }: { rows: IndicatorRow[] }) {
 
 // Renders the calendar-release table when real releases exist; otherwise
 // falls back to the Macro State view (real FRED level + period-over-period
-// trend, see lib/pipeline/scorecard.ts's resolveMacroStateRow) instead of
-// leaving the section blank; "unavailable" only when neither has any real
-// data for this country/indicator.
+// trend, see lib/pipeline/scorecard.ts's resolveMacroStateRow) in the SAME
+// table shape, with Forecast/Surprise columns reading "—" instead of a
+// fabricated comparison; "unavailable" only when neither has any real data
+// for this country/indicator.
 function IndicatorSectionView({ section }: { section: IndicatorSection }) {
-  if (section.kind === "calendar") return <IndicatorTable rows={section.rows} />;
+  if (section.kind === "calendar") return <IndicatorTable rows={section.rows.map(fromIndicatorRow)} />;
   if (section.kind === "unavailable") return <UnavailableState>UNAVAILABLE — {section.reason}</UnavailableState>;
   return (
     <div className="space-y-2">
-      <p className="text-[11px] text-(--text-faint)">No calendar release stored for this category yet — showing the underlying macro trend instead.</p>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-(--text-faint) text-left">
-              <th className="font-medium pb-1 pr-2">Status</th>
-              <th className="font-medium pb-1 pr-2">Indicator</th>
-              <th className="font-medium pb-1 pr-2 text-right">Value</th>
-              <th className="font-medium pb-1 pr-2 text-right">Change</th>
-              <th className="font-medium pb-1 pr-2">Trend</th>
-              <th className="font-medium pb-1 text-right">Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {section.rows.map((r) => (
-              <tr key={r.label} className="border-t border-(--border)" title={r.source}>
-                <td className="py-1.5 pr-2">
-                  <StatusBadge sentiment={r.classification} />
-                </td>
-                <td className="py-1.5 pr-2 whitespace-nowrap">{r.label}</td>
-                <td className="py-1.5 pr-2 text-right tabular-nums font-medium">{fmtNum(r.value)}</td>
-                <td className="py-1.5 pr-2 text-right tabular-nums text-(--text-faint)">{formatSigned(r.changeAbs, 2)}</td>
-                <td className="py-1.5 pr-2 whitespace-nowrap text-(--text-faint)">{r.trend}</td>
-                <td className="py-1.5 text-right tabular-nums text-(--text-faint) whitespace-nowrap">{r.date.slice(0, 10)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <p className="text-[11px] text-(--text-faint)">No calendar release stored for this category yet — showing the underlying macro trend instead (Forecast/Surprise not applicable).</p>
+      <IndicatorTable rows={section.rows.map(fromMacroStateRow)} />
     </div>
   );
 }
@@ -234,90 +238,64 @@ function TechnicalsRows({ rows }: { rows: TechnicalsRow[] }) {
   );
 }
 
+// A compact heading + IndicatorTable for the central-bank rate-decision
+// release(s) in scope (Fed Funds Rate/BoE/BoJ/... — see
+// scorecard.ts's resolveRateDecisionRows) — omitted entirely when none are
+// stored, never an empty table.
+function RateDecisionReleases({ releases }: { releases: IndicatorRow[] }) {
+  if (releases.length === 0) return null;
+  return (
+    <div>
+      <div className="text-[11px] text-(--text-faint) mb-1.5">Central Bank Rate Decisions</div>
+      <IndicatorTable rows={releases.map(fromIndicatorRow)} />
+    </div>
+  );
+}
+
 function InterestRatesView({ section }: { section: InterestRatesSection }) {
   if (section.kind === "gold-drivers") {
-    if (section.drivers.length === 0) return <UnavailableState>UNAVAILABLE — no gold-macro-regime series resolved.</UnavailableState>;
+    if (section.drivers.length === 0 && section.releases.length === 0) return <UnavailableState>UNAVAILABLE — no gold-macro-regime series resolved.</UnavailableState>;
     return (
-      <div className="space-y-1.5">
-        {section.drivers.map((d) => (
-          <div key={d.label} className="flex items-center justify-between gap-2 text-xs" title={d.explanation}>
-            <span>{d.label}</span>
-            <div className="flex items-center gap-2 tabular-nums">
-              <span className="text-(--text-faint)">{formatSigned(d.changeValue, 2)}</span>
-              <StatusBadge sentiment={d.contribution > 0 ? "Bullish" : d.contribution < 0 ? "Bearish" : "Neutral"} />
-            </div>
+      <div className="space-y-4">
+        {section.drivers.length > 0 && (
+          <div className="space-y-1.5">
+            {section.drivers.map((d) => (
+              <div key={d.label} className="flex items-center justify-between gap-2 text-xs" title={d.explanation}>
+                <span>{d.label}</span>
+                <div className="flex items-center gap-2 tabular-nums">
+                  <span className="text-(--text-faint)">{formatSigned(d.changeValue, 2)}</span>
+                  <StatusBadge sentiment={d.contribution > 0 ? "Bullish" : d.contribution < 0 ? "Bearish" : "Neutral"} />
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
+        <RateDecisionReleases releases={section.releases} />
       </div>
     );
   }
 
-  const { policyRate, differential, yield2y } = section;
+  const { policyRate, differential, yield2y, releases } = section;
   return (
-    <dl className="space-y-1.5 text-xs">
-      <div className="flex items-center justify-between gap-2" title={policyRate.source}>
-        <dt className="text-(--text-faint)">Current policy rate</dt>
-        <dd className="tabular-nums font-medium">{policyRate.data ? `${policyRate.data.rate.toFixed(2)}% (${policyRate.data.date})` : "unavailable"}</dd>
-      </div>
-      {differential && (
-        <div className="flex items-center justify-between gap-2" title={differential.source}>
-          <dt className="text-(--text-faint)">Rate differential</dt>
-          <dd className="tabular-nums font-medium">{differential.data ? `${differential.data.baseRate.toFixed(2)}% vs ${differential.data.quoteRate.toFixed(2)}% (${formatSigned(differential.data.diffPts, 2)}pt)` : "unavailable"}</dd>
+    <div className="space-y-4">
+      <dl className="space-y-1.5 text-xs">
+        <div className="flex items-center justify-between gap-2" title={policyRate.source}>
+          <dt className="text-(--text-faint)">Current policy rate</dt>
+          <dd className="tabular-nums font-medium">{policyRate.data ? `${policyRate.data.rate.toFixed(2)}% (${policyRate.data.date})` : "unavailable"}</dd>
         </div>
-      )}
-      <div className="flex items-center justify-between gap-2" title={yield2y.source}>
-        <dt className="text-(--text-faint)">2Y yield</dt>
-        <dd className="tabular-nums font-medium">{yield2y.data ? `${yield2y.data.rate.toFixed(2)}% (${yield2y.data.date})` : "unavailable"}</dd>
-      </div>
-    </dl>
-  );
-}
-
-function SurpriseIndexTable({ section, symbol }: { section: ScorecardData["surpriseIndex"]; symbol: string }) {
-  return (
-    <>
-      {section.limited && (
-        <p className="text-[11px] text-(--text-faint) mb-2">
-          Preview — real economic-release history for {symbol} is still accumulating. This section fills in as more releases are detected; it does not affect your V1 score above.
-        </p>
-      )}
-      {section.rows.length === 0 ? (
-        <p className="text-xs text-(--text-faint)">No release history recorded for this market yet.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-(--text-faint) text-left">
-                <th className="font-medium pb-1 pr-2">Status</th>
-                <th className="font-medium pb-1 pr-2">Country</th>
-                <th className="font-medium pb-1 pr-2">Indicator</th>
-                <th className="font-medium pb-1 pr-2 text-right">Actual</th>
-                <th className="font-medium pb-1 pr-2 text-right">Forecast</th>
-                <th className="font-medium pb-1 pr-2 text-right">Surprise Z</th>
-                <th className="font-medium pb-1 pr-2">Impact</th>
-                <th className="font-medium pb-1 text-right">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {section.rows.map((r, i) => (
-                <tr key={`${r.indicatorKey}-${r.date}-${i}`} className="border-t border-(--border)">
-                  <td className="py-1.5 pr-2">
-                    <StatusBadge sentiment={badgeFromSurprise(r)} />
-                  </td>
-                  <td className="py-1.5 pr-2 whitespace-nowrap">{r.country}</td>
-                  <td className="py-1.5 pr-2 whitespace-nowrap">{r.indicatorKey}</td>
-                  <td className="py-1.5 pr-2 text-right tabular-nums font-medium">{fmtNum(r.actual)}</td>
-                  <td className="py-1.5 pr-2 text-right tabular-nums text-(--text-faint)">{r.forecast === null ? "unavailable" : fmtNum(r.forecast)}</td>
-                  <td className="py-1.5 pr-2 text-right tabular-nums text-(--text-faint)">{r.surpriseZ === null ? "unavailable" : r.surpriseZ.toFixed(2)}</td>
-                  <td className="py-1.5 pr-2 whitespace-nowrap">{r.importanceTier}</td>
-                  <td className="py-1.5 text-right tabular-nums text-(--text-faint) whitespace-nowrap">{formatDateTime(r.date)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {differential && (
+          <div className="flex items-center justify-between gap-2" title={differential.source}>
+            <dt className="text-(--text-faint)">Rate differential</dt>
+            <dd className="tabular-nums font-medium">{differential.data ? `${differential.data.baseRate.toFixed(2)}% vs ${differential.data.quoteRate.toFixed(2)}% (${formatSigned(differential.data.diffPts, 2)}pt)` : "unavailable"}</dd>
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-2" title={yield2y.source}>
+          <dt className="text-(--text-faint)">2Y yield</dt>
+          <dd className="tabular-nums font-medium">{yield2y.data ? `${yield2y.data.rate.toFixed(2)}% (${yield2y.data.date})` : "unavailable"}</dd>
         </div>
-      )}
-    </>
+      </dl>
+      <RateDecisionReleases releases={releases} />
+    </div>
   );
 }
 
@@ -648,30 +626,21 @@ export function Scorecard({
               </SectionShell>
             )}
 
-            <SectionShell title="Economic Growth">
+            <SectionShell title="Economic Growth" badge={data.economicGrowth.kind === "macro-state" ? "Macro State" : undefined}>
               <IndicatorSectionView section={data.economicGrowth} />
             </SectionShell>
 
-            <SectionShell title="Inflation">
+            <SectionShell title="Inflation" badge={data.inflation.kind === "macro-state" ? "Macro State" : undefined}>
               <IndicatorSectionView section={data.inflation} />
             </SectionShell>
 
-            <SectionShell title="Jobs Market">
+            <SectionShell title="Jobs Market" badge={data.jobsMarket.kind === "macro-state" ? "Macro State" : undefined}>
               <IndicatorSectionView section={data.jobsMarket} />
             </SectionShell>
           </div>
 
           <SectionShell title="Interest Rates" id="sc-rates">
             <InterestRatesView section={data.interestRates} />
-          </SectionShell>
-
-          {/* Customer-facing label deliberately drops the internal "V2
-              shadow" versioning term — collapsed by default (compact) and
-              tagged "Preview" so this accumulating-data section reads as an
-              intentional early look, not an unfinished part of the V1
-              Scorecard above it. Same underlying data either way. */}
-          <SectionShell title="Economic Surprise Intelligence" badge="Preview" compact>
-            <SurpriseIndexTable section={data.surpriseIndex} symbol={instrument.symbol} />
           </SectionShell>
 
           <SectionShell title="News & Market Context" id="sc-news">

@@ -86,46 +86,64 @@ function makeQuery<T>(data: T[]): FakeQuery<T> {
   return promise;
 }
 
-import { getLatestEconomicEventByIndicator, upsertCandles, getLatestStoredCandles } from "./market-data";
+import { getLatestEconomicEventsByIndicators, upsertCandles, getLatestStoredCandles } from "./market-data";
 import { NormalizedCandle } from "@/services/types";
 
-describe("getLatestEconomicEventByIndicator", () => {
-  it("returns null when no event has been released for this country/indicatorKey (never a fabricated stub row)", async () => {
+describe("getLatestEconomicEventsByIndicators", () => {
+  it("returns an empty map when no event has been released for any requested pair (never a fabricated stub row)", async () => {
     selectResults = { economic_events: [] };
-    const result = await getLatestEconomicEventByIndicator("US", "gdp");
-    expect(result).toBeNull();
+    const result = await getLatestEconomicEventsByIndicators(["US"], ["gdp"]);
+    expect(result.size).toBe(0);
   });
 
-  it("returns the real stored row, mapped to StoredEconomicEventRow shape", async () => {
+  it("returns an empty map immediately (no query) when either input array is empty", async () => {
+    selectResults = { economic_events: [{ event: "GDP", dateTime: new Date(), country: "US", indicatorKey: "gdp", actual: 2.1, previous: 1.9, forecast: 2.0, revisedPrevious: null, importanceTier: "HIGH" }] };
+    expect((await getLatestEconomicEventsByIndicators([], ["gdp"])).size).toBe(0);
+    expect((await getLatestEconomicEventsByIndicators(["US"], [])).size).toBe(0);
+  });
+
+  it("returns the real stored row for each pair, keyed by country:indicatorKey", async () => {
     selectResults = {
       economic_events: [
-        {
-          event: "GDP Growth Rate QoQ",
-          dateTime: new Date("2027-01-30T13:30:00.000Z"),
-          actual: 2.1,
-          previous: 1.9,
-          forecast: 2.0,
-          importanceTier: "HIGH",
-        },
+        { event: "GDP Growth Rate QoQ", dateTime: new Date("2027-01-30T13:30:00.000Z"), country: "US", indicatorKey: "gdp", actual: 2.1, previous: 1.9, forecast: 2.0, revisedPrevious: null, importanceTier: "HIGH" },
+        { event: "CPI YoY", dateTime: new Date("2027-01-14T13:30:00.000Z"), country: "US", indicatorKey: "cpi", actual: 3.1, previous: 3.2, forecast: 3.0, revisedPrevious: null, importanceTier: "HIGH" },
       ],
     };
-    const result = await getLatestEconomicEventByIndicator("US", "gdp");
-    expect(result).toEqual({
-      event: "GDP Growth Rate QoQ",
-      dateTime: "2027-01-30T13:30:00.000Z",
-      actual: 2.1,
-      previous: 1.9,
-      forecast: 2.0,
-      importanceTier: "HIGH",
-    });
+    const result = await getLatestEconomicEventsByIndicators(["US"], ["gdp", "cpi"]);
+    expect(result.get("US:gdp")).toEqual({ event: "GDP Growth Rate QoQ", dateTime: "2027-01-30T13:30:00.000Z", actual: 2.1, previous: 1.9, forecast: 2.0, revisedPrevious: null, importanceTier: "HIGH" });
+    expect(result.get("US:cpi")).toEqual({ event: "CPI YoY", dateTime: "2027-01-14T13:30:00.000Z", actual: 3.1, previous: 3.2, forecast: 3.0, revisedPrevious: null, importanceTier: "HIGH" });
   });
 
-  it("returns null (never a real number) when actual is somehow null on the returned row, even though the query filters for isNotNull(actual)", async () => {
+  it("keeps only the latest release per (country, indicatorKey) pair when multiple are stored", async () => {
     selectResults = {
-      economic_events: [{ event: "CPI", dateTime: new Date("2027-01-01T00:00:00.000Z"), actual: null, previous: 3.1, forecast: 3.2, importanceTier: "HIGH" }],
+      economic_events: [
+        { event: "GDP Growth Rate QoQ (Q4)", dateTime: new Date("2027-01-30T13:30:00.000Z"), country: "US", indicatorKey: "gdp", actual: 2.1, previous: 1.9, forecast: 2.0, revisedPrevious: null, importanceTier: "HIGH" },
+        { event: "GDP Growth Rate QoQ (Q3)", dateTime: new Date("2026-10-30T13:30:00.000Z"), country: "US", indicatorKey: "gdp", actual: 1.9, previous: 1.7, forecast: 1.8, revisedPrevious: null, importanceTier: "HIGH" },
+      ],
     };
-    const result = await getLatestEconomicEventByIndicator("US", "cpi");
-    expect(result).toBeNull();
+    const result = await getLatestEconomicEventsByIndicators(["US"], ["gdp"]);
+    expect(result.size).toBe(1);
+    expect(result.get("US:gdp")?.event).toBe("GDP Growth Rate QoQ (Q4)");
+  });
+
+  it("distinguishes the same indicatorKey across different countries", async () => {
+    selectResults = {
+      economic_events: [
+        { event: "Fed Funds Rate", dateTime: new Date("2027-01-29T19:00:00.000Z"), country: "US", indicatorKey: "fedRateDecision", actual: 4.5, previous: 4.5, forecast: 4.5, revisedPrevious: null, importanceTier: "HIGH" },
+        { event: "BoE Rate Decision", dateTime: new Date("2027-01-30T12:00:00.000Z"), country: "GB", indicatorKey: "boeRateDecision", actual: 4.0, previous: 4.25, forecast: 4.0, revisedPrevious: null, importanceTier: "HIGH" },
+      ],
+    };
+    const result = await getLatestEconomicEventsByIndicators(["US", "GB"], ["fedRateDecision", "boeRateDecision"]);
+    expect(result.get("US:fedRateDecision")?.actual).toBe(4.5);
+    expect(result.get("GB:boeRateDecision")?.actual).toBe(4.0);
+  });
+
+  it("skips a row (never a real number) when actual is somehow null, even though the query filters for isNotNull(actual)", async () => {
+    selectResults = {
+      economic_events: [{ event: "CPI", dateTime: new Date("2027-01-01T00:00:00.000Z"), country: "US", indicatorKey: "cpi", actual: null, previous: 3.1, forecast: 3.2, revisedPrevious: null, importanceTier: "HIGH" }],
+    };
+    const result = await getLatestEconomicEventsByIndicators(["US"], ["cpi"]);
+    expect(result.size).toBe(0);
   });
 });
 

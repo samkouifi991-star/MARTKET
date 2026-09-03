@@ -156,11 +156,12 @@ export const economicEvents = pgTable(
   },
   (t) => [
     index("economic_events_date_time").on(t.dateTime),
-    // Backs getLatestEconomicEventByIndicator (db/queries/market-data.ts) —
-    // the market scorecard's Economic Growth/Inflation/Jobs Market rows run
-    // this on every market-detail page render (force-dynamic), so a plain
-    // date_time index alone would mean a full-table scan filtered by
-    // country+indicatorKey on every visit.
+    // Backs getLatestEconomicEventsByIndicators (db/queries/market-data.ts)
+    // — the market scorecard's Economic Growth/Inflation/Jobs Market/
+    // Interest Rates sections run this ONE batched query on every
+    // market-detail page render (force-dynamic), so a plain date_time index
+    // alone would mean a full-table scan filtered by country+indicatorKey
+    // on every visit.
     index("economic_events_country_indicator_datetime").on(t.country, t.indicatorKey, t.dateTime),
     // Backs the Admin Incoming Data page's most-recent-first listing.
     index("economic_events_received_at").on(t.receivedAt),
