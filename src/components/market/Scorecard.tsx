@@ -13,7 +13,6 @@ import { ScoreGauge } from "@/components/ui/ScoreGauge";
 import { ConfidenceBar } from "@/components/ui/ConfidenceBar";
 import { Card } from "@/components/ui/Card";
 import { DataFreshnessTag, unavailableLeadWord, DATA_FRESHNESS_LABELS } from "@/components/ui/DataFreshnessTag";
-import { ScoreHistoryChart } from "@/components/charts/ScoreHistoryChart";
 import { PriceScoreOverlayChart } from "@/components/charts/PriceScoreOverlayChart";
 import { filterToRecentWindow } from "@/lib/time";
 import { IndicatorRow, IndicatorSection, InterestRatesSection, NewsContextSection, ScorecardData, ScoreDriverRow, SurpriseIndexRow, TechnicalsRow, cotChangeLabel } from "@/lib/pipeline/scorecard";
@@ -187,29 +186,29 @@ function ScoreDriversView({ drivers }: { drivers: { positive: ScoreDriverRow[]; 
     return <UnavailableState>UNAVAILABLE — no factor is currently pushing the score in either direction.</UnavailableState>;
   }
   return (
-    <div className="grid sm:grid-cols-2 gap-3 text-xs">
-      <div className="space-y-1.5">
-        <div className="text-[10px] uppercase tracking-wide text-emerald-400/80 mb-1">Pushing bullish</div>
+    <div className="grid sm:grid-cols-2 gap-x-4 gap-y-3 text-xs">
+      <div className="space-y-1">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-400/80 mb-1">Pushing bullish</div>
         {drivers.positive.length === 0 ? (
           <p className="text-(--text-faint)">None</p>
         ) : (
           drivers.positive.map((d) => (
-            <div key={d.key} className="flex items-center justify-between gap-2" title={d.explanation}>
-              <span>{d.label}</span>
-              <span className="tabular-nums font-medium text-emerald-400">{formatSigned(d.contribution)}</span>
+            <div key={d.key} className="flex items-center justify-between gap-2 py-0.5" title={d.explanation}>
+              <span className="text-(--text-dim)">{d.label}</span>
+              <span className="tabular-nums font-bold text-sm text-emerald-400">{formatSigned(d.contribution)}</span>
             </div>
           ))
         )}
       </div>
-      <div className="space-y-1.5">
-        <div className="text-[10px] uppercase tracking-wide text-rose-400/80 mb-1">Pushing bearish</div>
+      <div className="space-y-1">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-rose-400/80 mb-1">Pushing bearish</div>
         {drivers.negative.length === 0 ? (
           <p className="text-(--text-faint)">None</p>
         ) : (
           drivers.negative.map((d) => (
-            <div key={d.key} className="flex items-center justify-between gap-2" title={d.explanation}>
-              <span>{d.label}</span>
-              <span className="tabular-nums font-medium text-rose-400">{formatSigned(d.contribution)}</span>
+            <div key={d.key} className="flex items-center justify-between gap-2 py-0.5" title={d.explanation}>
+              <span className="text-(--text-dim)">{d.label}</span>
+              <span className="tabular-nums font-bold text-sm text-rose-400">{formatSigned(d.contribution)}</span>
             </div>
           ))
         )}
@@ -534,7 +533,7 @@ export function Scorecard({
   return (
     <div className="space-y-3">
       <ScorecardSectionNav />
-      <div id="sc-overview" className="grid lg:grid-cols-3 gap-4 scroll-mt-24">
+      <div id="sc-overview" className="grid lg:grid-cols-3 gap-4 scroll-mt-24 items-start">
         {/* Left summary panel */}
         <Card className="lg:col-span-1 flex flex-col items-center">
           <div className="text-center mb-1">
@@ -569,10 +568,6 @@ export function Scorecard({
           <div className="w-full mt-1.5">
             <DataQualitySummaryLine summary={data.dataQuality} />
           </div>
-          <div className="w-full mt-3">
-            <div className="text-[10px] text-(--text-faint) uppercase tracking-wide mb-1">Score history (quick view)</div>
-            <ScoreHistoryChart history={score.history} thresholds={biasThresholds} height={100} autoWindow />
-          </div>
         </Card>
 
         {/* Right panel — "Why This Score?" leads, since the overview
@@ -584,7 +579,7 @@ export function Scorecard({
       </div>
 
       {price && (
-        <Card title="Price & Intelligence History" subtitle="Does the score move before the market does? Real, stored data only — never fabricated.">
+        <Card title="Price & Intelligence History" subtitle="See how market price and our intelligence score have evolved together.">
           <PriceScoreOverlayChart priceSeries={filterToRecentWindow(price.series)} scoreHistory={score.history} decimals={instrument.decimals} thresholds={biasThresholds} />
         </Card>
       )}
