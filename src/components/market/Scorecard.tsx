@@ -570,19 +570,24 @@ export function Scorecard({
           </div>
         </Card>
 
-        {/* Right panel — "Why This Score?" leads, since the overview
-            question ("what's the bias and why") should resolve before any
-            detail section. */}
-        <Card className="lg:col-span-2" title="Why This Score?">
-          <ScoreDriversView drivers={data.scoreDrivers} />
-        </Card>
-      </div>
+        {/* Right column — "Why This Score?" leads (the overview question
+            "what's the bias and why" should resolve before any detail
+            section), then Price & Intelligence History stacked directly
+            beneath it in the same column, filling the space next to the
+            shorter left summary card instead of running full-width below
+            both columns. */}
+        <div className="lg:col-span-2 space-y-4">
+          <Card title="Why This Score?">
+            <ScoreDriversView drivers={data.scoreDrivers} />
+          </Card>
 
-      {price && (
-        <Card title="Price & Intelligence History" subtitle="See how market price and our intelligence score have evolved together.">
-          <PriceScoreOverlayChart priceSeries={filterToRecentWindow(price.series)} scoreHistory={score.history} decimals={instrument.decimals} thresholds={biasThresholds} />
-        </Card>
-      )}
+          {price && (
+            <Card title="Price & Intelligence History" subtitle="See how market price and our intelligence score have evolved together.">
+              <PriceScoreOverlayChart priceSeries={filterToRecentWindow(price.series)} scoreHistory={score.history} decimals={instrument.decimals} thresholds={biasThresholds} />
+            </Card>
+          )}
+        </div>
+      </div>
 
       <Card>
         <div className="space-y-4">
