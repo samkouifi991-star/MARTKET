@@ -23,7 +23,9 @@ jobs:
         with:
           node-version: 20
       - name: Install Playwright (Chromium only)
-        run: npx --yes playwright@1.48.0 install --with-deps chromium
+        run: |
+          npm install playwright@1.48.0
+          npx playwright install --with-deps chromium
       - name: Screenshot the Scorecard for each FX pair
         env:
           APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
