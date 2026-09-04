@@ -18,7 +18,7 @@ import { getFredSeriesWithFallback } from "@/services/market-data/last-known-goo
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
 import { FredIndicatorKey } from "@/services/market-data/fred-series";
 import { scoreIndicator, Trend } from "@/lib/engines/macro-differential";
-import { classifyIndicatorSurprise, classifyMacroTrend, IndicatorClassification, MacroTrendKind } from "./indicator-classification";
+import { classifyIndicatorSurprise, classifyMacroTrend, classifyRateDecisionBias, IndicatorClassification, MacroTrendKind } from "./indicator-classification";
 import { computeGoldMacroRegime, GOLD_SYMBOL, GoldMacroDriver } from "./gold-macro";
 import { InstitutionalCardData, LiveMarketDetail } from "./market-detail";
 import { CardResult, worseOf } from "./types";
@@ -225,11 +225,11 @@ function lookupCalendarRow(events: Map<string, StoredEconomicEventRow>, instrume
 
 /** Release-style rows for whichever countries' central-bank rate decisions
  * are in scope for this instrument (FX: base + quote; everything else: its
- * one primary country) — same batched events map, no extra query. No Bias
- * is assigned: unlike growth/inflation/jobs, this codebase has no
- * established asset-specific transmission model for a rate-decision
- * surprise (hawkish/dovish is not simply "actual above forecast = strong"),
- * so `classification` stays null rather than a fabricated guess. */
+ * one primary country) — same batched events map, no extra query.
+ * `classification` is the deterministic hawkish/dovish display read from
+ * classifyRateDecisionBias — display-only, never fed into V1/V2 scoring
+ * (see that function's own doc for the exact rule and per-asset-class
+ * translation). */
 function resolveRateDecisionRows(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, countries: string[]): IndicatorRow[] {
   const rows: IndicatorRow[] = [];
   for (const c of countries) {
@@ -237,7 +237,7 @@ function resolveRateDecisionRows(events: Map<string, StoredEconomicEventRow>, in
     if (!decision) continue;
     const stored = events.get(`${c}:${decision.key}`);
     if (!stored) continue;
-    rows.push(toIndicatorRow(instrument, decision.label, decision.key, stored, null));
+    rows.push(toIndicatorRow(instrument, decision.label, decision.key, stored, classifyRateDecisionBias(instrument, c, stored.actual, stored.forecast)));
   }
   return rows;
 }

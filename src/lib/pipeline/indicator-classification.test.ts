@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { classifyIndicatorSurprise, classifyMacroTrend } from "./indicator-classification";
+import { classifyIndicatorSurprise, classifyMacroTrend, classifyRateDecisionBias } from "./indicator-classification";
 
 const GOLD = { symbol: "XAUUSD", name: "Gold", assetClass: "Commodities" as const, decimals: 2 };
 const SPX500 = { symbol: "SPX500", name: "S&P 500", assetClass: "Indices" as const, macroCountry: "US", decimals: 2 };
+const BTCUSD = { symbol: "BTCUSD", name: "Bitcoin", assetClass: "Crypto" as const, macroCountry: "US", decimals: 2 };
+const OIL = { symbol: "USOIL", name: "Crude Oil", assetClass: "Commodities" as const, macroCountry: "US", decimals: 2 };
 const GBPUSD = { symbol: "GBPUSD", name: "British Pound / US Dollar", assetClass: "Forex" as const, currencies: ["GBP", "USD"] as [string, string], decimals: 4 };
+const USDJPY = { symbol: "USDJPY", name: "US Dollar / Japanese Yen", assetClass: "Forex" as const, currencies: ["USD", "JPY"] as [string, string], decimals: 3 };
 
 describe("classifyIndicatorSurprise", () => {
   it("never returns a badge when forecast is null — no unavailable macro indicator is fabricated", () => {
@@ -103,5 +106,64 @@ describe("classifyMacroTrend — same polarity model, applied to a period-over-p
     expect(classifyMacroTrend(GOLD, "growth", 0)).toBe("Neutral");
     expect(classifyMacroTrend(SPX500, "jobs", 0)).toBe("Neutral");
     expect(classifyMacroTrend(GBPUSD, "inflation", 0)).toBe("Neutral");
+  });
+});
+
+describe("classifyRateDecisionBias — display-only hawkish/dovish read of a rate DECISION, never a V1/V2 score input", () => {
+  it("returns null (Unavailable) when forecast is missing — never a guessed Bias", () => {
+    expect(classifyRateDecisionBias(GBPUSD, "GB", 4.25, null)).toBeNull();
+  });
+
+  it("an exact in-line decision (actual === forecast) always reads Neutral, regardless of asset class", () => {
+    expect(classifyRateDecisionBias(GBPUSD, "GB", 4.0, 4.0)).toBe("Neutral");
+    expect(classifyRateDecisionBias(GOLD, "US", 4.5, 4.5)).toBe("Neutral");
+    expect(classifyRateDecisionBias(SPX500, "US", 4.5, 4.5)).toBe("Neutral");
+  });
+
+  it("FX: a hawkish surprise (actual > forecast) in the BASE currency reads Bullish for the pair", () => {
+    expect(classifyRateDecisionBias(GBPUSD, "GB", 4.25, 4.0)).toBe("Bullish");
+  });
+
+  it("FX: a dovish surprise (actual < forecast) in the BASE currency reads Bearish for the pair", () => {
+    expect(classifyRateDecisionBias(GBPUSD, "GB", 3.75, 4.0)).toBe("Bearish");
+  });
+
+  it("FX: a hawkish surprise in the QUOTE currency flips — reads Bearish for the pair", () => {
+    expect(classifyRateDecisionBias(GBPUSD, "US", 4.75, 4.5)).toBe("Bearish");
+  });
+
+  it("FX: a dovish surprise in the QUOTE currency flips — reads Bullish for the pair", () => {
+    expect(classifyRateDecisionBias(GBPUSD, "US", 4.25, 4.5)).toBe("Bullish");
+  });
+
+  it("FX: works symmetrically for a pair where USD is the base currency (USDJPY)", () => {
+    expect(classifyRateDecisionBias(USDJPY, "US", 4.75, 4.5)).toBe("Bullish"); // hawkish base
+    expect(classifyRateDecisionBias(USDJPY, "JP", 0.75, 0.5)).toBe("Bearish"); // hawkish quote
+  });
+
+  it("FX: a country that is neither side of the pair returns null rather than guessing", () => {
+    expect(classifyRateDecisionBias(GBPUSD, "AU", 4.6, 4.35)).toBeNull();
+  });
+
+  it("Gold: a hawkish Fed surprise reads Bearish (higher real yields, reduced safe-haven demand)", () => {
+    expect(classifyRateDecisionBias(GOLD, "US", 4.75, 4.5)).toBe("Bearish");
+  });
+
+  it("Gold: a dovish Fed surprise reads Bullish", () => {
+    expect(classifyRateDecisionBias(GOLD, "US", 4.25, 4.5)).toBe("Bullish");
+  });
+
+  it("US equity indices: a hawkish Fed surprise reads Bearish, a dovish one Bullish", () => {
+    expect(classifyRateDecisionBias(SPX500, "US", 4.75, 4.5)).toBe("Bearish");
+    expect(classifyRateDecisionBias(SPX500, "US", 4.25, 4.5)).toBe("Bullish");
+  });
+
+  it("crypto: same Fed-hawkishness read as equities", () => {
+    expect(classifyRateDecisionBias(BTCUSD, "US", 4.75, 4.5)).toBe("Bearish");
+    expect(classifyRateDecisionBias(BTCUSD, "US", 4.25, 4.5)).toBe("Bullish");
+  });
+
+  it("an asset class with no established rate-decision transmission model (generic commodities) returns null rather than a guess", () => {
+    expect(classifyRateDecisionBias(OIL, "US", 4.75, 4.5)).toBeNull();
   });
 });

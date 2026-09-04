@@ -15,7 +15,8 @@
 // computeGoldSurpriseShock: hot inflation reads bullish for gold too).
 import { Instrument } from "@/lib/types";
 import { EconomicIndicatorKey, indicatorCategory } from "@/services/economic-calendar/indicator-taxonomy";
-import { growthLaborPolarity } from "./asset-polarity";
+import { CCY_TO_COUNTRY } from "@/lib/scoring";
+import { growthLaborPolarity, macroPolarityClassFor } from "./asset-polarity";
 
 export type IndicatorClassification = "Bullish" | "Bearish" | "Neutral";
 
@@ -97,4 +98,50 @@ export function classifyMacroTrend(instrument: Instrument, kind: MacroTrendKind,
   if (assetSign > 0) return "Bullish";
   if (assetSign < 0) return "Bearish";
   return "Neutral";
+}
+
+/**
+ * Display-only hawkish/dovish read of a central-bank rate DECISION (never a
+ * V1/V2 score input — see scorecard.ts's resolveRateDecisionRows, the only
+ * caller). A rate decision has no "beat = stronger economy" reading the way
+ * a growth/inflation release does: the deterministic rule here is simply
+ * actual > forecast = hawkish, actual < forecast = dovish, actual ===
+ * forecast = Neutral, forecast missing = null (rendered "Unavailable" —
+ * never guessed). That hawkish/dovish read is then translated per asset
+ * class:
+ *  - FX: hawkish BASE currency -> pair Bullish, dovish base -> Bearish;
+ *    hawkish QUOTE currency flips (a stronger quote currency weakens the
+ *    pair) -> Bearish, dovish quote -> Bullish. `country` identifies which
+ *    side of the pair this specific release belongs to.
+ *  - Precious metals (Gold/Silver/Platinum): hawkish Fed -> Bearish (higher
+ *    real-yield expectations, reduced safe-haven demand), dovish -> Bullish.
+ *  - US equity indices / crypto: hawkish Fed -> Bearish, dovish -> Bullish
+ *    (the same direction as gold's regime read, just a softer "risk
+ *    sentiment" transmission than gold's real-yield one — still rendered
+ *    with the same three-value badge, no separate "conservative" tier).
+ *  - Anything else (e.g. generic commodities): no established model here,
+ *    so null rather than a guess.
+ */
+export function classifyRateDecisionBias(instrument: Instrument, country: string, actual: number, forecast: number | null): IndicatorClassification | null {
+  if (forecast === null) return null;
+
+  const hawkishSign = Math.sign(actual - forecast);
+  if (hawkishSign === 0) return "Neutral";
+
+  if (instrument.currencies) {
+    const baseCountry = CCY_TO_COUNTRY[instrument.currencies[0]];
+    const quoteCountry = CCY_TO_COUNTRY[instrument.currencies[1]];
+    let assetSign: number;
+    if (country === baseCountry) assetSign = hawkishSign;
+    else if (country === quoteCountry) assetSign = -hawkishSign;
+    else return null; // this release isn't for either side of the pair
+    return assetSign > 0 ? "Bullish" : "Bearish";
+  }
+
+  const polarityClass = macroPolarityClassFor(instrument);
+  if (polarityClass === "PreciousMetals" || polarityClass === "EquityIndices" || polarityClass === "Crypto") {
+    return hawkishSign > 0 ? "Bearish" : "Bullish";
+  }
+
+  return null;
 }

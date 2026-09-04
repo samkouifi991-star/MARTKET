@@ -500,7 +500,7 @@ describe("buildScorecardData — Interest Rates section", () => {
     }
   });
 
-  it("includes a Fed Funds Rate release row when one is stored for the country in scope, with no fabricated Bias", async () => {
+  it("includes a Fed Funds Rate release row when one is stored for the country in scope, with a deterministic hawkish/dovish Bias (in-line print reads Neutral)", async () => {
     vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
       eventsMap({ "US:fedRateDecision": { event: "Fed Funds Rate", dateTime: "2027-01-29T19:00:00.000Z", actual: 4.5, previous: 4.75, forecast: 4.5, importanceTier: "HIGH" } })
     );
@@ -508,7 +508,31 @@ describe("buildScorecardData — Interest Rates section", () => {
     expect(data.interestRates.kind).toBe("gold-drivers");
     if (data.interestRates.kind !== "gold-drivers") throw new Error("unreachable");
     expect(data.interestRates.releases).toHaveLength(1);
-    expect(data.interestRates.releases[0]).toMatchObject({ label: "Fed Funds Rate", actual: 4.5, previous: 4.75, forecast: 4.5, classification: null });
+    expect(data.interestRates.releases[0]).toMatchObject({ label: "Fed Funds Rate", actual: 4.5, previous: 4.75, forecast: 4.5, classification: "Neutral" });
+  });
+
+  it("gives gold a Bearish Bias on a hawkish Fed surprise (actual above forecast) and Bullish on a dovish one", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({ "US:fedRateDecision": { event: "Fed Funds Rate", dateTime: "2027-01-29T19:00:00.000Z", actual: 4.75, previous: 4.5, forecast: 4.5, importanceTier: "HIGH" } })
+    );
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    if (data.interestRates.kind !== "gold-drivers") throw new Error("unreachable");
+    expect(data.interestRates.releases[0].classification).toBe("Bearish");
+  });
+
+  it("gives an FX pair a Bullish Bias when its BASE currency surprises hawkish, and Bearish when its QUOTE currency does", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({
+        "GB:boeRateDecision": { event: "BoE Rate Decision", dateTime: "2027-01-30T12:00:00.000Z", actual: 4.25, previous: 4.0, forecast: 4.0, importanceTier: "HIGH" },
+        "US:fedRateDecision": { event: "Fed Funds Rate", dateTime: "2027-01-29T19:00:00.000Z", actual: 4.75, previous: 4.5, forecast: 4.5, importanceTier: "HIGH" },
+      })
+    );
+    const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    if (data.interestRates.kind !== "generic") throw new Error("unreachable");
+    const boe = data.interestRates.releases.find((r) => r.label === "BoE Rate Decision");
+    const fed = data.interestRates.releases.find((r) => r.label === "Fed Funds Rate");
+    expect(boe?.classification).toBe("Bullish"); // hawkish base (GBP) -> pair up
+    expect(fed?.classification).toBe("Bearish"); // hawkish quote (USD) -> pair down
   });
 
   it("includes both base and quote central-bank rate-decision releases for an FX pair", async () => {
