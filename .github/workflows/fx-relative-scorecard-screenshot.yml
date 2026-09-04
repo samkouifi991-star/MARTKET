@@ -49,12 +49,16 @@ jobs:
             const browser = await chromium.launch();
             const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
             for (const symbol of symbols) {
-              const url = `${process.env.APP_BASE_URL}/diagnostics/scorecard/${symbol}?key=${process.env.KEY}`;
+              const url = `${process.env.APP_BASE_URL}/diagnostics/scorecard/${symbol}?key=${encodeURIComponent(process.env.KEY)}`;
               console.log(`Loading ${symbol}...`);
               // "load" not "networkidle" — this page auto-refreshes on an
               // interval, so network activity never truly goes idle.
               const response = await page.goto(url, { waitUntil: "load", timeout: 90000 });
               console.log(`${symbol}: HTTP ${response.status()}`);
+              if (response.status() !== 200) {
+                console.log(await page.content());
+                throw new Error(`${symbol}: unexpected HTTP ${response.status()}`);
+              }
               const macro = page.locator("#sc-macro");
               await macro.waitFor({ state: "attached", timeout: 30000 });
               await macro.scrollIntoViewIfNeeded();
