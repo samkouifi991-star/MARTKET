@@ -49,11 +49,12 @@ const COVERAGE_INDICATORS: CoverageDef[] = [
   { label: "PPI", calendarKeys: ["ppi"], fredKey: "ppi" },
   { label: "PCE", calendarKeys: ["pce"], fredKey: "pce" },
   { label: "Non-Farm Payrolls", calendarKeys: ["nfp"] },
+  { label: "Employment Change", calendarKeys: ["employmentChange"] },
   { label: "Unemployment Rate", calendarKeys: ["unemploymentRate"], fredKey: "unemploymentRate" },
   { label: "Jobless Claims", calendarKeys: ["joblessClaims"], fredKey: "initialClaims" },
   { label: "ADP Employment", calendarKeys: ["adpEmployment"] },
   { label: "JOLTS", calendarKeys: ["jolts"] },
-  { label: "Wage Growth", calendarKeys: ["avgHourlyEarnings"] },
+  { label: "Wage Growth", calendarKeys: ["avgHourlyEarnings", "wageGrowth"] },
   { label: "Policy Rate", calendarKeysByCountry: (country) => (RATE_DECISION_BY_COUNTRY[country] ? [RATE_DECISION_BY_COUNTRY[country]!.key] : []), fredKey: "policyRate" },
   { label: "2Y Yield", fredKey: "yield2y" },
 ];

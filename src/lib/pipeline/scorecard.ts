@@ -165,11 +165,19 @@ const INFLATION_INDICATORS: IndicatorRowDef[] = [
 
 const JOBS_INDICATORS: IndicatorRowDef[] = [
   { label: "Non-Farm Payrolls", keys: ["nfp"] },
+  // Distinct row/key from Non-Farm Payrolls — "Employment Change"/"Net
+  // Change in Employment" is the real headline jobs-count figure for
+  // Australia/Canada/New Zealand's own labour-force surveys, not a
+  // US-branded NFP under another name.
+  { label: "Employment Change", keys: ["employmentChange"] },
   { label: "Unemployment Rate", keys: ["unemploymentRate"], fredFallback: { key: "unemploymentRate", trendKind: "jobs" } },
   { label: "Weekly Jobless Claims", keys: ["joblessClaims"], fredFallback: { key: "initialClaims", trendKind: "jobs" } },
   { label: "ADP Employment", keys: ["adpEmployment"] },
   { label: "JOLTS Job Openings", keys: ["jolts"] },
   { label: "Average Hourly Earnings", keys: ["avgHourlyEarnings"] },
+  // Distinct row/key from Average Hourly Earnings — "Wage Price Index"
+  // (Australia) / "Average Weekly Earnings" (UK) under their own real name.
+  { label: "Wage Growth", keys: ["wageGrowth"] },
   // trendKind "growth" (not "jobs") is deliberate: participation rising is
   // conventionally a stronger-economy signal (more people working/looking
   // for work), the same non-inverted polarity as a growth beat — "jobs"

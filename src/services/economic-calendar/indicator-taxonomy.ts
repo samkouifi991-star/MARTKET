@@ -23,6 +23,18 @@ export type EconomicIndicatorKey =
   | "continuingClaims"
   | "jolts"
   | "adpEmployment"
+  // "Employment Change"/"Net Change in Employment" — the headline net-jobs
+  // figure non-US labour-force surveys (Australia, Canada, New Zealand)
+  // publish under their own name. Deliberately distinct from `nfp`: NFP is
+  // U.S.-specific branding, and reusing that key for e.g. Australia would
+  // mislabel its Scorecard row "Non-Farm Payrolls" for an economy that has
+  // no such release.
+  | "employmentChange"
+  // "Wage Price Index" (Australia) / "Average (Weekly) Earnings" (UK) — the
+  // headline wage-growth figure for economies whose survey isn't literally
+  // "average HOURLY earnings" (avgHourlyEarnings stays U.S.-specific
+  // terminology/pattern).
+  | "wageGrowth"
   // Growth
   | "gdp"
   | "gdpRevision"
@@ -70,10 +82,14 @@ export const IMPORTANCE_TIER: Record<EconomicIndicatorKey, ImportanceTier> = {
   corePce: "HIGH",
   inflationExpectations: "MEDIUM",
   nfp: "HIGH",
+  // Same tier as NFP — this IS that country's headline jobs-change figure,
+  // just under its own real name (see the type's own doc comment).
+  employmentChange: "HIGH",
   unemploymentRate: "HIGH",
   // "wages" is explicitly Tier 1 alongside NFP/unemployment in the labor
   // report composite (requirement #11) — bumped from MEDIUM.
   avgHourlyEarnings: "HIGH",
+  wageGrowth: "HIGH",
   // Tier 2 per requirement #11's explicit list — bumped from LOW.
   joblessClaims: "MEDIUM",
   continuingClaims: "MEDIUM",
@@ -127,8 +143,14 @@ const PATTERNS: { key: EconomicIndicatorKey; patterns: string[] }[] = [
   { key: "inflationExpectations", patterns: ["inflation expectations"] },
 
   { key: "nfp", patterns: ["non-farm payrolls", "nonfarm payrolls", "nfp"] },
+  // adpEmployment must be checked before the generic employmentChange
+  // pattern below — "ADP Nonfarm Employment Change" contains "employment
+  // change" as a substring and would otherwise misclassify as the generic
+  // AU/CA/NZ indicator instead of ADP's own distinct one.
   { key: "adpEmployment", patterns: ["adp"] },
+  { key: "employmentChange", patterns: ["employment change", "net change in employment"] },
   { key: "avgHourlyEarnings", patterns: ["average hourly earnings"] },
+  { key: "wageGrowth", patterns: ["wage price index", "average weekly earnings"] },
   { key: "continuingClaims", patterns: ["continuing jobless claims", "continuing claims"] },
   { key: "joblessClaims", patterns: ["initial jobless claims", "jobless claims"] },
   { key: "jolts", patterns: ["jolts"] },
@@ -142,11 +164,12 @@ const PATTERNS: { key: EconomicIndicatorKey; patterns: string[] }[] = [
   { key: "ismManufacturing", patterns: ["ism manufacturing"] },
   { key: "ismServices", patterns: ["ism services", "ism non-manufacturing"] },
   // "markit" was S&P Global's PMI brand before the 2024 HCOB (eurozone) /
-  // au Jibun Bank (Japan) rebrand of the underlying same survey — both
-  // names must resolve to the same indicator so a real HCOB/Jibun Bank
-  // release classifies instead of silently going unclassified.
-  { key: "spGlobalManufacturingPmi", patterns: ["s&p global manufacturing pmi", "markit manufacturing pmi", "hcob manufacturing pmi", "jibun bank manufacturing pmi"] },
-  { key: "spGlobalServicesPmi", patterns: ["s&p global services pmi", "markit services pmi", "hcob services pmi", "jibun bank services pmi"] },
+  // au Jibun Bank (Japan) / Judo Bank (Australia) rebrand of the underlying
+  // same survey — all names must resolve to the same indicator so a real
+  // HCOB/Jibun Bank/Judo Bank release classifies instead of silently going
+  // unclassified.
+  { key: "spGlobalManufacturingPmi", patterns: ["s&p global manufacturing pmi", "markit manufacturing pmi", "hcob manufacturing pmi", "jibun bank manufacturing pmi", "judo bank manufacturing pmi"] },
+  { key: "spGlobalServicesPmi", patterns: ["s&p global services pmi", "markit services pmi", "hcob services pmi", "jibun bank services pmi", "judo bank services pmi"] },
 
   { key: "dotPlot", patterns: ["dot plot", "economic projections", "sep "] },
   { key: "powellPressConference", patterns: ["powell", "press conference"] },
@@ -162,7 +185,10 @@ const PATTERNS: { key: EconomicIndicatorKey; patterns: string[] }[] = [
   { key: "rbnzRateDecision", patterns: ["rbnz interest rate", "rbnz rate decision"] },
 
   { key: "michiganSentiment", patterns: ["michigan consumer sentiment", "uom consumer sentiment"] },
-  { key: "consumerConfidence", patterns: ["consumer confidence"] },
+  // "Westpac Consumer Sentiment" (Australia) is the same growth-sentiment
+  // concept as "Consumer Confidence" under a different local survey name —
+  // resolves to the same key rather than going unclassified.
+  { key: "consumerConfidence", patterns: ["consumer confidence", "westpac consumer sentiment"] },
   { key: "housingData", patterns: ["housing starts", "building permits", "existing home sales", "new home sales", "pending home sales"] },
   { key: "tradeBalance", patterns: ["trade balance"] },
   { key: "productivity", patterns: ["nonfarm productivity", "productivity"] },
@@ -198,8 +224,10 @@ const CATEGORY: Record<EconomicIndicatorKey, IndicatorCategory> = {
   inflationExpectations: "inflation",
   michiganInflationExpectations: "inflation",
   nfp: "growthLabor",
+  employmentChange: "growthLabor",
   unemploymentRate: "growthLabor",
   avgHourlyEarnings: "growthLabor",
+  wageGrowth: "growthLabor",
   joblessClaims: "growthLabor",
   continuingClaims: "growthLabor",
   jolts: "growthLabor",

@@ -28,6 +28,18 @@ describe("matchIndicator", () => {
     expect(matchIndicator("ADP Nonfarm Employment Change")).toBe("adpEmployment");
   });
 
+  it("matches non-US headline jobs/wage releases under their own real names, distinct from NFP/avgHourlyEarnings", () => {
+    expect(matchIndicator("Employment Change")).toBe("employmentChange");
+    expect(matchIndicator("Net Change in Employment")).toBe("employmentChange");
+    expect(matchIndicator("Wage Price Index")).toBe("wageGrowth");
+    expect(matchIndicator("Average Weekly Earnings")).toBe("wageGrowth");
+  });
+
+  it("still classifies ADP's own release as adpEmployment even though its name contains the substring 'employment change'", () => {
+    expect(matchIndicator("ADP Nonfarm Employment Change")).toBe("adpEmployment");
+    expect(matchIndicator("ADP Employment Change")).toBe("adpEmployment");
+  });
+
   it("matches the major growth releases", () => {
     expect(matchIndicator("GDP q/q")).toBe("gdp");
     expect(matchIndicator("Retail Sales m/m")).toBe("retailSales");
@@ -62,6 +74,7 @@ describe("matchIndicator", () => {
 
   it("matches the remaining high-impact releases", () => {
     expect(matchIndicator("CB Consumer Confidence")).toBe("consumerConfidence");
+    expect(matchIndicator("Westpac Consumer Sentiment")).toBe("consumerConfidence");
     expect(matchIndicator("Michigan Consumer Sentiment")).toBe("michiganSentiment");
     expect(matchIndicator("Michigan Inflation Expectations")).toBe("michiganInflationExpectations");
     expect(matchIndicator("Building Permits")).toBe("housingData");
