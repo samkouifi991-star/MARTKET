@@ -14,6 +14,7 @@ import {
   getLatestStoredPositioning,
   getLatestStoredRetailSentiment,
   getLatestStoredEconomicSeries,
+  getLatestStoredEconomicSeriesForCountries,
 } from "@/db/queries/market-data";
 import {
   getQuoteWithFallback,
@@ -229,32 +230,55 @@ describe("getFredSeriesWithFallback", () => {
 // (economic_indicators reads at 567,068 calls in ~46h) — this is the
 // Scorecard/Economic-Strength/Heatmap display path, never the live-first
 // V1/V2 scoring branch above (which is untouched by the cache and still
-// exercised by the tests above). Unlike unstable_cache (tried first, but
-// found non-functional for this call path — see last-known-good.ts's own
-// comment on why), the in-process Map cache actually runs its real
-// hit/miss/TTL logic under vitest, so these tests exercise the genuine
-// cache behavior, not a fallback path.
-describe("getFredSeriesWithFallback — storageOnly=true (the cached Macro State display path)", () => {
+// exercised by the tests above). It's backed by getLatestStoredEconomicSeriesForCountries
+// (a BATCHED read across every tracked currency's country for one
+// indicator+limit, not getLatestStoredEconomicSeries per country) plus an
+// in-process TTL layer on top — both unstable_cache and a per-country
+// (non-batched) in-process cache were tried and found not to reliably
+// reduce production DB traffic; see last-known-good.ts's own comment for
+// why. These tests exercise the real batching/hit/miss/TTL logic under
+// vitest, not a degraded fallback path.
+function batchMap(entries: Record<string, { value: number; date?: string }>): Map<string, { points: { date: string; value: number }[]; fetchedAt: Date }> {
+  const map = new Map();
+  for (const [country, { value, date }] of Object.entries(entries)) {
+    map.set(country, { points: [{ date: date ?? "2026-08-01", value }], fetchedAt: hoursAgo(1) });
+  }
+  return map;
+}
+
+// Like batchMap, but each country carries a full ascending (oldest-first)
+// points series — needed to exercise the cachedLimit slicing logic, which
+// only makes sense against more than one stored point.
+function batchMapSeries(entries: Record<string, number[]>): Map<string, { points: { date: string; value: number }[]; fetchedAt: Date }> {
+  const map = new Map();
+  for (const [country, values] of Object.entries(entries)) {
+    const points = values.map((value, i) => ({ date: `2026-01-${String(i + 1).padStart(2, "0")}`, value }));
+    map.set(country, { points, fetchedAt: hoursAgo(1) });
+  }
+  return map;
+}
+
+describe("getFredSeriesWithFallback — storageOnly=true (the cached, batched Macro State display path)", () => {
   afterEach(() => vi.useRealTimers());
 
   it("never calls the live FRED API — storage-only means storage-only", async () => {
-    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue({ points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) });
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValue(batchMap({ US: { value: 3.2 } }));
     vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 20, cadence: "monthly" });
 
     await getFredSeriesWithFallback("US", "cpi", 24, true);
 
     expect(fred.getSeries).not.toHaveBeenCalled();
-    expect(getLatestStoredEconomicSeries).toHaveBeenCalledWith("US", "cpi", 24);
+    expect(getLatestStoredEconomicSeriesForCountries).toHaveBeenCalledWith(expect.arrayContaining(["US"]), "cpi", 24);
   });
 
   it("first request reads the DB; a second request for the same key is a cache hit — no second DB call", async () => {
-    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue({ points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) });
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValue(batchMap({ US: { value: 3.2 } }));
     vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
 
     const first = await getFredSeriesWithFallback("US", "cpi", 24, true);
     const second = await getFredSeriesWithFallback("US", "cpi", 24, true);
 
-    expect(getLatestStoredEconomicSeries).toHaveBeenCalledTimes(1);
+    expect(getLatestStoredEconomicSeriesForCountries).toHaveBeenCalledTimes(1);
     expect(first.value?.[0].value).toBe(3.2);
     expect(second.value?.[0].value).toBe(3.2);
   });
@@ -263,43 +287,43 @@ describe("getFredSeriesWithFallback — storageOnly=true (the cached Macro State
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
     vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
-    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValueOnce({ points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) });
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValueOnce(batchMap({ US: { value: 3.2 } }));
 
     const first = await getFredSeriesWithFallback("US", "cpi", 24, true);
     expect(first.value?.[0].value).toBe(3.2);
 
     // Still within the 30-minute TTL — cache hit, no second call.
     vi.setSystemTime(new Date("2026-08-01T00:20:00.000Z"));
-    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValueOnce({ points: [{ date: "2026-08-01", value: 9.9 }], fetchedAt: hoursAgo(1) });
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValueOnce(batchMap({ US: { value: 9.9 } }));
     const stillCached = await getFredSeriesWithFallback("US", "cpi", 24, true);
     expect(stillCached.value?.[0].value).toBe(3.2);
-    expect(getLatestStoredEconomicSeries).toHaveBeenCalledTimes(1);
+    expect(getLatestStoredEconomicSeriesForCountries).toHaveBeenCalledTimes(1);
 
     // Past the 30-minute TTL — revalidates from the DB.
     vi.setSystemTime(new Date("2026-08-01T00:31:00.000Z"));
     const revalidated = await getFredSeriesWithFallback("US", "cpi", 24, true);
     expect(revalidated.value?.[0].value).toBe(9.9);
-    expect(getLatestStoredEconomicSeries).toHaveBeenCalledTimes(2);
+    expect(getLatestStoredEconomicSeriesForCountries).toHaveBeenCalledTimes(2);
   });
 
   it("does not cache a rejected read — the very next call retries the DB instead of replaying the failure", async () => {
-    vi.mocked(getLatestStoredEconomicSeries).mockRejectedValueOnce(new Error("connection terminated"));
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockRejectedValueOnce(new Error("connection terminated"));
     await expect(getFredSeriesWithFallback("US", "cpi", 24, true)).rejects.toThrow("connection terminated");
 
-    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValueOnce({ points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) });
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValueOnce(batchMap({ US: { value: 3.2 } }));
     vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
     const result = await getFredSeriesWithFallback("US", "cpi", 24, true);
 
     expect(result.value?.[0].value).toBe(3.2);
-    expect(getLatestStoredEconomicSeries).toHaveBeenCalledTimes(2);
+    expect(getLatestStoredEconomicSeriesForCountries).toHaveBeenCalledTimes(2);
   });
 
   it("keeps different indicators for the same economy independent — no cross-contamination between series", async () => {
     vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
-    vi.mocked(getLatestStoredEconomicSeries).mockImplementation(async (country, indicator) => {
-      if (country === "US" && indicator === "cpi") return { points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) };
-      if (country === "US" && indicator === "unemploymentRate") return { points: [{ date: "2026-08-01", value: 4.1 }], fetchedAt: hoursAgo(1) };
-      throw new Error(`unexpected lookup ${country}/${indicator}`);
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockImplementation(async (_countries, indicator) => {
+      if (indicator === "cpi") return batchMap({ US: { value: 3.2 } });
+      if (indicator === "unemploymentRate") return batchMap({ US: { value: 4.1 } });
+      throw new Error(`unexpected indicator ${indicator}`);
     });
 
     const cpi = await getFredSeriesWithFallback("US", "cpi", 24, true);
@@ -309,38 +333,52 @@ describe("getFredSeriesWithFallback — storageOnly=true (the cached Macro State
     expect(unemployment.value?.[0].value).toBe(4.1);
   });
 
-  it("keeps different economies for the same indicator independent — GBP CPI can never come back as USD CPI (batched FX base+quote correctness)", async () => {
+  it("batches concurrent requests for different economies of the same indicator into ONE query — GBP CPI can never come back as USD CPI (dual-economy FX correctness)", async () => {
     vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
-    vi.mocked(getLatestStoredEconomicSeries).mockImplementation(async (country, indicator) => {
-      if (country === "GB" && indicator === "cpi") return { points: [{ date: "2026-08-01", value: 2.9 }], fetchedAt: hoursAgo(1) };
-      if (country === "JP" && indicator === "cpi") return { points: [{ date: "2026-08-01", value: 1.8 }], fetchedAt: hoursAgo(1) };
-      throw new Error(`unexpected lookup ${country}/${indicator}`);
-    });
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValue(batchMap({ GB: { value: 2.9 }, JP: { value: 1.8 } }));
 
-    // Simulates a GBPJPY dual-economy Scorecard render resolving both sides.
+    // Simulates a GBPJPY dual-economy Scorecard render resolving both sides
+    // concurrently — this is exactly the shape that used to cost 2+
+    // separate queries and now costs exactly 1.
     const [gbp, jpy] = await Promise.all([getFredSeriesWithFallback("GB", "cpi", 24, true), getFredSeriesWithFallback("JP", "cpi", 24, true)]);
 
     expect(gbp.value?.[0].value).toBe(2.9);
     expect(jpy.value?.[0].value).toBe(1.8);
+    expect(getLatestStoredEconomicSeriesForCountries).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps different limits (24 vs 6, i.e. Macro State rows vs. policy-rate/yield reads) independent", async () => {
+  it("serves a smaller-limit request (e.g. policyRate's 6) from an already-cached larger slice (e.g. Macro State's 24) without a second query", async () => {
     vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 5, cadence: "monthly" });
-    vi.mocked(getLatestStoredEconomicSeries).mockImplementation(async (country, indicator, limit) => {
-      if (limit === 24) return { points: [{ date: "2026-08-01", value: 100 }], fetchedAt: hoursAgo(1) };
-      if (limit === 6) return { points: [{ date: "2026-08-01", value: 200 }], fetchedAt: hoursAgo(1) };
-      throw new Error(`unexpected limit ${limit}`);
-    });
+    const twentyFourPoints = Array.from({ length: 24 }, (_, i) => i + 1); // 1..24, ascending
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValueOnce(batchMapSeries({ US: twentyFourPoints }));
 
     const macroState = await getFredSeriesWithFallback("US", "policyRate", 24, true);
     const policyPoint = await getFredSeriesWithFallback("US", "policyRate", 6, true);
 
-    expect(macroState.value?.[0].value).toBe(100);
-    expect(policyPoint.value?.[0].value).toBe(200);
+    expect(macroState.value?.map((p) => p.value)).toEqual(twentyFourPoints);
+    // The tail 6 of the same cached series — not a fresh, independently-mocked value.
+    expect(policyPoint.value?.map((p) => p.value)).toEqual([19, 20, 21, 22, 23, 24]);
+    expect(getLatestStoredEconomicSeriesForCountries).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a request for MORE history than is cached as a miss and re-batches at the larger limit", async () => {
+    vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 5, cadence: "monthly" });
+    const sixPoints = [1, 2, 3, 4, 5, 6];
+    const twentyFourPoints = Array.from({ length: 24 }, (_, i) => i + 1);
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValueOnce(batchMapSeries({ US: sixPoints }));
+
+    const policyPoint = await getFredSeriesWithFallback("US", "policyRate", 6, true);
+    expect(policyPoint.value?.map((p) => p.value)).toEqual(sixPoints);
+
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValueOnce(batchMapSeries({ US: twentyFourPoints }));
+    const macroState = await getFredSeriesWithFallback("US", "policyRate", 24, true);
+
+    expect(macroState.value?.map((p) => p.value)).toEqual(twentyFourPoints);
+    expect(getLatestStoredEconomicSeriesForCountries).toHaveBeenCalledTimes(2);
   });
 
   it("stays honest on a DB failure — never fabricates a macro value", async () => {
-    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue(null);
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockResolvedValue(new Map());
 
     const result = await getFredSeriesWithFallback("US", "cpi", 24, true);
 
@@ -349,7 +387,7 @@ describe("getFredSeriesWithFallback — storageOnly=true (the cached Macro State
   });
 
   it("stays honest when the storage read itself throws", async () => {
-    vi.mocked(getLatestStoredEconomicSeries).mockRejectedValue(new Error("connection terminated"));
+    vi.mocked(getLatestStoredEconomicSeriesForCountries).mockRejectedValue(new Error("connection terminated"));
 
     await expect(getFredSeriesWithFallback("US", "cpi", 24, true)).rejects.toThrow("connection terminated");
   });

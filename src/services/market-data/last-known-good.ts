@@ -49,6 +49,7 @@ import { CftcPositioningResult, isCftcReportWithinFreshnessLimit } from "./cftc"
 import { classifyFredFreshness } from "./fred";
 import { FredIndicatorKey } from "./fred-series";
 import { NormalizedRetailSentiment, classifyRetailSentimentFreshness } from "./retail-sentiment";
+import { CCY_TO_COUNTRY } from "@/lib/scoring";
 import {
   getLatestStoredPrice,
   getLatestStoredDailyCandles,
@@ -56,6 +57,7 @@ import {
   getLatestStoredPositioning,
   getLatestStoredRetailSentiment,
   getLatestStoredEconomicSeries,
+  getLatestStoredEconomicSeriesForCountries,
   StoredEconomicSeries,
   StoredPrice,
   StoredDailyCandles,
@@ -237,70 +239,110 @@ const FRED_SOURCE = "FRED (Federal Reserve Economic Data)";
 // Cross-request cache for the FRED "Macro State" fallback storage read
 // (economic_indicators) — added after production observation showed this
 // exact query shape at 567,068 calls in ~46h, dwarfing every other query
-// bucket combined. Deliberately narrow: this only wraps
-// getLatestStoredEconomicSeries, the STORAGE read behind the `storageOnly`
-// branch below — every real economic calendar release (economic_events,
-// live/manual/Zapier) is untouched, and the LIVE fred.getSeries() branch a
-// few lines down (used by V1/V2 scoring's live-first resolution) is also
-// untouched, so this can never make a newly entered release, nor a live
-// scoring read, sit behind a stale cache. 30 minutes is far shorter than
-// FRED's own fastest update cadence (daily) — this only reduces redundant
-// re-reads of data that hasn't actually changed, never returns data older
-// than what a live-first caller would already treat as merely "delayed".
+// bucket combined. Deliberately narrow: this only wraps the STORAGE read
+// behind the `storageOnly` branch below — every real economic calendar
+// release (economic_events, live/manual/Zapier) is untouched, and the LIVE
+// fred.getSeries() branch a few lines down (used by V1/V2 scoring's
+// live-first resolution) is also untouched, so this can never make a newly
+// entered release, nor a live scoring read, sit behind a stale cache.
 //
-// unstable_cache (the pattern market-detail.ts's cachedSeasonalityCandles/
-// cachedPositioning already use) was tried here first, but proved
-// non-functional for this call path: Next.js 16's own implementation
-// (node_modules/next/dist/server/web/spec-extension/unstable-cache.js)
-// unconditionally SKIPS the cache READ — while still performing a wasted
-// write — whenever the calling route segment sets `workStore.fetchCache
-// === "force-no-store"`, which is exactly what `export const dynamic =
-// "force-dynamic"` implies (see caching-without-cache-components.md). Both
-// the diagnostics verification route AND the real production
-// /markets/[symbol] page set `dynamic = "force-dynamic"` (required so
-// AutoRefresh always sees current data), so unstable_cache's Data Cache
-// never actually served a hit here. Confirmed in production: two
-// back-to-back requests for the identical symbol each produced a full,
-// undiminished set of fresh economic_indicators reads. (This same
-// constraint likely affects the pre-existing cachedPositioning/
-// cachedSeasonalityCandles caches too, since Market Detail is also
-// force-dynamic — a separate, pre-existing question outside this fix's
-// narrow scope, flagged here rather than silently worked around elsewhere.)
+// Two things were tried and rejected before this design, both confirmed
+// against real production traffic (not just reasoned about):
 //
-// Given that, this uses a plain in-process Map with a manually tracked
-// TTL instead — no external service, no schema change, and (per Vercel's
-// serverless model) a real cross-request cache for the lifetime of a warm
-// function instance, which is exactly the traffic pattern (repeated
-// AutoRefresh polls hitting the same warm instance) this fix targets. The
-// cache stores the in-flight Promise (not just the resolved value) so
-// concurrent requests for the same key share one read, matching
-// scorecard.ts's own FredReadCache convention; a rejected promise is
-// evicted immediately rather than cached, so a DB failure is retried on
-// the very next call instead of being "remembered" as a failure for the
-// full TTL.
+// 1. unstable_cache (the pattern market-detail.ts's cachedSeasonalityCandles/
+//    cachedPositioning already use) is a no-op here: Next.js 16's own
+//    implementation (node_modules/next/dist/server/web/spec-extension/
+//    unstable-cache.js) unconditionally SKIPS the cache READ whenever the
+//    calling route sets `workStore.fetchCache === "force-no-store"`, which
+//    is exactly what `export const dynamic = "force-dynamic"` implies (see
+//    caching-without-cache-components.md) — and both the diagnostics
+//    verification route and the real production /markets/[symbol] page set
+//    that (required for AutoRefresh). Confirmed: two back-to-back requests
+//    for the identical symbol each produced a full, undiminished set of
+//    fresh reads.
+// 2. A plain per-key in-process Map (no batching) reduced calls only
+//    inconsistently: Vercel does not guarantee that separate HTTP requests,
+//    even seconds apart from the same client, land on the same warm
+//    function instance, so a per-request cache miss still issued one query
+//    PER IN-RENDER (country, indicator) COMBINATION. A controlled 20-request
+//    burst against 4 FX pairs (which together touch multiple economies, and
+//    each also pulls Economic Strength data for all 8 tracked currencies)
+//    showed no measurable improvement over the pre-fix baseline.
+//
+// The fix that actually moves the needle is reducing how many queries a
+// single cold cache miss costs, not just how often misses happen: this
+// batches a miss for ANY (country, indicator, limit) into ONE query
+// covering every tracked currency's country for that indicator (mirroring
+// getLatestEconomicEventsByIndicators' batching of economic_events), then
+// serves every other tracked country's entry for that indicator from the
+// same query. Economic Strength/Heatmap computing all 8 currencies'
+// indicators — previously 8 separate queries — now costs exactly one, even
+// on a cold instance with nothing yet cached. The in-process TTL layer
+// on top (30 minutes, far shorter than FRED's own fastest update cadence)
+// still helps whenever an instance does stay warm across requests, but the
+// batching is what guarantees a real reduction regardless of instance
+// reuse. A request for MORE history than is currently cached for that
+// (country, indicator) pair (e.g. a 24-point Macro State read is cached,
+// then a 60-point regime read for the same indicator arrives) is treated
+// as a miss and re-batched at the larger limit, since a smaller cached
+// slice can't safely be padded — but every requested limit still costs at
+// most one batched query, never one query per country.
 const FRED_MACRO_STATE_CACHE_TTL_MS = 30 * 60 * 1000;
 
-type FredCacheEntry = { promise: Promise<StoredEconomicSeries | null>; expiresAt: number };
-const fredMacroStateCache = new Map<string, FredCacheEntry>();
+// The exact 8 currencies' countries this pipeline tracks FRED data for
+// (CCY_TO_COUNTRY's own key set) — batching is scoped to these, matching
+// every real caller (macro.ts, economic-strength.ts, economic-heatmap.ts,
+// scorecard.ts) which only ever derives a country from one of these 8
+// currencies. A country outside this set (should never happen in practice)
+// simply won't appear in the batch result, which resolveMacroStateRow's
+// existing "no stored series" honest-unavailable handling already covers.
+const FRED_TRACKED_COUNTRIES = Array.from(new Set(Object.values(CCY_TO_COUNTRY)));
+
+type FredCountryCacheEntry = { value: StoredEconomicSeries | null; cachedLimit: number; expiresAt: number };
+const fredCountryCache = new Map<string, FredCountryCacheEntry>();
+const fredPendingBatches = new Map<string, Promise<Map<string, StoredEconomicSeries>>>();
 
 /** Test-only: clears the module-scoped FRED cache so one test's mocked
  * storage response can't leak into another's via a shared cache key. Never
  * called from production code — the whole point of this cache is that it
  * persists for the life of the (warm) process. */
 export function __resetFredMacroStateCacheForTests(): void {
-  fredMacroStateCache.clear();
+  fredCountryCache.clear();
+  fredPendingBatches.clear();
 }
 
-function getCachedStoredEconomicSeries(country: string, indicator: FredIndicatorKey, limit: number): Promise<StoredEconomicSeries | null> {
-  const key = `${country}:${indicator}:${limit}`;
+async function getCachedStoredEconomicSeries(country: string, indicator: FredIndicatorKey, limit: number): Promise<StoredEconomicSeries | null> {
   const now = Date.now();
-  const cached = fredMacroStateCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
+  const countryKey = `${country}:${indicator}`;
+  const cached = fredCountryCache.get(countryKey);
+  if (cached && cached.expiresAt > now && cached.cachedLimit >= limit) {
+    return cached.value ? { points: cached.value.points.slice(-limit), fetchedAt: cached.value.fetchedAt } : null;
+  }
 
-  const promise = getLatestStoredEconomicSeries(country, indicator, limit);
-  fredMacroStateCache.set(key, { promise, expiresAt: now + FRED_MACRO_STATE_CACHE_TTL_MS });
-  promise.catch(() => fredMacroStateCache.delete(key));
-  return promise;
+  // Concurrent requests for the same (indicator, limit) across DIFFERENT
+  // countries — e.g. Economic Strength's Promise.all over all 8 currencies
+  // — share one in-flight batched query instead of each starting their own.
+  const batchKey = `${indicator}:${limit}`;
+  let batch = fredPendingBatches.get(batchKey);
+  if (!batch) {
+    batch = getLatestStoredEconomicSeriesForCountries(FRED_TRACKED_COUNTRIES, indicator, limit);
+    fredPendingBatches.set(batchKey, batch);
+    batch
+      .then((byCountry) => {
+        const expiresAt = Date.now() + FRED_MACRO_STATE_CACHE_TTL_MS;
+        for (const c of FRED_TRACKED_COUNTRIES) {
+          fredCountryCache.set(`${c}:${indicator}`, { value: byCountry.get(c) ?? null, cachedLimit: limit, expiresAt });
+        }
+      })
+      .catch(() => {
+        // A failed batch caches nothing — the next call retries the DB
+        // instead of "remembering" a failure for the full TTL.
+      })
+      .finally(() => fredPendingBatches.delete(batchKey));
+  }
+
+  const byCountry = await batch;
+  return byCountry.get(country) ?? null;
 }
 
 export async function getFredSeriesWithFallback(country: string, indicator: FredIndicatorKey, limit = 24, storageOnly = false): Promise<Provenance<FredSeriesPoint[]>> {

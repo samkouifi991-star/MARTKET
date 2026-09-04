@@ -665,6 +665,46 @@ export async function getLatestStoredEconomicSeries(country: string, indicator: 
   return { points, fetchedAt };
 }
 
+/** Same shape as getLatestStoredEconomicSeries, batched across every
+ * requested country for ONE indicator in a single query — the storage-side
+ * counterpart to getLatestEconomicEventsByIndicators' batching of
+ * economic_events above, applied to economic_indicators (FRED). Used by
+ * last-known-good.ts's cross-request FRED cache so that e.g. computing
+ * Economic Strength for all 8 tracked currencies (which each need the same
+ * indicator) issues one query instead of eight. A single indicator's
+ * history across 8 countries is small (real FRED observations only), so an
+ * unfiltered per-country ORDER BY + in-memory top-`limit` slice is safe —
+ * same reasoning as getEconomicEventCoverage's bounded full scan above. */
+export async function getLatestStoredEconomicSeriesForCountries(countries: string[], indicator: FredIndicatorKey, limit: number): Promise<Map<string, StoredEconomicSeries>> {
+  const result = new Map<string, StoredEconomicSeries>();
+  if (countries.length === 0) return result;
+
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(economicIndicators)
+    .where(and(inArray(economicIndicators.country, countries), eq(economicIndicators.indicator, indicator)))
+    .orderBy(economicIndicators.country, desc(economicIndicators.date));
+
+  const byCountry = new Map<string, (typeof rows)[number][]>();
+  for (const r of rows) {
+    const list = byCountry.get(r.country);
+    if (list) {
+      if (list.length < limit) list.push(r);
+    } else {
+      byCountry.set(r.country, [r]);
+    }
+  }
+
+  for (const [country, list] of byCountry) {
+    const ascending = [...list].reverse();
+    const points: FredSeriesPoint[] = ascending.map((r) => ({ date: r.date.toISOString().slice(0, 10), value: r.value }));
+    const fetchedAt = list.reduce((max, r) => (r.fetchedAt > max ? r.fetchedAt : max), list[0].fetchedAt);
+    result.set(country, { points, fetchedAt });
+  }
+  return result;
+}
+
 export type StoredDailyCandles = { candles: NormalizedCandle[]; fetchedAt: Date; provider: string };
 
 // Egress guard (Supabase free-tier egress incident): this table is
