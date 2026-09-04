@@ -217,6 +217,91 @@ describe("getFredSeriesWithFallback", () => {
   });
 });
 
+// storageOnly=true is the exact branch behind the production observation
+// (economic_indicators reads at 567,068 calls in ~46h) — this is the
+// Scorecard/Economic-Strength/Heatmap display path, never the live-first
+// V1/V2 scoring branch above (which is untouched by the cache and still
+// exercised by the tests above). Real cross-request TTL/cache-hit behavior
+// requires a live Next.js request context unstable_cache can attach an
+// entry to — unavailable under vitest, same limitation this codebase's
+// other unstable_cache call sites (cachedPositioning, cachedScoreHistoryForChart)
+// already live with — so it never calls the live-fetch branch. It always calls
+// through getCachedStoredEconomicSeries's withCacheFallback fallback path in this
+// environment, which exercises the exact same read/return logic the real cache
+// wraps; the actual cross-request reduction is verified in production via
+// pg_stat_statements (see the deployment report).
+describe("getFredSeriesWithFallback — storageOnly=true (the cached Macro State display path)", () => {
+  it("never calls the live FRED API — storage-only means storage-only", async () => {
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue({ points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) });
+    vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 20, cadence: "monthly" });
+
+    await getFredSeriesWithFallback("US", "cpi", 24, true);
+
+    expect(fred.getSeries).not.toHaveBeenCalled();
+    expect(getLatestStoredEconomicSeries).toHaveBeenCalledWith("US", "cpi", 24);
+  });
+
+  it("keeps different indicators for the same economy independent — no cross-contamination between series", async () => {
+    vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
+    vi.mocked(getLatestStoredEconomicSeries).mockImplementation(async (country, indicator) => {
+      if (country === "US" && indicator === "cpi") return { points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) };
+      if (country === "US" && indicator === "unemploymentRate") return { points: [{ date: "2026-08-01", value: 4.1 }], fetchedAt: hoursAgo(1) };
+      throw new Error(`unexpected lookup ${country}/${indicator}`);
+    });
+
+    const cpi = await getFredSeriesWithFallback("US", "cpi", 24, true);
+    const unemployment = await getFredSeriesWithFallback("US", "unemploymentRate", 24, true);
+
+    expect(cpi.value?.[0].value).toBe(3.2);
+    expect(unemployment.value?.[0].value).toBe(4.1);
+  });
+
+  it("keeps different economies for the same indicator independent — GBP CPI can never come back as USD CPI (batched FX base+quote correctness)", async () => {
+    vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
+    vi.mocked(getLatestStoredEconomicSeries).mockImplementation(async (country, indicator) => {
+      if (country === "GB" && indicator === "cpi") return { points: [{ date: "2026-08-01", value: 2.9 }], fetchedAt: hoursAgo(1) };
+      if (country === "JP" && indicator === "cpi") return { points: [{ date: "2026-08-01", value: 1.8 }], fetchedAt: hoursAgo(1) };
+      throw new Error(`unexpected lookup ${country}/${indicator}`);
+    });
+
+    // Simulates a GBPJPY dual-economy Scorecard render resolving both sides.
+    const [gbp, jpy] = await Promise.all([getFredSeriesWithFallback("GB", "cpi", 24, true), getFredSeriesWithFallback("JP", "cpi", 24, true)]);
+
+    expect(gbp.value?.[0].value).toBe(2.9);
+    expect(jpy.value?.[0].value).toBe(1.8);
+  });
+
+  it("keeps different limits (24 vs 6, i.e. Macro State rows vs. policy-rate/yield reads) independent", async () => {
+    vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 5, cadence: "monthly" });
+    vi.mocked(getLatestStoredEconomicSeries).mockImplementation(async (country, indicator, limit) => {
+      if (limit === 24) return { points: [{ date: "2026-08-01", value: 100 }], fetchedAt: hoursAgo(1) };
+      if (limit === 6) return { points: [{ date: "2026-08-01", value: 200 }], fetchedAt: hoursAgo(1) };
+      throw new Error(`unexpected limit ${limit}`);
+    });
+
+    const macroState = await getFredSeriesWithFallback("US", "policyRate", 24, true);
+    const policyPoint = await getFredSeriesWithFallback("US", "policyRate", 6, true);
+
+    expect(macroState.value?.[0].value).toBe(100);
+    expect(policyPoint.value?.[0].value).toBe(200);
+  });
+
+  it("stays honest on a DB failure — never fabricates a macro value", async () => {
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue(null);
+
+    const result = await getFredSeriesWithFallback("US", "cpi", 24, true);
+
+    expect(result.status).toBe("unavailable");
+    expect(result.value).toBeNull();
+  });
+
+  it("stays honest when the storage read itself throws", async () => {
+    vi.mocked(getLatestStoredEconomicSeries).mockRejectedValue(new Error("connection terminated"));
+
+    await expect(getFredSeriesWithFallback("US", "cpi", 24, true)).rejects.toThrow("connection terminated");
+  });
+});
+
 describe("getRetailSentimentFromStorage — reads Neon only, freshness driven by the source timestamp's age, not how recently the row was read", () => {
   it("classifies a fresh OANDA source timestamp as LIVE even though it was read from Neon — storage provenance never forces a downgrade", async () => {
     // fetchedAt is old (the row itself was written a while ago) but

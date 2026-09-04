@@ -42,6 +42,7 @@
 // provenance (fetchedAt) is tracked on the row but never drives freshness.
 // This keeps provider request volume to the cron's own cadence, never one
 // call per page view.
+import { unstable_cache } from "next/cache";
 import * as marketData from "./market-data-router";
 import * as cftc from "./cftc";
 import * as fred from "./fred";
@@ -56,10 +57,12 @@ import {
   getLatestStoredPositioning,
   getLatestStoredRetailSentiment,
   getLatestStoredEconomicSeries,
+  StoredEconomicSeries,
   StoredPrice,
   StoredDailyCandles,
 } from "@/db/queries/market-data";
 import { FredSeriesPoint, NormalizedCandle, NormalizedQuote, Provenance, ProviderName, unavailable } from "../types";
+import { withCacheFallback } from "@/lib/cache-fallback";
 
 // Human-readable label per provider, for the storage-fallback branches
 // below — never a hardcoded "Financial Modeling Prep" regardless of which
@@ -233,9 +236,50 @@ export async function getPositioningWithFallback(symbol: string, storageOnly = f
 
 const FRED_SOURCE = "FRED (Federal Reserve Economic Data)";
 
+// Cross-request cache for the FRED "Macro State" fallback storage read
+// (economic_indicators) — added after production observation showed this
+// exact query shape at 567,068 calls in ~46h, dwarfing every other query
+// bucket combined. Deliberately narrow: this only wraps
+// getLatestStoredEconomicSeries, the STORAGE read behind the `storageOnly`
+// branch below — every real economic calendar release (economic_events,
+// live/manual/Zapier) is untouched, and the LIVE fred.getSeries() branch a
+// few lines down (used by V1/V2 scoring's live-first resolution) is also
+// untouched, so this can never make a newly entered release, nor a live
+// scoring read, sit behind a stale cache. 30 minutes is far shorter than
+// FRED's own fastest update cadence (daily) — this only reduces redundant
+// re-reads of data that hasn't actually changed, never returns data older
+// than what a live-first caller would already treat as merely "delayed".
+// Same unstable_cache + withCacheFallback pattern as market-detail.ts's
+// cachedSeasonalityCandles/cachedPositioning (the Supabase egress fix's
+// original fast/slow cache split) — degrades to the uncached read on a
+// non-request context (tests, scripts) instead of throwing.
+//
+// unstable_cache requires a JSON-serializable return value, so `fetchedAt`
+// (a real Date on StoredEconomicSeries) is carried as an ISO string across
+// the cache boundary and reconstructed into a Date immediately after —
+// every other field (FredSeriesPoint[]) is already plain strings/numbers.
+const FRED_MACRO_STATE_CACHE_TTL_SECONDS = 30 * 60;
+
+type CachedFredSeries = { points: FredSeriesPoint[]; fetchedAtIso: string } | null;
+
+async function readStoredEconomicSeriesForCache(country: string, indicator: FredIndicatorKey, limit: number): Promise<CachedFredSeries> {
+  const stored = await getLatestStoredEconomicSeries(country, indicator, limit);
+  return stored ? { points: stored.points, fetchedAtIso: stored.fetchedAt.toISOString() } : null;
+}
+
+const cachedFredSeriesRead = unstable_cache(readStoredEconomicSeriesForCache, ["fred-macro-state-storage-read"], { revalidate: FRED_MACRO_STATE_CACHE_TTL_SECONDS });
+
+async function getCachedStoredEconomicSeries(country: string, indicator: FredIndicatorKey, limit: number): Promise<StoredEconomicSeries | null> {
+  const cached = await withCacheFallback(
+    () => cachedFredSeriesRead(country, indicator, limit),
+    () => readStoredEconomicSeriesForCache(country, indicator, limit),
+  );
+  return cached ? { points: cached.points, fetchedAt: new Date(cached.fetchedAtIso) } : null;
+}
+
 export async function getFredSeriesWithFallback(country: string, indicator: FredIndicatorKey, limit = 24, storageOnly = false): Promise<Provenance<FredSeriesPoint[]>> {
   if (storageOnly) {
-    const stored = await getLatestStoredEconomicSeries(country, indicator, limit);
+    const stored = await getCachedStoredEconomicSeries(country, indicator, limit);
     if (!stored || stored.points.length === 0) {
       return unavailable("fred", FRED_SOURCE, `No stored ${country}/${indicator} series exists yet (storage-only read — no live provider call attempted).`);
     }
