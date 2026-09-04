@@ -18,6 +18,7 @@ on:
 jobs:
   screenshot:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/setup-node@v4
         with:
@@ -47,7 +48,9 @@ jobs:
             for (const symbol of symbols) {
               const url = `${process.env.APP_BASE_URL}/diagnostics/scorecard/${symbol}?key=${process.env.KEY}`;
               console.log(`Loading ${symbol}...`);
-              const response = await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
+              // "load" not "networkidle" — this page auto-refreshes on an
+              // interval, so network activity never truly goes idle.
+              const response = await page.goto(url, { waitUntil: "load", timeout: 90000 });
               console.log(`${symbol}: HTTP ${response.status()}`);
               // Jump straight to the macro comparison section (id="sc-macro")
               // so the dual-economy tables are visible without manual scroll.
