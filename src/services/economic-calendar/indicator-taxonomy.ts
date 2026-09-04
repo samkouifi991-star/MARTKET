@@ -167,9 +167,13 @@ const PATTERNS: { key: EconomicIndicatorKey; patterns: string[] }[] = [
   // au Jibun Bank (Japan) / Judo Bank (Australia) rebrand of the underlying
   // same survey — all names must resolve to the same indicator so a real
   // HCOB/Jibun Bank/Judo Bank release classifies instead of silently going
-  // unclassified.
-  { key: "spGlobalManufacturingPmi", patterns: ["s&p global manufacturing pmi", "markit manufacturing pmi", "hcob manufacturing pmi", "jibun bank manufacturing pmi", "judo bank manufacturing pmi"] },
-  { key: "spGlobalServicesPmi", patterns: ["s&p global services pmi", "markit services pmi", "hcob services pmi", "jibun bank services pmi", "judo bank services pmi"] },
+  // unclassified. procure.ch (Switzerland, formerly SVME) and BusinessNZ
+  // (New Zealand) run their OWN independent manufacturing/services surveys
+  // — not an S&P Global sponsorship — but represent the same
+  // Manufacturing/Services PMI concept for this Scorecard's purposes, so
+  // they resolve to the same shared key.
+  { key: "spGlobalManufacturingPmi", patterns: ["s&p global manufacturing pmi", "markit manufacturing pmi", "hcob manufacturing pmi", "jibun bank manufacturing pmi", "judo bank manufacturing pmi", "procure.ch manufacturing pmi", "businessnz manufacturing pmi", "businessnz pmi"] },
+  { key: "spGlobalServicesPmi", patterns: ["s&p global services pmi", "markit services pmi", "hcob services pmi", "jibun bank services pmi", "judo bank services pmi", "procure.ch services pmi", "businessnz services pmi", "businessnz psi"] },
 
   { key: "dotPlot", patterns: ["dot plot", "economic projections", "sep "] },
   { key: "powellPressConference", patterns: ["powell", "press conference"] },

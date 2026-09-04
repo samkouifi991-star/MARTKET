@@ -58,6 +58,15 @@ describe("matchIndicator", () => {
     expect(matchIndicator("au Jibun Bank Services PMI")).toBe("spGlobalServicesPmi");
   });
 
+  it("matches Judo Bank (Australia), procure.ch (Switzerland), and BusinessNZ (New Zealand) as the same Manufacturing/Services PMI concept", () => {
+    expect(matchIndicator("Judo Bank Manufacturing PMI")).toBe("spGlobalManufacturingPmi");
+    expect(matchIndicator("Judo Bank Services PMI")).toBe("spGlobalServicesPmi");
+    expect(matchIndicator("procure.ch Manufacturing PMI")).toBe("spGlobalManufacturingPmi");
+    expect(matchIndicator("procure.ch Services PMI")).toBe("spGlobalServicesPmi");
+    expect(matchIndicator("BusinessNZ Manufacturing PMI")).toBe("spGlobalManufacturingPmi");
+    expect(matchIndicator("BusinessNZ PSI")).toBe("spGlobalServicesPmi");
+  });
+
   it("matches central bank events across the major currencies", () => {
     expect(matchIndicator("Fed Interest Rate Decision")).toBe("fedRateDecision");
     expect(matchIndicator("FOMC Statement")).toBe("fomcStatement");
