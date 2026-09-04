@@ -59,7 +59,7 @@ jobs:
             echo "--- ${SYM} ---"
             curl -s -m 30 "${APP_BASE_URL}/diagnostics/scorecard/${SYM}?key=${ENCODED_KEY}" \
               | python3 -c "import sys,html; print(html.unescape(sys.stdin.read()))" \
-              | grep -oE '"baseCurrency":"[A-Z]*"|"quoteCurrency":"[A-Z]*"|"economicGrowthQuote":\{"kind":"[a-z]*"|"inflationQuote":\{"kind":"[a-z]*"|"jobsMarketQuote":\{"kind":"[a-z]*"' \
-              | sort -u
+              | grep -A1 -E '"baseCurrency"|"quoteCurrency"|"economicGrowthQuote"|"inflationQuote"|"jobsMarketQuote"' \
+              | grep -v '^--$'
           done
           echo "END_FX_CORRECTNESS"
