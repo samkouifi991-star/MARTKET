@@ -1,0 +1,43 @@
+name: Temporary — Manual Data Entry Seed (Phase F)
+
+# One-off, temporary workflow: drives the real /admin/data-entry form against
+# production to seed real (web-researched, honestly-sourced) economic
+# releases, since this sandbox cannot reach *.vercel.app directly. Deleted
+# after use — not a permanent part of CI. Authenticates via a short-lived
+# session token (inserted directly into the sessions table ahead of
+# dispatch, then revoked immediately after this run) rather than the QA
+# account's actual password — the account credential is never touched.
+on:
+  workflow_dispatch:
+    inputs:
+      session_token:
+        description: "Short-lived session token (not the account password)"
+        required: true
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install playwright
+        run: |
+          npm install playwright@1.56.1
+          npx playwright install --with-deps chromium
+        working-directory: scripts/tmp-data-entry-seed
+      - name: Run seed script
+        working-directory: scripts/tmp-data-entry-seed
+        env:
+          SEED_SESSION_TOKEN: ${{ inputs.session_token }}
+        run: node run.js
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seed-results-batch2
+          path: |
+            scripts/tmp-data-entry-seed/shots/**
+            scripts/tmp-data-entry-seed/results.json
+          retention-days: 5
