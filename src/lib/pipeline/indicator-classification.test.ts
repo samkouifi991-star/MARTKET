@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyIndicatorSurprise, classifyMacroTrend, classifyRateDecisionBias } from "./indicator-classification";
+import { classifyIndicatorSurprise, classifyMacroTrend, classifyRateDecisionBias, flipClassificationForQuoteSide } from "./indicator-classification";
 
 const GOLD = { symbol: "XAUUSD", name: "Gold", assetClass: "Commodities" as const, decimals: 2 };
 const SPX500 = { symbol: "SPX500", name: "S&P 500", assetClass: "Indices" as const, macroCountry: "US", decimals: 2 };
@@ -165,5 +165,23 @@ describe("classifyRateDecisionBias — display-only hawkish/dovish read of a rat
 
   it("an asset class with no established rate-decision transmission model (generic commodities) returns null rather than a guess", () => {
     expect(classifyRateDecisionBias(OIL, "US", 4.75, 4.5)).toBeNull();
+  });
+});
+
+describe("flipClassificationForQuoteSide — turns a domestic-economy read into a pair-relative one for the FX quote side", () => {
+  it("flips Bullish to Bearish", () => {
+    expect(flipClassificationForQuoteSide("Bullish")).toBe("Bearish");
+  });
+
+  it("flips Bearish to Bullish", () => {
+    expect(flipClassificationForQuoteSide("Bearish")).toBe("Bullish");
+  });
+
+  it("leaves Neutral unchanged — there's no direction to flip", () => {
+    expect(flipClassificationForQuoteSide("Neutral")).toBe("Neutral");
+  });
+
+  it("leaves null unchanged — never fabricates a direction where none was established", () => {
+    expect(flipClassificationForQuoteSide(null)).toBeNull();
   });
 });

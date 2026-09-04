@@ -10,7 +10,7 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth/dal";
 import { isDemoOnly } from "@/services/data-mode";
-import { buildEconomicCoverage, CoverageCell, TRACKED_CURRENCIES } from "@/lib/pipeline/economic-coverage";
+import { buildEconomicCoverage, computeCoveragePercentage, CoverageCell, TRACKED_CURRENCIES } from "@/lib/pipeline/economic-coverage";
 import { Card } from "@/components/ui/Card";
 
 export const metadata = { title: "Economic Data Coverage — Admin — Market Intelligence AI" };
@@ -25,19 +25,29 @@ const STATUS_CLASSES: Record<CoverageCell["status"], string> = {
   current: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25",
   stale: "bg-amber-500/10 text-amber-400 border-amber-500/25",
   missing: "bg-(--bg-elevated) text-(--text-faint) border-(--border)",
+  not_applicable: "bg-(--bg-elevated) text-(--text-faint) border-(--border) opacity-50",
 };
 
-const STATUS_LABEL: Record<CoverageCell["status"], string> = { current: "CURRENT", stale: "STALE", missing: "MISSING" };
+const STATUS_LABEL: Record<CoverageCell["status"], string> = { current: "CURRENT", stale: "STALE", missing: "MISSING", not_applicable: "N/A" };
 
 function CoverageCellView({ label, currency, cell }: { label: string; currency: string; cell: CoverageCell }) {
   const badge = (
-    <span className={`inline-flex flex-col items-center gap-0.5 rounded border px-1.5 py-1 text-[10px] font-semibold tracking-wide ${STATUS_CLASSES[cell.status]}`} title={cell.latestDate ? `${cell.source === "fred" ? "FRED macro state" : "Economic calendar"} — latest ${formatDate(cell.latestDate)}` : "No data stored for this currency yet"}>
+    <span
+      className={`inline-flex flex-col items-center gap-0.5 rounded border px-1.5 py-1 text-[10px] font-semibold tracking-wide ${STATUS_CLASSES[cell.status]}`}
+      title={
+        cell.status === "not_applicable"
+          ? "This indicator doesn't structurally exist for this currency — excluded from its coverage percentage, never penalized as missing."
+          : cell.latestDate
+            ? `${cell.source === "fred" ? "FRED macro state" : "Economic calendar"} — latest ${formatDate(cell.latestDate)}`
+            : "No data stored for this currency yet"
+      }
+    >
       {STATUS_LABEL[cell.status]}
       {cell.latestDate && <span className="font-normal normal-case text-(--text-faint)">{formatDate(cell.latestDate)}</span>}
     </span>
   );
 
-  if (cell.status === "current") return <td className="py-1 px-1 text-center">{badge}</td>;
+  if (cell.status === "current" || cell.status === "not_applicable") return <td className="py-1 px-1 text-center">{badge}</td>;
 
   return (
     <td className="py-1 px-1 text-center">
@@ -96,6 +106,18 @@ export default async function EconomicCoveragePage() {
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-(--border-strong)">
+                  <td className="py-2 pr-3 whitespace-nowrap font-semibold sticky left-0 bg-(--bg-card)" title="CURRENT=100%, STALE=50%, MISSING=0%, N/A excluded from the denominator — admin diagnostic only, never a customer market score.">
+                    Coverage %
+                  </td>
+                  {TRACKED_CURRENCIES.map((c) => (
+                    <td key={c} className="py-2 px-1 text-center font-semibold tabular-nums">
+                      {computeCoveragePercentage(rows, c)}%
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}

@@ -19,6 +19,7 @@ import { IndicatorRow, IndicatorSection, IndicatorSectionRow, InterestRatesSecti
 import { UnavailableState } from "@/components/ui/UnavailableState";
 import { HEATMAP_LABEL_CLASSES, HeatmapLabel } from "@/lib/pipeline/economic-heatmap";
 import { pairDirectionLabel } from "@/lib/pipeline/forex-scorecard";
+import { EconomicIndicatorKey } from "@/services/economic-calendar/indicator-taxonomy";
 
 function StatusBadge({ sentiment }: { sentiment: FactorSentiment | null }) {
   if (!sentiment) {
@@ -113,12 +114,19 @@ type MacroTableRow = {
   isMacroState: boolean;
 };
 
+// Both helpers render `pairBias`, not the raw `classification` — for a
+// non-FX instrument and for an FX pair's base-currency side these are
+// always identical (see IndicatorRow/MacroStateRow's own doc comments), so
+// this changes nothing there; for an FX pair's quote-currency side
+// `pairBias` is the flipped, pair-relative read, which is what "Bias"
+// should mean on a Forex Scorecard (a stronger quote economy pressures the
+// pair, it doesn't support it).
 function fromIndicatorRow(r: IndicatorRow): MacroTableRow {
-  return { key: r.indicatorKey, label: r.label, classification: r.classification, actual: r.actual, forecast: r.forecast, previous: r.previous, revisedPrevious: r.revisedPrevious, surprise: r.surprise, date: r.date, source: r.source, isMacroState: false };
+  return { key: r.indicatorKey, label: r.label, classification: r.pairBias, actual: r.actual, forecast: r.forecast, previous: r.previous, revisedPrevious: r.revisedPrevious, surprise: r.surprise, date: r.date, source: r.source, isMacroState: false };
 }
 
 function fromMacroStateRow(r: MacroStateRow): MacroTableRow {
-  return { key: r.label, label: r.label, classification: r.classification, actual: r.value, forecast: null, previous: r.previousValue, revisedPrevious: null, surprise: null, date: r.date, source: r.source, isMacroState: true };
+  return { key: r.label, label: r.label, classification: r.pairBias, actual: r.value, forecast: null, previous: r.previousValue, revisedPrevious: null, surprise: null, date: r.date, source: r.source, isMacroState: true };
 }
 
 function fromSectionRow(r: IndicatorSectionRow): MacroTableRow {
@@ -193,6 +201,55 @@ function IndicatorTable({ rows }: { rows: MacroTableRow[] }) {
 function IndicatorSectionView({ section }: { section: IndicatorSection }) {
   if (section.kind === "unavailable") return <UnavailableState>UNAVAILABLE — {section.reason}</UnavailableState>;
   return <IndicatorTable rows={section.rows.map(fromSectionRow)} />;
+}
+
+// FX is a relative trade — the display name for each side of the pair's
+// economy, keyed by currency code (CCY_TO_COUNTRY's exact 8 currencies).
+// Presentation-only labeling, not a new data source.
+const CURRENCY_ECONOMY_LABEL: Record<string, string> = {
+  USD: "United States",
+  EUR: "Eurozone",
+  GBP: "United Kingdom",
+  JPY: "Japan",
+  CHF: "Switzerland",
+  AUD: "Australia",
+  NZD: "New Zealand",
+  CAD: "Canada",
+};
+
+// Side-by-side base/quote rendering for Growth/Inflation/Jobs Market on an
+// FX pair — two compact mirrored tables (desktop), stacking on narrower
+// viewports. Every release stays fully detailed (Indicator/Bias/Actual/
+// Forecast/Previous/Surprise/Date, Macro State badge included) on both
+// sides; only the layout is new, not the data.
+function DualIndicatorSectionView({ baseCurrency, baseSection, quoteCurrency, quoteSection }: { baseCurrency: string; baseSection: IndicatorSection; quoteCurrency: string; quoteSection: IndicatorSection }) {
+  return (
+    <div className="grid lg:grid-cols-2 gap-4">
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-(--text-faint) mb-1.5">{CURRENCY_ECONOMY_LABEL[baseCurrency] ?? baseCurrency} ({baseCurrency})</div>
+        <IndicatorSectionView section={baseSection} />
+      </div>
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-(--text-faint) mb-1.5">{CURRENCY_ECONOMY_LABEL[quoteCurrency] ?? quoteCurrency} ({quoteCurrency})</div>
+        <IndicatorSectionView section={quoteSection} />
+      </div>
+    </div>
+  );
+}
+
+/** Finds one specific indicator's real Actual value inside an already-
+ * resolved IndicatorSection — either a calendar release (by indicatorKey)
+ * or a Macro State fallback (by label) — for the "Economic Comparison"
+ * summary's Inflation row, which shows the underlying CPI comparison
+ * directly rather than a fabricated composite (see CurrencyComparisonView).
+ * Returns null when neither source has this indicator yet. */
+function findIndicatorActual(section: IndicatorSection, indicatorKey: EconomicIndicatorKey, macroStateLabel: string): number | null {
+  if (section.kind !== "rows") return null;
+  for (const r of section.rows) {
+    if (r.source === "calendar" && r.row.indicatorKey === indicatorKey) return r.row.actual;
+    if (r.source === "macro-state" && r.row.label === macroStateLabel) return r.row.value;
+  }
+  return null;
 }
 
 // Compact positive/negative driver list — a pure re-sort/re-label of the
@@ -368,11 +425,38 @@ function DifferentialRow({
   );
 }
 
+// Simple, un-banded base/quote readout — used only for Inflation (see
+// CurrencyComparisonView below): there is no legitimate Inflation
+// composite anywhere in this architecture (economic-strength.ts's
+// weighted score doesn't include one), so per the redesign spec this shows
+// the underlying CPI actual values directly rather than inventing a
+// differential/band for a comparison this platform hasn't validated.
+function RawComparisonRow({ label, baseLabel, baseValue, quoteLabel, quoteValue }: { label: string; baseLabel: string; baseValue: string; quoteLabel: string; quoteValue: string }) {
+  return (
+    <div className="text-xs">
+      <div className="text-(--text-faint) mb-1">{label}</div>
+      <div className="space-y-1">
+        <Row label={baseLabel} value={baseValue} />
+        <Row label={quoteLabel} value={quoteValue} />
+      </div>
+    </div>
+  );
+}
+
 // FX-only — folds the old standalone Forex Scorecard's base-vs-quote
-// comparison into this Scorecard. Reuses ForexScorecardData verbatim
+// comparison into this Scorecard, and doubles as the redesign spec's
+// "Economic Comparison" relative summary shown above the detailed
+// Growth/Inflation/Jobs tables. Reuses ForexScorecardData verbatim
 // (forex-scorecard.ts), including its already-computed bands and
-// deterministic narrative sentence — nothing recomputed here.
-function CurrencyComparisonView({ data }: { data: NonNullable<ScorecardData["currencyComparison"]> }) {
+// deterministic narrative sentence — nothing recomputed here. Growth/Labor
+// rows reuse economic-strength.ts's own per-category driver contributions
+// (real, already-labeled numbers — not a fabricated 0-100 score); Inflation
+// has no such aggregate, so it shows the literal CPI comparison instead
+// (see RawComparisonRow above and findIndicatorActual).
+function CurrencyComparisonView({ data, inflationBase, inflationQuote }: { data: NonNullable<ScorecardData["currencyComparison"]>; inflationBase: IndicatorSection; inflationQuote: IndicatorSection | null }) {
+  const baseCpi = findIndicatorActual(inflationBase, "cpi", "CPI YoY");
+  const quoteCpi = inflationQuote ? findIndicatorActual(inflationQuote, "cpi", "CPI YoY") : null;
+
   return (
     <div className="space-y-3">
       {data.narrative && <p className="text-xs text-(--text-dim) leading-relaxed">{data.narrative}</p>}
@@ -410,6 +494,45 @@ function CurrencyComparisonView({ data }: { data: NonNullable<ScorecardData["cur
           <UnavailableState>UNAVAILABLE — no verified policy-rate series yet for one or both currencies.</UnavailableState>
         )}
       </div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        {data.growthDifferential !== null && data.baseGrowthContribution !== null && data.quoteGrowthContribution !== null ? (
+          <DifferentialRow
+            label="Economic Growth"
+            baseLabel={data.base}
+            baseValue={formatSigned(data.baseGrowthContribution, 1)}
+            quoteLabel={data.quote}
+            quoteValue={formatSigned(data.quoteGrowthContribution, 1)}
+            differential={data.growthDifferential}
+            band={data.growthBand}
+            base={data.base}
+            quote={data.quote}
+            decimals={1}
+          />
+        ) : (
+          <UnavailableState>UNAVAILABLE — no verified growth-driver contribution yet for one or both currencies.</UnavailableState>
+        )}
+        {data.laborDifferential !== null && data.baseLaborContribution !== null && data.quoteLaborContribution !== null ? (
+          <DifferentialRow
+            label="Labor Market"
+            baseLabel={data.base}
+            baseValue={formatSigned(data.baseLaborContribution, 1)}
+            quoteLabel={data.quote}
+            quoteValue={formatSigned(data.quoteLaborContribution, 1)}
+            differential={data.laborDifferential}
+            band={data.laborBand}
+            base={data.base}
+            quote={data.quote}
+            decimals={1}
+          />
+        ) : (
+          <UnavailableState>UNAVAILABLE — no verified labor-driver contribution yet for one or both currencies.</UnavailableState>
+        )}
+      </div>
+      {baseCpi !== null && quoteCpi !== null ? (
+        <RawComparisonRow label="Inflation (CPI YoY)" baseLabel={data.base} baseValue={`${formatSigned(baseCpi, 1)}%`} quoteLabel={data.quote} quoteValue={`${formatSigned(quoteCpi, 1)}%`} />
+      ) : (
+        <UnavailableState>UNAVAILABLE — no verified CPI reading yet for one or both currencies.</UnavailableState>
+      )}
       {data.surpriseDifferential !== null && data.baseSurprise !== null && data.quoteSurprise !== null ? (
         <DifferentialRow
           label="Economic Surprise"
@@ -640,21 +763,33 @@ export function Scorecard({
 
           <div id="sc-macro" className="scroll-mt-24">
             {data.currencyComparison && (
-              <SectionShell title="Currency Comparison">
-                <CurrencyComparisonView data={data.currencyComparison} />
+              <SectionShell title="Economic Comparison">
+                <CurrencyComparisonView data={data.currencyComparison} inflationBase={data.inflation} inflationQuote={data.inflationQuote} />
               </SectionShell>
             )}
 
             <SectionShell title="Economic Growth">
-              <IndicatorSectionView section={data.economicGrowth} />
+              {data.economicGrowthQuote && data.baseCurrency && data.quoteCurrency ? (
+                <DualIndicatorSectionView baseCurrency={data.baseCurrency} baseSection={data.economicGrowth} quoteCurrency={data.quoteCurrency} quoteSection={data.economicGrowthQuote} />
+              ) : (
+                <IndicatorSectionView section={data.economicGrowth} />
+              )}
             </SectionShell>
 
             <SectionShell title="Inflation">
-              <IndicatorSectionView section={data.inflation} />
+              {data.inflationQuote && data.baseCurrency && data.quoteCurrency ? (
+                <DualIndicatorSectionView baseCurrency={data.baseCurrency} baseSection={data.inflation} quoteCurrency={data.quoteCurrency} quoteSection={data.inflationQuote} />
+              ) : (
+                <IndicatorSectionView section={data.inflation} />
+              )}
             </SectionShell>
 
             <SectionShell title="Jobs Market">
-              <IndicatorSectionView section={data.jobsMarket} />
+              {data.jobsMarketQuote && data.baseCurrency && data.quoteCurrency ? (
+                <DualIndicatorSectionView baseCurrency={data.baseCurrency} baseSection={data.jobsMarket} quoteCurrency={data.quoteCurrency} quoteSection={data.jobsMarketQuote} />
+              ) : (
+                <IndicatorSectionView section={data.jobsMarket} />
+              )}
             </SectionShell>
           </div>
 

@@ -32,22 +32,27 @@ describe("bandSurpriseDifferential", () => {
 });
 
 describe("synthesizeForexNarrative", () => {
-  it("combines strength, rate, and trend clauses deterministically", () => {
-    const result = synthesizeForexNarrative({ base: "GBP", quote: "JPY", strengthDifferential: 60, rateDifferentialPts: 2.91, dailyTrend: "Bullish" });
-    expect(result).toBe("GBP currently has stronger macro conditions, with a favorable rate differential for GBP, and the daily technical trend is bullish.");
+  it("combines rate, growth, strength, and trend clauses deterministically", () => {
+    const result = synthesizeForexNarrative({ base: "GBP", quote: "JPY", strengthDifferential: 60, rateDifferentialPts: 2.91, growthDifferential: 0, dailyTrend: "Bullish" });
+    expect(result).toBe("GBP currently has stronger rate support than JPY, while recent growth data is mixed, and GBP currently has stronger overall macro conditions, and the daily technical trend is bullish.");
   });
 
   it("returns null when both strength and rate are unavailable", () => {
-    expect(synthesizeForexNarrative({ base: "GBP", quote: "JPY", strengthDifferential: null, rateDifferentialPts: null, dailyTrend: null })).toBeNull();
+    expect(synthesizeForexNarrative({ base: "GBP", quote: "JPY", strengthDifferential: null, rateDifferentialPts: null, growthDifferential: null, dailyTrend: null })).toBeNull();
   });
 
   it("still produces a sentence from strength alone", () => {
-    const result = synthesizeForexNarrative({ base: "EUR", quote: "USD", strengthDifferential: -30, rateDifferentialPts: null, dailyTrend: null });
-    expect(result).toBe("USD currently has stronger macro conditions.");
+    const result = synthesizeForexNarrative({ base: "EUR", quote: "USD", strengthDifferential: -30, rateDifferentialPts: null, growthDifferential: null, dailyTrend: null });
+    expect(result).toBe("USD currently has stronger overall macro conditions.");
   });
 
   it("never claims a side is stronger when the differential is exactly 0", () => {
-    const result = synthesizeForexNarrative({ base: "EUR", quote: "USD", strengthDifferential: 0, rateDifferentialPts: null, dailyTrend: null });
-    expect(result).toBe("EUR and USD have similar macro conditions.");
+    const result = synthesizeForexNarrative({ base: "EUR", quote: "USD", strengthDifferential: 0, rateDifferentialPts: null, growthDifferential: null, dailyTrend: null });
+    expect(result).toBe("EUR and USD have similar overall macro conditions.");
+  });
+
+  it("names the favored side for a real, non-neutral growth differential", () => {
+    const result = synthesizeForexNarrative({ base: "USD", quote: "JPY", strengthDifferential: 10, rateDifferentialPts: null, growthDifferential: 5, dailyTrend: null });
+    expect(result).toBe("recent growth data favors USD, while USD currently has stronger overall macro conditions.");
   });
 });

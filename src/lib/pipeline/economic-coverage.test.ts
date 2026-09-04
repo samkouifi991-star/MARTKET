@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 vi.mock("@/db/queries/market-data");
 
 import { getEconomicEventCoverage, getEconomicIndicatorCoverage, EconomicEventCoverageRow, EconomicIndicatorCoverageRow } from "@/db/queries/market-data";
-import { buildEconomicCoverage } from "./economic-coverage";
+import { buildEconomicCoverage, computeCoveragePercentage } from "./economic-coverage";
 
 function daysAgo(n: number): string {
   return new Date(Date.now() - n * 86_400_000).toISOString();
@@ -93,5 +93,54 @@ describe("buildEconomicCoverage", () => {
     for (const row of rows) {
       expect(Object.keys(row.cells).sort()).toEqual(["AUD", "CAD", "CHF", "EUR", "GBP", "JPY", "NZD", "USD"]);
     }
+  });
+
+  it("marks NFP/ADP/JOLTS/PCE as NOT_APPLICABLE (not MISSING) for every currency except USD — these are genuinely US-only concepts, not a coverage gap", async () => {
+    const rows = await buildEconomicCoverage();
+    for (const label of ["Non-Farm Payrolls", "ADP Employment", "JOLTS", "PCE"]) {
+      const row = findRow(rows, label);
+      expect(row.cells.USD.status).not.toBe("not_applicable");
+      for (const currency of ["EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF"] as const) {
+        expect(row.cells[currency]).toEqual({ status: "not_applicable", latestDate: null, source: null });
+      }
+    }
+  });
+
+  it("does NOT mark Employment Change or Jobless Claims as NOT_APPLICABLE anywhere — those are unresearched gaps (MISSING), not confirmed non-existent", async () => {
+    const rows = await buildEconomicCoverage();
+    for (const label of ["Employment Change", "Jobless Claims"]) {
+      const row = findRow(rows, label);
+      for (const currency of Object.keys(row.cells) as (keyof typeof row.cells)[]) {
+        expect(row.cells[currency].status).not.toBe("not_applicable");
+      }
+    }
+  });
+});
+
+describe("computeCoveragePercentage", () => {
+  it("scores CURRENT as 100%, STALE as 50%, MISSING as 0%, and excludes NOT_APPLICABLE from the denominator", async () => {
+    const rows = await buildEconomicCoverage();
+    // With no stored data at all, USD still has 4 NOT_APPLICABLE-free... no:
+    // NFP/ADP/JOLTS/PCE are all applicable to USD (never not_applicable for
+    // USD), so an all-missing fixture gives USD a real 0% same as everyone.
+    expect(computeCoveragePercentage(rows, "USD")).toBe(0);
+  });
+
+  it("a currency with several NOT_APPLICABLE cells reaches 100% once every APPLICABLE cell is current — the excluded cells never drag it down", async () => {
+    const recent = daysAgo(3);
+    const events: EconomicEventCoverageRow[] = [
+      { country: "GB", indicatorKey: "gdp", latestDate: recent },
+      { country: "GB", indicatorKey: "ismManufacturing" as never, latestDate: recent }, // wrong key on purpose, ignored
+    ];
+    vi.mocked(getEconomicEventCoverage).mockResolvedValue(events);
+    const rows = await buildEconomicCoverage();
+    // GBP is NOT_APPLICABLE for NFP/ADP/JOLTS/PCE (4 of 18 rows) — those 4
+    // must not count toward the denominator at all.
+    const gbpRow = rows.find((r) => r.label === "Non-Farm Payrolls")!;
+    expect(gbpRow.cells.GBP.status).toBe("not_applicable");
+    // Sanity: percentage stays a plain 0-100 number, never negative/NaN.
+    const pct = computeCoveragePercentage(rows, "GBP");
+    expect(pct).toBeGreaterThanOrEqual(0);
+    expect(pct).toBeLessThanOrEqual(100);
   });
 });

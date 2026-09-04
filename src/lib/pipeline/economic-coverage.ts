@@ -15,7 +15,14 @@ import { classifyFredFreshness } from "@/services/market-data/fred";
 import { getEconomicEventCoverage, getEconomicIndicatorCoverage } from "@/db/queries/market-data";
 import { RATE_DECISION_BY_COUNTRY } from "./scorecard";
 
-export type CoverageStatus = "current" | "stale" | "missing";
+// "not_applicable" is structurally different from "missing": missing means
+// real data could exist for this country but nothing is stored yet (a
+// genuine coverage gap); not_applicable means the concept itself doesn't
+// exist for that country under this taxonomy (e.g. NFP is US-only
+// branding — the UK doesn't have "Non-Farm Payrolls" to seed, it has its
+// own Employment Change row instead). Never penalized as a gap, and
+// excluded from the coverage-percentage denominator (see the page).
+export type CoverageStatus = "current" | "stale" | "missing" | "not_applicable";
 export type CoverageSource = "calendar" | "fred" | null;
 export type CoverageCell = { status: CoverageStatus; latestDate: string | null; source: CoverageSource };
 
@@ -36,6 +43,18 @@ type CoverageDef = {
   // Growth) — never guessed. NFP deliberately has none: FRED's "payrolls"
   // is a level, not the monthly change figure "NFP" means to traders.
   fredKey?: FredIndicatorKey;
+  // When set, every OTHER country not in this list is "not_applicable"
+  // rather than "missing" — reserved for concepts that are genuinely
+  // US-specific branding/methodology with no real equivalent anywhere
+  // else (confirmed, not guessed): NFP (the UK/EU/etc. have their own
+  // Employment Change row instead), ADP and JOLTS (both literally
+  // US-only surveys), and PCE (a US-specific price-index methodology —
+  // "Do not force U.S.-specific indicators onto economies where the
+  // equivalent release is different"). Left unset for concepts we simply
+  // haven't confirmed exist or don't exist elsewhere yet (e.g. Employment
+  // Change, Jobless Claims) — those stay "missing", not "not_applicable",
+  // until genuinely researched one way or the other.
+  applicableCountries?: string[];
 };
 
 const COVERAGE_INDICATORS: CoverageDef[] = [
@@ -47,13 +66,13 @@ const COVERAGE_INDICATORS: CoverageDef[] = [
   { label: "CPI", calendarKeys: ["cpi"], fredKey: "cpi" },
   { label: "Core CPI", calendarKeys: ["coreCpi"], fredKey: "coreCpi" },
   { label: "PPI", calendarKeys: ["ppi"], fredKey: "ppi" },
-  { label: "PCE", calendarKeys: ["pce"], fredKey: "pce" },
-  { label: "Non-Farm Payrolls", calendarKeys: ["nfp"] },
+  { label: "PCE", calendarKeys: ["pce"], fredKey: "pce", applicableCountries: ["US"] },
+  { label: "Non-Farm Payrolls", calendarKeys: ["nfp"], applicableCountries: ["US"] },
   { label: "Employment Change", calendarKeys: ["employmentChange"] },
   { label: "Unemployment Rate", calendarKeys: ["unemploymentRate"], fredKey: "unemploymentRate" },
   { label: "Jobless Claims", calendarKeys: ["joblessClaims"], fredKey: "initialClaims" },
-  { label: "ADP Employment", calendarKeys: ["adpEmployment"] },
-  { label: "JOLTS", calendarKeys: ["jolts"] },
+  { label: "ADP Employment", calendarKeys: ["adpEmployment"], applicableCountries: ["US"] },
+  { label: "JOLTS", calendarKeys: ["jolts"], applicableCountries: ["US"] },
   { label: "Wage Growth", calendarKeys: ["avgHourlyEarnings", "wageGrowth"] },
   { label: "Policy Rate", calendarKeysByCountry: (country) => (RATE_DECISION_BY_COUNTRY[country] ? [RATE_DECISION_BY_COUNTRY[country]!.key] : []), fredKey: "policyRate" },
   { label: "2Y Yield", fredKey: "yield2y" },
@@ -68,6 +87,25 @@ const CALENDAR_CURRENT_WITHIN_DAYS = 45;
 
 function ageDays(dateIso: string): number {
   return Math.round((Date.now() - new Date(dateIso).getTime()) / 86_400_000);
+}
+
+/** Admin-only operational diagnostic — CURRENT counts fully, STALE counts
+ * half (real data, just aging), MISSING counts zero, and NOT_APPLICABLE is
+ * excluded from the denominator entirely so a currency isn't penalized for
+ * indicators that structurally don't apply to it (e.g. the UK not having
+ * NFP). This is never a customer-facing market score — see the page it's
+ * rendered on. */
+export function computeCoveragePercentage(rows: CoverageRow[], currency: TrackedCurrency): number {
+  let earned = 0;
+  let total = 0;
+  for (const row of rows) {
+    const status = row.cells[currency].status;
+    if (status === "not_applicable") continue;
+    total += 1;
+    if (status === "current") earned += 1;
+    else if (status === "stale") earned += 0.5;
+  }
+  return total === 0 ? 0 : Math.round((earned / total) * 100);
 }
 
 /** ONE batched read per table (never per cell) — see the two coverage
@@ -85,6 +123,12 @@ export async function buildEconomicCoverage(): Promise<CoverageRow[]> {
     const cells = {} as Record<TrackedCurrency, CoverageCell>;
     for (const currency of TRACKED_CURRENCIES) {
       const country = CCY_TO_COUNTRY[currency];
+
+      if (def.applicableCountries && !def.applicableCountries.includes(country)) {
+        cells[currency] = { status: "not_applicable", latestDate: null, source: null };
+        continue;
+      }
+
       const calendarKeys = def.calendarKeysByCountry ? def.calendarKeysByCountry(country) : (def.calendarKeys ?? []);
 
       let cell: CoverageCell = { status: "missing", latestDate: null, source: null };

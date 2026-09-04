@@ -20,9 +20,10 @@ import { getRecentSurprisesForCountries } from "@/db/queries/economic-releases";
 import { getRetailSentimentFromStorage } from "@/services/market-data/last-known-good";
 import { getCurrentScore } from "@/db/queries/scores";
 import { buildForexScorecard, FX_PAIRS } from "./forex-scorecard";
+import type { StrengthDriver } from "./economic-strength";
 
-function strength(currency: string, country: string, score: number | null) {
-  return { currency, country, score, level: score !== null ? ("Strong" as const) : null, drivers: [], freshness: "live" as const };
+function strength(currency: string, country: string, score: number | null, drivers: StrengthDriver[] = []) {
+  return { currency, country, score, level: score !== null ? ("Strong" as const) : null, drivers, freshness: "live" as const };
 }
 
 describe("FX_PAIRS", () => {
@@ -35,7 +36,17 @@ describe("FX_PAIRS", () => {
 describe("buildForexScorecard", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.mocked(computeCurrencyStrength).mockImplementation(async (currency: string) => (currency === "GBP" ? strength("GBP", "GB", 40) : strength("JPY", "JP", -30)));
+    vi.mocked(computeCurrencyStrength).mockImplementation(async (currency: string) =>
+      currency === "GBP"
+        ? strength("GBP", "GB", 40, [
+            { label: "Economic growth", contribution: 5.2, explanation: "GB growth score +2.6" },
+            { label: "Labor market", contribution: 1.4, explanation: "GB labor score +0.7" },
+          ])
+        : strength("JPY", "JP", -30, [
+            { label: "Economic growth", contribution: -3.1, explanation: "JP growth score -1.5" },
+            { label: "Labor market", contribution: 0.8, explanation: "JP labor score +0.4" },
+          ]),
+    );
     vi.mocked(fetchLatestRates).mockImplementation(async (country: string) => (country === "GB" ? { policyRate: 5, trend: 1, freshness: "live" } : { policyRate: 0.5, trend: -1, freshness: "live" }));
     vi.mocked(getRecentSurprisesForCountries).mockResolvedValue([]);
     vi.mocked(fetchTechnicalTrend).mockResolvedValue({
@@ -102,5 +113,23 @@ describe("buildForexScorecard", () => {
 
   it("throws for a non-FX symbol", async () => {
     await expect(buildForexScorecard("XAUUSD", true)).rejects.toThrow(/not a tracked FX pair/);
+  });
+
+  it("extracts Growth/Labor driver contributions and their differentials directly from computeCurrencyStrength's own drivers — no new math", async () => {
+    const data = await buildForexScorecard("GBPJPY", true);
+    expect(data.baseGrowthContribution).toBe(5.2);
+    expect(data.quoteGrowthContribution).toBe(-3.1);
+    expect(data.growthDifferential).toBe(8.3); // 5.2 - (-3.1)
+    expect(data.baseLaborContribution).toBe(1.4);
+    expect(data.quoteLaborContribution).toBe(0.8);
+    expect(data.laborDifferential).toBe(0.6); // 1.4 - 0.8
+  });
+
+  it("never fabricates a growth/labor differential when a driver is genuinely missing on one side", async () => {
+    vi.mocked(computeCurrencyStrength).mockImplementation(async (currency: string) => (currency === "GBP" ? strength("GBP", "GB", 40, []) : strength("JPY", "JP", -30, [{ label: "Economic growth", contribution: -3.1, explanation: "" }])));
+    const data = await buildForexScorecard("GBPJPY", true);
+    expect(data.baseGrowthContribution).toBeNull();
+    expect(data.quoteGrowthContribution).toBe(-3.1);
+    expect(data.growthDifferential).toBeNull();
   });
 });

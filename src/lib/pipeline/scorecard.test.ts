@@ -102,6 +102,12 @@ beforeEach(() => {
     surpriseDifferential: null,
     baseSurprise: null,
     quoteSurprise: null,
+    baseGrowthContribution: null,
+    quoteGrowthContribution: null,
+    growthDifferential: null,
+    baseLaborContribution: null,
+    quoteLaborContribution: null,
+    laborDifferential: null,
     dailyTrend: null,
     h4Trend: null,
     h1Trend: null,
@@ -112,6 +118,8 @@ beforeEach(() => {
     strengthBand: null,
     rateBand: null,
     surpriseBand: null,
+    growthBand: null,
+    laborBand: null,
     narrative: null,
   });
 });
@@ -600,6 +608,12 @@ describe("buildScorecardData — Currency Comparison (pre-launch Scorecard renam
       surpriseDifferential: 36,
       baseSurprise: 24,
       quoteSurprise: -12,
+      baseGrowthContribution: 4.2,
+      quoteGrowthContribution: -1.8,
+      growthDifferential: 6,
+      baseLaborContribution: 2.1,
+      quoteLaborContribution: -0.5,
+      laborDifferential: 2.6,
       dailyTrend: "Bullish" as const,
       h4Trend: "Bullish" as const,
       h1Trend: "Neutral" as const,
@@ -610,12 +624,105 @@ describe("buildScorecardData — Currency Comparison (pre-launch Scorecard renam
       strengthBand: "Strong bullish" as const,
       rateBand: "Strong bullish" as const,
       surpriseBand: "Strong bullish" as const,
+      growthBand: "Strong bullish" as const,
+      laborBand: "Strong bullish" as const,
       narrative: "GBP currently has stronger macro conditions.",
     };
     vi.mocked(buildForexScorecard).mockResolvedValue(stub);
     const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
     expect(data.currencyComparison).toEqual(stub);
     expect(buildForexScorecard).toHaveBeenCalledWith("GBPUSD", false);
+  });
+});
+
+describe("buildScorecardData — dual base/quote Economy sections (FX is a relative trade)", () => {
+  it("is null for every non-FX instrument — Growth/Inflation/Jobs stay single-column exactly as before", async () => {
+    const data = await buildScorecardData(GOLD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.economicGrowthQuote).toBeNull();
+    expect(data.inflationQuote).toBeNull();
+    expect(data.jobsMarketQuote).toBeNull();
+    expect(data.baseCurrency).toBeNull();
+    expect(data.quoteCurrency).toBeNull();
+  });
+
+  it("populates the quote economy's Growth/Inflation/Jobs sections for an FX pair from real stored GB releases", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({
+        "US:gdp": { event: "GDP QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.1, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" },
+        "GB:gdp": { event: "GDP QoQ", dateTime: "2027-01-28T00:00:00.000Z", actual: 0.5, previous: 0.3, forecast: 0.4, importanceTier: "HIGH" },
+      })
+    );
+    const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    expect(data.baseCurrency).toBe("GBP");
+    expect(data.quoteCurrency).toBe("USD");
+    expect(calendarRow(data.economicGrowth, "gdp")!.actual).toBe(0.5); // base = GBP
+    expect(calendarRow(data.economicGrowthQuote!, "gdp")!.actual).toBe(2.1); // quote = USD
+  });
+
+  it("reads the quote economy from the SAME single batched events query — zero additional calendar queries for showing both sides", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockClear();
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({ "GB:gdp": { event: "GDP QoQ", dateTime: "2027-01-28T00:00:00.000Z", actual: 0.5, previous: 0.3, forecast: 0.4, importanceTier: "HIGH" } })
+    );
+    await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    expect(getLatestEconomicEventsByIndicators).toHaveBeenCalledTimes(1);
+  });
+
+  it("never fetches the same (country, FRED series) pair twice in one render — the shared FredReadCache dedupes it", async () => {
+    const fredCalls: string[] = [];
+    vi.mocked(getFredSeriesWithFallback).mockImplementation(async (country, indicator) => {
+      fredCalls.push(`${country}:${indicator}`);
+      return {
+        provider: "fred", source: "FRED", status: "live", fetchedAt: new Date().toISOString(), sourceUpdatedAt: "2026-07-01", nextExpectedUpdate: null,
+        value: [{ date: "2026-05-01", value: 100 }, { date: "2026-06-01", value: 101 }, { date: "2026-07-01", value: 103 }],
+      };
+    });
+    await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    const counts = new Map<string, number>();
+    for (const c of fredCalls) counts.set(c, (counts.get(c) ?? 0) + 1);
+    for (const [pair, n] of counts) expect(n, `${pair} was fetched ${n} times, expected at most 1`).toBe(1);
+  });
+
+  it("flips Bias into a pair-relative read for the quote economy: a GBP growth beat stays Bullish (base), a USD growth beat becomes Bearish for GBPUSD (quote)", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({
+        "GB:gdp": { event: "GDP QoQ", dateTime: "2027-01-28T00:00:00.000Z", actual: 0.6, previous: 0.3, forecast: 0.4, importanceTier: "HIGH" }, // GBP beat
+        "US:gdp": { event: "GDP QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.5, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" }, // USD beat
+      })
+    );
+    const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    const gbpRow = calendarRow(data.economicGrowth, "gdp")!;
+    const usdRow = calendarRow(data.economicGrowthQuote!, "gdp")!;
+    // Raw domestic direction: both are genuine beats, so both classify Bullish for their own economy.
+    expect(gbpRow.classification).toBe("Bullish");
+    expect(usdRow.classification).toBe("Bullish");
+    // Pair-relative Bias: base beat supports the pair; quote beat pressures it.
+    expect(gbpRow.pairBias).toBe("Bullish");
+    expect(usdRow.pairBias).toBe("Bearish");
+  });
+
+  it("flips a quote-side FRED macro-state Bias too, not just calendar releases", async () => {
+    vi.mocked(getFredSeriesWithFallback).mockImplementation(async (country) => ({
+      provider: "fred", source: "FRED", status: "live", fetchedAt: new Date().toISOString(), sourceUpdatedAt: "2026-07-01", nextExpectedUpdate: null,
+      value: country === "US" ? [{ date: "2026-05-01", value: 100 }, { date: "2026-06-01", value: 101 }, { date: "2026-07-01", value: 103 }] : null,
+    }));
+    const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    const usdGdpRow = macroStateRow(data.economicGrowthQuote!, "GDP Growth QoQ")!;
+    expect(usdGdpRow).toBeDefined();
+    expect(usdGdpRow.classification).toBe("Bullish"); // rising GDP is domestically Bullish for USD
+    expect(usdGdpRow.pairBias).toBe("Bearish"); // but bearish for GBPUSD since USD is the quote currency
+  });
+
+  it("Neutral and unclassifiable rows are never flipped into a fabricated direction", async () => {
+    vi.mocked(getLatestEconomicEventsByIndicators).mockResolvedValue(
+      eventsMap({
+        "US:gdp": { event: "GDP QoQ", dateTime: "2027-01-30T00:00:00.000Z", actual: 2.0, previous: 1.9, forecast: 2.0, importanceTier: "HIGH" }, // exact in-line -> Neutral
+        "US:pce": { event: "PCE YoY", dateTime: "2027-01-31T00:00:00.000Z", actual: 2.8, previous: 2.9, forecast: null, importanceTier: "HIGH" }, // no forecast -> null
+      })
+    );
+    const data = await buildScorecardData(GBPUSD, fixtureScore({}), fixtureLiveDetail());
+    expect(calendarRow(data.economicGrowthQuote!, "gdp")!.pairBias).toBe("Neutral");
+    expect(calendarRow(data.inflationQuote!, "pce")!.pairBias).toBeNull();
   });
 });
 

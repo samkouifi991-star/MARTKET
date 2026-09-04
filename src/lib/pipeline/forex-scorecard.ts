@@ -34,6 +34,23 @@ export type ForexScorecardData = {
   surpriseDifferential: number | null; // base country surprise rollup minus quote's, -10..10-ish
   baseSurprise: number | null;
   quoteSurprise: number | null;
+  // Growth/Labor rows for the "Economic Comparison" summary — NOT new
+  // math: these are the exact same "Economic growth"/"Labor market"
+  // driver contributions computeCurrencyStrength already computes for
+  // baseStrength/quoteStrength.drivers (economic-strength.ts), just
+  // surfaced per-side instead of only inside the blended composite score.
+  // null whenever that side has no real growth/labor component yet —
+  // never a fabricated 0. There is deliberately no equivalent "Inflation
+  // differential" field: no legitimate inflation aggregate exists in this
+  // architecture (economic-strength.ts's composite doesn't include one),
+  // so the Scorecard shows the underlying CPI comparison directly instead
+  // — see Scorecard.tsx's CurrencyComparisonView.
+  baseGrowthContribution: number | null;
+  quoteGrowthContribution: number | null;
+  growthDifferential: number | null;
+  baseLaborContribution: number | null;
+  quoteLaborContribution: number | null;
+  laborDifferential: number | null;
   dailyTrend: TrendLabel | null;
   h4Trend: TrendLabel | null;
   h1Trend: TrendLabel | null;
@@ -41,7 +58,7 @@ export type ForexScorecardData = {
   retail: { pctLong: number; pctShort: number; contrarianBias: TrendLabel } | null;
   finalScore: number | null; // this pair's real canonical V1 score — not a new blended number
   finalBias: Bias | null;
-  // Pre-launch value pass: presentation-only 5-tier bands over the three
+  // Pre-launch value pass: presentation-only 5-tier bands over the
   // differentials above, reusing the exact color language Economic Heatmap
   // already established (see economic-heatmap.ts's HEATMAP_LABEL_CLASSES)
   // so "bullish/bearish at a glance" reads the same everywhere in the app.
@@ -49,6 +66,8 @@ export type ForexScorecardData = {
   strengthBand: HeatmapLabel | null;
   rateBand: HeatmapLabel | null;
   surpriseBand: HeatmapLabel | null;
+  growthBand: HeatmapLabel | null;
+  laborBand: HeatmapLabel | null;
   // One deterministic sentence combining the differentials/trend/retail
   // already computed above — see synthesizeForexNarrative. Never an LLM
   // call: every clause is a direct, literal readout of a field already on
@@ -81,6 +100,27 @@ export function bandSurpriseDifferential(value: number | null): HeatmapLabel | n
   return value === null ? null : bandHeatmapValue(value);
 }
 
+// Growth/Labor driver contributions are already on economic-strength.ts's
+// own -10..10-ish weighted scale (WEIGHTS.growth/labor * 10), the same
+// scale bandHeatmapValue's ±1/±4 thresholds are tuned for — so, unlike the
+// strength/rate differentials above, these reuse bandHeatmapValue directly
+// rather than needing their own bespoke thresholds.
+export function bandGrowthDifferential(value: number | null): HeatmapLabel | null {
+  return value === null ? null : bandHeatmapValue(value);
+}
+
+export function bandLaborDifferential(value: number | null): HeatmapLabel | null {
+  return value === null ? null : bandHeatmapValue(value);
+}
+
+/** Extracts a named driver's contribution from an already-computed
+ * CurrencyStrength (economic-strength.ts) — no new math, just a lookup by
+ * label. Returns null (never 0) when that driver isn't present, matching
+ * this pipeline's existing null-if-unavailable convention. */
+function driverContribution(strength: CurrencyStrength, label: string): number | null {
+  return strength.drivers.find((d) => d.label === label)?.contribution ?? null;
+}
+
 /** Combines fields already computed on `data` into one plain-English
  * sentence — every clause is a direct readout (band label / rate numbers /
  * trend label / retail %) of a real field, never a paraphrase or inference
@@ -88,25 +128,31 @@ export function bandSurpriseDifferential(value: number | null): HeatmapLabel | n
  * enough real data to say anything (both strength scores and the rate
  * differential unavailable), matching this pipeline's existing
  * null-if-unavailable convention. */
-export function synthesizeForexNarrative(data: Pick<ForexScorecardData, "base" | "quote" | "strengthDifferential" | "rateDifferentialPts" | "dailyTrend">): string | null {
-  const { base, quote, strengthDifferential, rateDifferentialPts, dailyTrend } = data;
+export function synthesizeForexNarrative(
+  data: Pick<ForexScorecardData, "base" | "quote" | "strengthDifferential" | "rateDifferentialPts" | "growthDifferential" | "dailyTrend">,
+): string | null {
+  const { base, quote, strengthDifferential, rateDifferentialPts, growthDifferential, dailyTrend } = data;
   if (strengthDifferential === null && rateDifferentialPts === null) return null;
 
   const clauses: string[] = [];
-  if (strengthDifferential !== null) {
-    const stronger = strengthDifferential > 0 ? base : strengthDifferential < 0 ? quote : null;
-    clauses.push(stronger ? `${stronger} currently has stronger macro conditions` : `${base} and ${quote} have similar macro conditions`);
-  }
   if (rateDifferentialPts !== null) {
     const favored = rateDifferentialPts > 0 ? base : rateDifferentialPts < 0 ? quote : null;
-    clauses.push(favored ? `a favorable rate differential for ${favored}` : "no meaningful rate differential");
+    clauses.push(favored ? `${favored} currently has stronger rate support than ${favored === base ? quote : base}` : "no meaningful rate differential");
+  }
+  if (growthDifferential !== null) {
+    const growthBand = bandGrowthDifferential(growthDifferential);
+    clauses.push(growthBand === "Neutral" ? "recent growth data is mixed" : `recent growth data favors ${growthDifferential > 0 ? base : quote}`);
+  }
+  if (strengthDifferential !== null) {
+    const stronger = strengthDifferential > 0 ? base : strengthDifferential < 0 ? quote : null;
+    clauses.push(stronger ? `${stronger} currently has stronger overall macro conditions` : `${base} and ${quote} have similar overall macro conditions`);
   }
   if (dailyTrend) {
     clauses.push(`the daily technical trend is ${dailyTrend.toLowerCase()}`);
   }
   if (clauses.length === 0) return null;
   const [first, ...rest] = clauses;
-  return `${first}${rest.length > 0 ? `, with ${rest.join(", and ")}` : ""}.`;
+  return `${first}${rest.length > 0 ? `, while ${rest.join(", and ")}` : ""}.`;
 }
 
 /** "BULLISH GBPJPY" / "BEARISH GBPJPY" / "NEUTRAL" — a direct readout of an
@@ -157,6 +203,14 @@ export async function buildForexScorecard(symbol: string, storageOnly = true): P
   const surpriseDifferential =
     baseSurprise !== null || quoteSurprise !== null ? round((baseSurprise ?? 0) - (quoteSurprise ?? 0), 2) : null;
 
+  const baseGrowthContribution = driverContribution(baseStrength, "Economic growth");
+  const quoteGrowthContribution = driverContribution(quoteStrength, "Economic growth");
+  const growthDifferential = baseGrowthContribution !== null && quoteGrowthContribution !== null ? round(baseGrowthContribution - quoteGrowthContribution) : null;
+
+  const baseLaborContribution = driverContribution(baseStrength, "Labor market");
+  const quoteLaborContribution = driverContribution(quoteStrength, "Labor market");
+  const laborDifferential = baseLaborContribution !== null && quoteLaborContribution !== null ? round(baseLaborContribution - quoteLaborContribution) : null;
+
   const timeframes = techFetch.result?.timeframes ?? [];
   const dailyScore = timeframes.find((t) => t.timeframe === "daily")?.score ?? null;
   const h4Score = timeframes.find((t) => t.timeframe === "4h")?.score ?? null;
@@ -186,6 +240,12 @@ export async function buildForexScorecard(symbol: string, storageOnly = true): P
     surpriseDifferential,
     baseSurprise,
     quoteSurprise,
+    baseGrowthContribution,
+    quoteGrowthContribution,
+    growthDifferential,
+    baseLaborContribution,
+    quoteLaborContribution,
+    laborDifferential,
     dailyTrend,
     h4Trend: h4Score !== null ? trendLabel(h4Score) : null,
     h1Trend: h1Score !== null ? trendLabel(h1Score) : null,
@@ -196,7 +256,9 @@ export async function buildForexScorecard(symbol: string, storageOnly = true): P
     strengthBand: bandStrengthDifferential(strengthDifferential),
     rateBand: bandRateDifferential(rateDifferentialPts),
     surpriseBand: bandSurpriseDifferential(surpriseDifferential),
-    narrative: synthesizeForexNarrative({ base, quote, strengthDifferential, rateDifferentialPts, dailyTrend }),
+    growthBand: bandGrowthDifferential(growthDifferential),
+    laborBand: bandLaborDifferential(laborDifferential),
+    narrative: synthesizeForexNarrative({ base, quote, strengthDifferential, rateDifferentialPts, growthDifferential, dailyTrend }),
   };
 }
 

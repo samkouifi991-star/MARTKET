@@ -145,3 +145,25 @@ export function classifyRateDecisionBias(instrument: Instrument, country: string
 
   return null;
 }
+
+/**
+ * classifyIndicatorSurprise/classifyMacroTrend both compute a release's
+ * effect on ITS OWN economy (growthLaborPolarity for FX is a flat +1
+ * regardless of which side of the pair the release is for — a growth beat
+ * is good news for that economy, full stop). That "domestic" read is
+ * exactly right for the pair's BASE currency, where a stronger economy IS
+ * bullish for the pair. For the QUOTE currency it's backwards: a stronger
+ * quote economy is bearish for the pair (it strengthens the currency
+ * you're short against), and a quote-side miss is bullish for the pair.
+ * This flips a domestic Bullish/Bearish read into that pair-relative read
+ * — Neutral and null (no forecast / no established model) pass through
+ * unchanged, since there's no direction to flip. Used ONLY for display
+ * (see scorecard.ts's quote-side Growth/Inflation/Jobs resolution) — never
+ * changes classifyIndicatorSurprise's own return value, so the "raw
+ * domestic" reading stays available wherever it's still wanted.
+ */
+export function flipClassificationForQuoteSide(classification: IndicatorClassification | null): IndicatorClassification | null {
+  if (classification === "Bullish") return "Bearish";
+  if (classification === "Bearish") return "Bullish";
+  return classification;
+}

@@ -18,7 +18,7 @@ import { getFredSeriesWithFallback } from "@/services/market-data/last-known-goo
 import { NormalizedRetailSentiment } from "@/services/market-data/retail-sentiment";
 import { FredIndicatorKey } from "@/services/market-data/fred-series";
 import { scoreIndicator, Trend } from "@/lib/engines/macro-differential";
-import { classifyIndicatorSurprise, classifyMacroTrend, classifyRateDecisionBias, IndicatorClassification, MacroTrendKind } from "./indicator-classification";
+import { classifyIndicatorSurprise, classifyMacroTrend, classifyRateDecisionBias, flipClassificationForQuoteSide, IndicatorClassification, MacroTrendKind } from "./indicator-classification";
 import { computeGoldMacroRegime, GOLD_SYMBOL, GoldMacroDriver } from "./gold-macro";
 import { InstitutionalCardData, LiveMarketDetail } from "./market-detail";
 import { CardResult, worseOf } from "./types";
@@ -113,6 +113,13 @@ export type IndicatorRow = {
   label: string;
   indicatorKey: EconomicIndicatorKey;
   classification: IndicatorClassification | null; // null when forecast is unavailable, or (rate decisions) when no established asset-specific transmission model exists — never fabricated
+  // The pair-relative read: identical to `classification` for the base
+  // currency (and for every non-FX instrument), FLIPPED for the quote
+  // currency (see flipClassificationForQuoteSide) — this is what should be
+  // rendered as "Bias"/"Pair impact" on a dual-economy FX Scorecard.
+  // `classification` itself is kept unflipped as the "raw domestic" read,
+  // per the redesign spec's "keep raw economic direction separately".
+  pairBias: IndicatorClassification | null;
   actual: number;
   forecast: number | null;
   previous: number | null;
@@ -201,11 +208,12 @@ export const RATE_DECISION_BY_COUNTRY: Partial<Record<string, { key: EconomicInd
   NZ: { key: "rbnzRateDecision", label: "RBNZ Rate Decision" },
 };
 
-function toIndicatorRow(instrument: Instrument, label: string, key: EconomicIndicatorKey, stored: StoredEconomicEventRow, classification: IndicatorClassification | null): IndicatorRow {
+function toIndicatorRow(label: string, key: EconomicIndicatorKey, stored: StoredEconomicEventRow, classification: IndicatorClassification | null, isQuoteSide: boolean): IndicatorRow {
   return {
     label,
     indicatorKey: key,
     classification,
+    pairBias: isQuoteSide ? flipClassificationForQuoteSide(classification) : classification,
     actual: stored.actual,
     forecast: stored.forecast,
     previous: stored.previous,
@@ -222,11 +230,14 @@ function toIndicatorRow(instrument: Instrument, label: string, key: EconomicIndi
  * spGlobalManufacturingPmi) against the already-fetched batched events map
  * and returns the first with a real stored release. Pure/synchronous — the
  * one DB read for every indicator this Scorecard needs already happened in
- * buildScorecardData's single getLatestEconomicEventsByIndicators call. */
-function lookupCalendarRow(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, def: IndicatorRowDef): IndicatorRow | null {
+ * buildScorecardData's single getLatestEconomicEventsByIndicators call.
+ * `isQuoteSide` only affects the returned row's `pairBias` (see
+ * flipClassificationForQuoteSide) — `classification` itself is always the
+ * unflipped "domestic" read regardless of which side is being resolved. */
+function lookupCalendarRow(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, def: IndicatorRowDef, isQuoteSide: boolean): IndicatorRow | null {
   for (const key of def.keys) {
     const stored = events.get(`${country}:${key}`);
-    if (stored) return toIndicatorRow(instrument, def.label, key, stored, classifyIndicatorSurprise(instrument, key, stored.actual, stored.forecast));
+    if (stored) return toIndicatorRow(def.label, key, stored, classifyIndicatorSurprise(instrument, key, stored.actual, stored.forecast), isQuoteSide);
   }
   return null;
 }
@@ -235,8 +246,11 @@ function lookupCalendarRow(events: Map<string, StoredEconomicEventRow>, instrume
  * are in scope for this instrument (FX: base + quote; everything else: its
  * one primary country) — same batched events map, no extra query.
  * `classification` is the deterministic hawkish/dovish display read from
- * classifyRateDecisionBias — display-only, never fed into V1/V2 scoring
- * (see that function's own doc for the exact rule and per-asset-class
+ * classifyRateDecisionBias, which is ALREADY pair-relative by construction
+ * (it takes the releasing country and flips for the quote side internally)
+ * — so `pairBias` here is simply set equal to `classification`, never
+ * flipped a second time. Display-only, never fed into V1/V2 scoring (see
+ * that function's own doc for the exact rule and per-asset-class
  * translation). */
 function resolveRateDecisionRows(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, countries: string[]): IndicatorRow[] {
   const rows: IndicatorRow[] = [];
@@ -245,7 +259,7 @@ function resolveRateDecisionRows(events: Map<string, StoredEconomicEventRow>, in
     if (!decision) continue;
     const stored = events.get(`${c}:${decision.key}`);
     if (!stored) continue;
-    rows.push(toIndicatorRow(instrument, decision.label, decision.key, stored, classifyRateDecisionBias(instrument, c, stored.actual, stored.forecast)));
+    rows.push(toIndicatorRow(decision.label, decision.key, stored, classifyRateDecisionBias(instrument, c, stored.actual, stored.forecast), false));
   }
   return rows;
 }
@@ -267,6 +281,8 @@ export type MacroStateRow = {
   changePct: number | null;
   trend: Trend;
   classification: IndicatorClassification;
+  // Same base/quote convention as IndicatorRow.pairBias — see its doc.
+  pairBias: IndicatorClassification;
   date: string;
   freshness: DataFreshness;
   source: string;
@@ -283,46 +299,69 @@ export type IndicatorSection = { kind: "rows"; rows: IndicatorSectionRow[] } | {
 
 type MacroStateDef = { label: string; fredKey: FredIndicatorKey; trendKind: MacroTrendKind };
 
+// Request-scoped memoization for getFredSeriesWithFallback: the base/quote
+// Economy comparison (see below) can ask for the SAME (country, fredKey)
+// pair from more than one call site in a single render (e.g. Interest
+// Rates' policy-rate read and a future consumer needing the same series) —
+// this guarantees each distinct (country, fredKey) pair hits Supabase at
+// most once per Scorecard render, never once-per-side. Keyed by a plain
+// string, not an object, so two calls for the same pair always share the
+// same in-flight Promise rather than issuing a second read while the first
+// is still pending.
+export type FredReadCache = Map<string, ReturnType<typeof getFredSeriesWithFallback>>;
+
+function cachedFredRead(cache: FredReadCache, country: string, fredKey: FredIndicatorKey, months: number, storageOnly: boolean): ReturnType<typeof getFredSeriesWithFallback> {
+  const key = `${country}:${fredKey}:${months}:${storageOnly}`;
+  let pending = cache.get(key);
+  if (!pending) {
+    pending = getFredSeriesWithFallback(country, fredKey, months, storageOnly);
+    cache.set(key, pending);
+  }
+  return pending;
+}
+
 // Always storage-only (the literal `true` below, never the caller's own
 // storageOnly flag) — this macro-state row is purely supplementary
 // Scorecard display, never a scoring input, so it must never trigger a
 // live FRED API call from the render path. See buildScorecardData's
 // batched-events comment for the same principle applied to calendar data.
-async function resolveMacroStateRow(instrument: Instrument, country: string, def: MacroStateDef): Promise<MacroStateRow | { reason: string }> {
-  const result = await getFredSeriesWithFallback(country, def.fredKey, 24, true);
+async function resolveMacroStateRow(instrument: Instrument, country: string, def: MacroStateDef, fredCache: FredReadCache, isQuoteSide: boolean): Promise<MacroStateRow | { reason: string }> {
+  const result = await cachedFredRead(fredCache, country, def.fredKey, 24, true);
   const usable = (result.status === "live" || result.status === "delayed" || result.status === "stale") && result.value && result.value.length > 0;
   if (!usable) return { reason: result.error ?? `No verified FRED series configured for ${country}/${def.fredKey}` };
 
   const scored = scoreIndicator(def.fredKey, result.value!);
   if (!scored) return { reason: "Insufficient FRED observation history to compute a trend (need at least 3 data points)" };
 
+  const classification = classifyMacroTrend(instrument, def.trendKind, scored.changeAbs);
   return {
     label: def.label,
+    pairBias: isQuoteSide ? (flipClassificationForQuoteSide(classification) as IndicatorClassification) : classification,
     value: scored.currentValue,
     previousValue: scored.previousValue,
     changeAbs: scored.changeAbs,
     changePct: scored.changePct,
     trend: scored.trend,
-    classification: classifyMacroTrend(instrument, def.trendKind, scored.changeAbs),
+    classification,
     date: result.value![result.value!.length - 1].date,
     freshness: result.status,
     source: result.source,
   };
 }
 
-async function resolveIndicatorRow(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, def: IndicatorRowDef): Promise<IndicatorSectionRow | null> {
-  const calendarRow = lookupCalendarRow(events, instrument, country, def);
+async function resolveIndicatorRow(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, def: IndicatorRowDef, fredCache: FredReadCache, isQuoteSide: boolean): Promise<IndicatorSectionRow | null> {
+  const calendarRow = lookupCalendarRow(events, instrument, country, def, isQuoteSide);
   if (calendarRow) return { source: "calendar", row: calendarRow };
 
   if (def.fredFallback) {
-    const macroRow = await resolveMacroStateRow(instrument, country, { label: def.label, fredKey: def.fredFallback.key, trendKind: def.fredFallback.trendKind });
+    const macroRow = await resolveMacroStateRow(instrument, country, { label: def.label, fredKey: def.fredFallback.key, trendKind: def.fredFallback.trendKind }, fredCache, isQuoteSide);
     if (!("reason" in macroRow)) return { source: "macro-state", row: macroRow };
   }
   return null;
 }
 
-async function resolveIndicatorSection(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, defs: IndicatorRowDef[]): Promise<IndicatorSection> {
-  const resolved = await Promise.all(defs.map((def) => resolveIndicatorRow(events, instrument, country, def)));
+async function resolveIndicatorSection(events: Map<string, StoredEconomicEventRow>, instrument: Instrument, country: string, defs: IndicatorRowDef[], fredCache: FredReadCache, isQuoteSide: boolean): Promise<IndicatorSection> {
+  const resolved = await Promise.all(defs.map((def) => resolveIndicatorRow(events, instrument, country, def, fredCache, isQuoteSide)));
   const rows = resolved.filter((r): r is IndicatorSectionRow => r !== null);
   if (rows.length === 0) return { kind: "unavailable", reason: `No released calendar indicators or verified FRED macro-state series are currently stored for ${country} in this category.` };
   return { kind: "rows", rows };
@@ -353,8 +392,8 @@ export type InterestRatesSection =
 
 // Always storage-only, same principle as resolveMacroStateRow above — this
 // is Scorecard display, not a scoring input.
-async function resolveLatestFredPoint(country: string, indicator: "policyRate" | "yield2y" | "yield10y"): Promise<CardResult<{ rate: number; date: string }>> {
-  const result = await getFredSeriesWithFallback(country, indicator, 6, true);
+async function resolveLatestFredPoint(country: string, indicator: "policyRate" | "yield2y" | "yield10y", fredCache: FredReadCache): Promise<CardResult<{ rate: number; date: string }>> {
+  const result = await cachedFredRead(fredCache, country, indicator, 6, true);
   const usable = (result.status === "live" || result.status === "delayed" || result.status === "stale") && result.value && result.value.length > 0;
   if (!usable) {
     return { data: null, freshness: result.status === "error" ? "error" : "unavailable", source: result.source, lastUpdated: null, reason: result.error };
@@ -363,7 +402,7 @@ async function resolveLatestFredPoint(country: string, indicator: "policyRate" |
   return { data: { rate: latest.value, date: latest.date }, freshness: result.status, source: result.source, lastUpdated: result.sourceUpdatedAt };
 }
 
-async function resolveInterestRatesSection(instrument: Instrument, country: string, events: Map<string, StoredEconomicEventRow>, storageOnly: boolean): Promise<InterestRatesSection> {
+async function resolveInterestRatesSection(instrument: Instrument, country: string, events: Map<string, StoredEconomicEventRow>, storageOnly: boolean, fredCache: FredReadCache): Promise<InterestRatesSection> {
   if (instrument.symbol === GOLD_SYMBOL) {
     const regime = await computeGoldMacroRegime(60, storageOnly);
     return { kind: "gold-drivers", drivers: regime.drivers, freshness: regime.interestRatesFreshness, releases: resolveRateDecisionRows(events, instrument, [country]) };
@@ -374,10 +413,10 @@ async function resolveInterestRatesSection(instrument: Instrument, country: stri
     const baseCountry = CCY_TO_COUNTRY[base];
     const quoteCountry = CCY_TO_COUNTRY[quote];
     const [baseRate, quoteRate, yield2y, yield10y] = await Promise.all([
-      resolveLatestFredPoint(baseCountry, "policyRate"),
-      resolveLatestFredPoint(quoteCountry, "policyRate"),
-      resolveLatestFredPoint(country, "yield2y"),
-      resolveLatestFredPoint(country, "yield10y"),
+      resolveLatestFredPoint(baseCountry, "policyRate", fredCache),
+      resolveLatestFredPoint(quoteCountry, "policyRate", fredCache),
+      resolveLatestFredPoint(country, "yield2y", fredCache),
+      resolveLatestFredPoint(country, "yield10y", fredCache),
     ]);
     const differential: CardResult<{ baseRate: number; quoteRate: number; diffPts: number }> =
       baseRate.data && quoteRate.data
@@ -391,7 +430,7 @@ async function resolveInterestRatesSection(instrument: Instrument, country: stri
     return { kind: "generic", policyRate: baseRate, differential, yield2y, yield10y, releases: resolveRateDecisionRows(events, instrument, [baseCountry, quoteCountry]) };
   }
 
-  const [policyRate, yield2y, yield10y] = await Promise.all([resolveLatestFredPoint(country, "policyRate"), resolveLatestFredPoint(country, "yield2y"), resolveLatestFredPoint(country, "yield10y")]);
+  const [policyRate, yield2y, yield10y] = await Promise.all([resolveLatestFredPoint(country, "policyRate", fredCache), resolveLatestFredPoint(country, "yield2y", fredCache), resolveLatestFredPoint(country, "yield10y", fredCache)]);
   return { kind: "generic", policyRate, differential: null, yield2y, yield10y, releases: resolveRateDecisionRows(events, instrument, [country]) };
 }
 
@@ -478,6 +517,15 @@ export async function resolveNewsContext(instrument: Instrument): Promise<NewsCo
 }
 
 // ---- Composition ----
+// `economicGrowth`/`inflation`/`jobsMarket` always describe the pair's BASE
+// country (or the single country, for non-FX) — unchanged behavior, so
+// every existing non-FX consumer (Gold, indices, crypto) sees exactly what
+// it always has. The `*Quote` siblings are populated ONLY for FX
+// instruments (base currency != quote currency) and are null everywhere
+// else — see FX_QUOTE_MACRO_COMMENT below for why this costs zero extra
+// queries. `quoteCountry`/`quoteCurrency` are null for non-FX so a
+// consumer can tell "no quote side exists" apart from "quote side has no
+// data" (an IndicatorSection with kind: "unavailable").
 export type ScorecardData = {
   subScores: ScorecardSubScores;
   scoreDrivers: { positive: ScoreDriverRow[]; negative: ScoreDriverRow[] };
@@ -488,6 +536,11 @@ export type ScorecardData = {
   economicGrowth: IndicatorSection;
   inflation: IndicatorSection;
   jobsMarket: IndicatorSection;
+  economicGrowthQuote: IndicatorSection | null;
+  inflationQuote: IndicatorSection | null;
+  jobsMarketQuote: IndicatorSection | null;
+  baseCurrency: string | null;
+  quoteCurrency: string | null;
   interestRates: InterestRatesSection;
   currencyComparison: ForexScorecardData | null;
   newsContext: NewsContextSection;
@@ -500,6 +553,12 @@ const GROWTH_INFLATION_JOBS_KEYS: EconomicIndicatorKey[] = [...GROWTH_INDICATORS
 
 export async function buildScorecardData(instrument: Instrument, score: MarketScore, live: LiveMarketDetail, storageOnly = false): Promise<ScorecardData> {
   const country = primaryMacroCountry(instrument);
+  // FX is the ONLY asset class where a second, genuinely different economy
+  // (the quote currency's) is directly relevant to the pair — "FX is a
+  // relative trade" (per the redesign spec). Gold/indices/crypto keep
+  // their existing single-country Growth/Inflation/Jobs sections
+  // untouched (quoteCountry stays null for them).
+  const quoteCountry = instrument.currencies && instrument.currencies[0] !== instrument.currencies[1] ? CCY_TO_COUNTRY[instrument.currencies[1]] : null;
   const countries = instrument.currencies ? Array.from(new Set([CCY_TO_COUNTRY[instrument.currencies[0]], CCY_TO_COUNTRY[instrument.currencies[1]]])) : [country];
   const rateDecisionKeys = countries.map((c) => RATE_DECISION_BY_COUNTRY[c]?.key).filter((k): k is EconomicIndicatorKey => !!k);
   const indicatorKeys = Array.from(new Set([...GROWTH_INFLATION_JOBS_KEYS, ...rateDecisionKeys]));
@@ -508,13 +567,24 @@ export async function buildScorecardData(instrument: Instrument, score: MarketSc
   // section below needs — replaces what used to be a separate query per
   // indicator (up to ~20 round trips for a full Scorecard render). See
   // getLatestEconomicEventsByIndicators (db/queries/market-data.ts).
+  // `countries` already includes BOTH sides of an FX pair, so resolving
+  // the quote economy's Growth/Inflation/Jobs sections below reads from
+  // this SAME map — zero additional calendar queries for showing both
+  // sides of the pair.
   const events = await getLatestEconomicEventsByIndicators(countries, indicatorKeys);
+  // Shared across base AND quote resolution below so a FRED macro-state
+  // fallback for a given (country, series) pair is fetched at most once
+  // per render, never once per side — see FredReadCache's own doc.
+  const fredCache: FredReadCache = new Map();
 
-  const [economicGrowth, inflation, jobsMarket, interestRates, currencyComparison, newsContext] = await Promise.all([
-    resolveIndicatorSection(events, instrument, country, GROWTH_INDICATORS),
-    resolveIndicatorSection(events, instrument, country, INFLATION_INDICATORS),
-    resolveIndicatorSection(events, instrument, country, JOBS_INDICATORS),
-    resolveInterestRatesSection(instrument, country, events, storageOnly),
+  const [economicGrowth, inflation, jobsMarket, economicGrowthQuote, inflationQuote, jobsMarketQuote, interestRates, currencyComparison, newsContext] = await Promise.all([
+    resolveIndicatorSection(events, instrument, country, GROWTH_INDICATORS, fredCache, false),
+    resolveIndicatorSection(events, instrument, country, INFLATION_INDICATORS, fredCache, false),
+    resolveIndicatorSection(events, instrument, country, JOBS_INDICATORS, fredCache, false),
+    quoteCountry ? resolveIndicatorSection(events, instrument, quoteCountry, GROWTH_INDICATORS, fredCache, true) : Promise.resolve(null),
+    quoteCountry ? resolveIndicatorSection(events, instrument, quoteCountry, INFLATION_INDICATORS, fredCache, true) : Promise.resolve(null),
+    quoteCountry ? resolveIndicatorSection(events, instrument, quoteCountry, JOBS_INDICATORS, fredCache, true) : Promise.resolve(null),
+    resolveInterestRatesSection(instrument, country, events, storageOnly, fredCache),
     resolveCurrencyComparison(instrument, storageOnly),
     resolveNewsContext(instrument),
   ]);
@@ -524,6 +594,11 @@ export async function buildScorecardData(instrument: Instrument, score: MarketSc
     scoreDrivers: buildScoreDrivers(score.factors),
     dataQuality: buildDataQualitySummary(score.factors),
     technicals: buildTechnicalsRows(score.factors),
+    baseCurrency: instrument.currencies ? instrument.currencies[0] : null,
+    quoteCurrency: instrument.currencies && quoteCountry ? instrument.currencies[1] : null,
+    economicGrowthQuote,
+    inflationQuote,
+    jobsMarketQuote,
     // Institutional and Retail are distinct sections/fields — never merged
     // into one "positioning" object — CFTC (institutional) and retail
     // sentiment stay separately keyed exactly as market-detail.ts already
