@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("./market-data-router");
 vi.mock("./cftc");
@@ -21,6 +21,7 @@ import {
   getPositioningWithFallback,
   getFredSeriesWithFallback,
   getRetailSentimentFromStorage,
+  __resetFredMacroStateCacheForTests,
 } from "./last-known-good";
 import { CftcPositioningResult } from "./cftc";
 
@@ -30,7 +31,14 @@ function hoursAgo(h: number): Date {
   return new Date(Date.now() - h * 3_600_000);
 }
 
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  // getFredSeriesWithFallback(storageOnly=true) is backed by a module-
+  // scoped cross-request cache (see last-known-good.ts) — without this
+  // reset, one test's mocked storage response for a given (country,
+  // indicator, limit) key would leak into the next test that reuses it.
+  __resetFredMacroStateCacheForTests();
+});
 
 describe("getQuoteWithFallback", () => {
   it("passes through the live result unchanged when the live call succeeds", async () => {
@@ -221,16 +229,14 @@ describe("getFredSeriesWithFallback", () => {
 // (economic_indicators reads at 567,068 calls in ~46h) — this is the
 // Scorecard/Economic-Strength/Heatmap display path, never the live-first
 // V1/V2 scoring branch above (which is untouched by the cache and still
-// exercised by the tests above). Real cross-request TTL/cache-hit behavior
-// requires a live Next.js request context unstable_cache can attach an
-// entry to — unavailable under vitest, same limitation this codebase's
-// other unstable_cache call sites (cachedPositioning, cachedScoreHistoryForChart)
-// already live with — so it never calls the live-fetch branch. It always calls
-// through getCachedStoredEconomicSeries's withCacheFallback fallback path in this
-// environment, which exercises the exact same read/return logic the real cache
-// wraps; the actual cross-request reduction is verified in production via
-// pg_stat_statements (see the deployment report).
+// exercised by the tests above). Unlike unstable_cache (tried first, but
+// found non-functional for this call path — see last-known-good.ts's own
+// comment on why), the in-process Map cache actually runs its real
+// hit/miss/TTL logic under vitest, so these tests exercise the genuine
+// cache behavior, not a fallback path.
 describe("getFredSeriesWithFallback — storageOnly=true (the cached Macro State display path)", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("never calls the live FRED API — storage-only means storage-only", async () => {
     vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue({ points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) });
     vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 20, cadence: "monthly" });
@@ -239,6 +245,53 @@ describe("getFredSeriesWithFallback — storageOnly=true (the cached Macro State
 
     expect(fred.getSeries).not.toHaveBeenCalled();
     expect(getLatestStoredEconomicSeries).toHaveBeenCalledWith("US", "cpi", 24);
+  });
+
+  it("first request reads the DB; a second request for the same key is a cache hit — no second DB call", async () => {
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValue({ points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) });
+    vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
+
+    const first = await getFredSeriesWithFallback("US", "cpi", 24, true);
+    const second = await getFredSeriesWithFallback("US", "cpi", 24, true);
+
+    expect(getLatestStoredEconomicSeries).toHaveBeenCalledTimes(1);
+    expect(first.value?.[0].value).toBe(3.2);
+    expect(second.value?.[0].value).toBe(3.2);
+  });
+
+  it("revalidates from the DB once the TTL expires", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
+    vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValueOnce({ points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) });
+
+    const first = await getFredSeriesWithFallback("US", "cpi", 24, true);
+    expect(first.value?.[0].value).toBe(3.2);
+
+    // Still within the 30-minute TTL — cache hit, no second call.
+    vi.setSystemTime(new Date("2026-08-01T00:20:00.000Z"));
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValueOnce({ points: [{ date: "2026-08-01", value: 9.9 }], fetchedAt: hoursAgo(1) });
+    const stillCached = await getFredSeriesWithFallback("US", "cpi", 24, true);
+    expect(stillCached.value?.[0].value).toBe(3.2);
+    expect(getLatestStoredEconomicSeries).toHaveBeenCalledTimes(1);
+
+    // Past the 30-minute TTL — revalidates from the DB.
+    vi.setSystemTime(new Date("2026-08-01T00:31:00.000Z"));
+    const revalidated = await getFredSeriesWithFallback("US", "cpi", 24, true);
+    expect(revalidated.value?.[0].value).toBe(9.9);
+    expect(getLatestStoredEconomicSeries).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache a rejected read — the very next call retries the DB instead of replaying the failure", async () => {
+    vi.mocked(getLatestStoredEconomicSeries).mockRejectedValueOnce(new Error("connection terminated"));
+    await expect(getFredSeriesWithFallback("US", "cpi", 24, true)).rejects.toThrow("connection terminated");
+
+    vi.mocked(getLatestStoredEconomicSeries).mockResolvedValueOnce({ points: [{ date: "2026-08-01", value: 3.2 }], fetchedAt: hoursAgo(1) });
+    vi.mocked(fred.classifyFredFreshness).mockReturnValue({ freshness: "delayed", ageDays: 10, cadence: "monthly" });
+    const result = await getFredSeriesWithFallback("US", "cpi", 24, true);
+
+    expect(result.value?.[0].value).toBe(3.2);
+    expect(getLatestStoredEconomicSeries).toHaveBeenCalledTimes(2);
   });
 
   it("keeps different indicators for the same economy independent — no cross-contamination between series", async () => {

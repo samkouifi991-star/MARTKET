@@ -42,7 +42,6 @@
 // provenance (fetchedAt) is tracked on the row but never drives freshness.
 // This keeps provider request volume to the cron's own cadence, never one
 // call per page view.
-import { unstable_cache } from "next/cache";
 import * as marketData from "./market-data-router";
 import * as cftc from "./cftc";
 import * as fred from "./fred";
@@ -62,7 +61,6 @@ import {
   StoredDailyCandles,
 } from "@/db/queries/market-data";
 import { FredSeriesPoint, NormalizedCandle, NormalizedQuote, Provenance, ProviderName, unavailable } from "../types";
-import { withCacheFallback } from "@/lib/cache-fallback";
 
 // Human-readable label per provider, for the storage-fallback branches
 // below — never a hardcoded "Financial Modeling Prep" regardless of which
@@ -249,32 +247,60 @@ const FRED_SOURCE = "FRED (Federal Reserve Economic Data)";
 // FRED's own fastest update cadence (daily) — this only reduces redundant
 // re-reads of data that hasn't actually changed, never returns data older
 // than what a live-first caller would already treat as merely "delayed".
-// Same unstable_cache + withCacheFallback pattern as market-detail.ts's
-// cachedSeasonalityCandles/cachedPositioning (the Supabase egress fix's
-// original fast/slow cache split) — degrades to the uncached read on a
-// non-request context (tests, scripts) instead of throwing.
 //
-// unstable_cache requires a JSON-serializable return value, so `fetchedAt`
-// (a real Date on StoredEconomicSeries) is carried as an ISO string across
-// the cache boundary and reconstructed into a Date immediately after —
-// every other field (FredSeriesPoint[]) is already plain strings/numbers.
-const FRED_MACRO_STATE_CACHE_TTL_SECONDS = 30 * 60;
+// unstable_cache (the pattern market-detail.ts's cachedSeasonalityCandles/
+// cachedPositioning already use) was tried here first, but proved
+// non-functional for this call path: Next.js 16's own implementation
+// (node_modules/next/dist/server/web/spec-extension/unstable-cache.js)
+// unconditionally SKIPS the cache READ — while still performing a wasted
+// write — whenever the calling route segment sets `workStore.fetchCache
+// === "force-no-store"`, which is exactly what `export const dynamic =
+// "force-dynamic"` implies (see caching-without-cache-components.md). Both
+// the diagnostics verification route AND the real production
+// /markets/[symbol] page set `dynamic = "force-dynamic"` (required so
+// AutoRefresh always sees current data), so unstable_cache's Data Cache
+// never actually served a hit here. Confirmed in production: two
+// back-to-back requests for the identical symbol each produced a full,
+// undiminished set of fresh economic_indicators reads. (This same
+// constraint likely affects the pre-existing cachedPositioning/
+// cachedSeasonalityCandles caches too, since Market Detail is also
+// force-dynamic — a separate, pre-existing question outside this fix's
+// narrow scope, flagged here rather than silently worked around elsewhere.)
+//
+// Given that, this uses a plain in-process Map with a manually tracked
+// TTL instead — no external service, no schema change, and (per Vercel's
+// serverless model) a real cross-request cache for the lifetime of a warm
+// function instance, which is exactly the traffic pattern (repeated
+// AutoRefresh polls hitting the same warm instance) this fix targets. The
+// cache stores the in-flight Promise (not just the resolved value) so
+// concurrent requests for the same key share one read, matching
+// scorecard.ts's own FredReadCache convention; a rejected promise is
+// evicted immediately rather than cached, so a DB failure is retried on
+// the very next call instead of being "remembered" as a failure for the
+// full TTL.
+const FRED_MACRO_STATE_CACHE_TTL_MS = 30 * 60 * 1000;
 
-type CachedFredSeries = { points: FredSeriesPoint[]; fetchedAtIso: string } | null;
+type FredCacheEntry = { promise: Promise<StoredEconomicSeries | null>; expiresAt: number };
+const fredMacroStateCache = new Map<string, FredCacheEntry>();
 
-async function readStoredEconomicSeriesForCache(country: string, indicator: FredIndicatorKey, limit: number): Promise<CachedFredSeries> {
-  const stored = await getLatestStoredEconomicSeries(country, indicator, limit);
-  return stored ? { points: stored.points, fetchedAtIso: stored.fetchedAt.toISOString() } : null;
+/** Test-only: clears the module-scoped FRED cache so one test's mocked
+ * storage response can't leak into another's via a shared cache key. Never
+ * called from production code — the whole point of this cache is that it
+ * persists for the life of the (warm) process. */
+export function __resetFredMacroStateCacheForTests(): void {
+  fredMacroStateCache.clear();
 }
 
-const cachedFredSeriesRead = unstable_cache(readStoredEconomicSeriesForCache, ["fred-macro-state-storage-read"], { revalidate: FRED_MACRO_STATE_CACHE_TTL_SECONDS });
+function getCachedStoredEconomicSeries(country: string, indicator: FredIndicatorKey, limit: number): Promise<StoredEconomicSeries | null> {
+  const key = `${country}:${indicator}:${limit}`;
+  const now = Date.now();
+  const cached = fredMacroStateCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
 
-async function getCachedStoredEconomicSeries(country: string, indicator: FredIndicatorKey, limit: number): Promise<StoredEconomicSeries | null> {
-  const cached = await withCacheFallback(
-    () => cachedFredSeriesRead(country, indicator, limit),
-    () => readStoredEconomicSeriesForCache(country, indicator, limit),
-  );
-  return cached ? { points: cached.points, fetchedAt: new Date(cached.fetchedAtIso) } : null;
+  const promise = getLatestStoredEconomicSeries(country, indicator, limit);
+  fredMacroStateCache.set(key, { promise, expiresAt: now + FRED_MACRO_STATE_CACHE_TTL_MS });
+  promise.catch(() => fredMacroStateCache.delete(key));
+  return promise;
 }
 
 export async function getFredSeriesWithFallback(country: string, indicator: FredIndicatorKey, limit = 24, storageOnly = false): Promise<Provenance<FredSeriesPoint[]>> {
