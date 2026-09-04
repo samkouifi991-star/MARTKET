@@ -47,3 +47,18 @@ jobs:
             echo "round=${ROUND} symbol=XAUUSD http_code=${STATUS}"
           done
           echo "END_TRAFFIC"
+
+      - name: Verify FX dual-economy base+quote correctness (raw JSON spot-check)
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          KEY: ${{ secrets.EVENT_WATCH_SECRET }}
+        run: |
+          ENCODED_KEY=$(python3 -c "import urllib.parse,os; print(urllib.parse.quote(os.environ['KEY']))")
+          echo "BEGIN_FX_CORRECTNESS"
+          for SYM in AUDUSD USDJPY GBPJPY EURGBP; do
+            echo "--- ${SYM} ---"
+            curl -s -m 30 "${APP_BASE_URL}/diagnostics/scorecard/${SYM}?key=${ENCODED_KEY}" \
+              | grep -oE '"baseCurrency":"[A-Z]*"|"quoteCurrency":"[A-Z]*"|"economicGrowthQuote":\{"kind":"[a-z]*"|"inflationQuote":\{"kind":"[a-z]*"|"jobsMarketQuote":\{"kind":"[a-z]*"' \
+              | sort -u
+          done
+          echo "END_FX_CORRECTNESS"
