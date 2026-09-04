@@ -39,6 +39,13 @@ describe("matchIndicator", () => {
     expect(matchIndicator("S&P Global Services PMI")).toBe("spGlobalServicesPmi");
   });
 
+  it("matches the HCOB (eurozone) and au Jibun Bank (Japan) PMI rebrand names, not just the legacy Markit name", () => {
+    expect(matchIndicator("HCOB Manufacturing PMI")).toBe("spGlobalManufacturingPmi");
+    expect(matchIndicator("HCOB Services PMI")).toBe("spGlobalServicesPmi");
+    expect(matchIndicator("au Jibun Bank Manufacturing PMI")).toBe("spGlobalManufacturingPmi");
+    expect(matchIndicator("au Jibun Bank Services PMI")).toBe("spGlobalServicesPmi");
+  });
+
   it("matches central bank events across the major currencies", () => {
     expect(matchIndicator("Fed Interest Rate Decision")).toBe("fedRateDecision");
     expect(matchIndicator("FOMC Statement")).toBe("fomcStatement");

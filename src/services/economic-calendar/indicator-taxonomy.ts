@@ -141,8 +141,12 @@ const PATTERNS: { key: EconomicIndicatorKey; patterns: string[] }[] = [
   { key: "durableGoods", patterns: ["durable goods"] },
   { key: "ismManufacturing", patterns: ["ism manufacturing"] },
   { key: "ismServices", patterns: ["ism services", "ism non-manufacturing"] },
-  { key: "spGlobalManufacturingPmi", patterns: ["s&p global manufacturing pmi", "markit manufacturing pmi"] },
-  { key: "spGlobalServicesPmi", patterns: ["s&p global services pmi", "markit services pmi"] },
+  // "markit" was S&P Global's PMI brand before the 2024 HCOB (eurozone) /
+  // au Jibun Bank (Japan) rebrand of the underlying same survey — both
+  // names must resolve to the same indicator so a real HCOB/Jibun Bank
+  // release classifies instead of silently going unclassified.
+  { key: "spGlobalManufacturingPmi", patterns: ["s&p global manufacturing pmi", "markit manufacturing pmi", "hcob manufacturing pmi", "jibun bank manufacturing pmi"] },
+  { key: "spGlobalServicesPmi", patterns: ["s&p global services pmi", "markit services pmi", "hcob services pmi", "jibun bank services pmi"] },
 
   { key: "dotPlot", patterns: ["dot plot", "economic projections", "sep "] },
   { key: "powellPressConference", patterns: ["powell", "press conference"] },
