@@ -26,5 +26,14 @@ export async function GET(req: NextRequest) {
     warning: rows.filter((r) => r.verdict === "WARNING").length,
     fail: rows.filter((r) => r.verdict === "FAIL").length,
   };
-  return NextResponse.json({ summary, rows });
+  // Existence-only check (booleans, never values) — Phase 14 launch-blocker
+  // gate: a missing key here means Stripe Production billing cannot work,
+  // regardless of what the rest of the audit says about market data.
+  const stripeProductionConfig = {
+    STRIPE_SECRET_KEY: Boolean(process.env.STRIPE_SECRET_KEY),
+    STRIPE_PRICE_ID: Boolean(process.env.STRIPE_PRICE_ID),
+    STRIPE_WEBHOOK_SECRET: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+    NEXT_PUBLIC_APP_URL: Boolean(process.env.NEXT_PUBLIC_APP_URL),
+  };
+  return NextResponse.json({ summary, rows, stripeProductionConfig });
 }
