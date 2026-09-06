@@ -225,11 +225,11 @@ const CURRENCY_ECONOMY_LABEL: Record<string, string> = {
 function DualIndicatorSectionView({ baseCurrency, baseSection, quoteCurrency, quoteSection }: { baseCurrency: string; baseSection: IndicatorSection; quoteCurrency: string; quoteSection: IndicatorSection }) {
   return (
     <div className="grid lg:grid-cols-2 gap-4">
-      <div>
+      <div className="min-w-0">
         <div className="text-[11px] font-semibold uppercase tracking-wide text-(--text-faint) mb-1.5">{CURRENCY_ECONOMY_LABEL[baseCurrency] ?? baseCurrency} ({baseCurrency})</div>
         <IndicatorSectionView section={baseSection} />
       </div>
-      <div>
+      <div className="min-w-0">
         <div className="text-[11px] font-semibold uppercase tracking-wide text-(--text-faint) mb-1.5">{CURRENCY_ECONOMY_LABEL[quoteCurrency] ?? quoteCurrency} ({quoteCurrency})</div>
         <IndicatorSectionView section={quoteSection} />
       </div>

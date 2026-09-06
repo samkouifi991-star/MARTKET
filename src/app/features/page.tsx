@@ -94,7 +94,7 @@ const FEATURES: Feature[] = [
   {
     icon: Landmark,
     title: "Interest Rates",
-    description: "Real policy rates and recent trend direction per currency, feeding every rate-differential read across the Forex Scorecard and Carry Trade Scanner.",
+    description: "Real policy rates and recent trend direction per currency, feeding every rate-differential read across the Scorecard and Carry Trade Scanner.",
     href: "/interest-rates",
   },
   {
