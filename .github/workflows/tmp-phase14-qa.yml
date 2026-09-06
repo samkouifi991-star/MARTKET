@@ -40,14 +40,14 @@ jobs:
         if: always()
         working-directory: scripts/tmp-phase14-qa
         run: |
-          git config user.name "phase14-qa-bot"
-          git config user.email "phase14-qa-bot@users.noreply.github.com"
           rm -rf /tmp/qa-publish
           mkdir -p /tmp/qa-publish
           cp -r shots /tmp/qa-publish/shots 2>/dev/null || true
           cp results.json /tmp/qa-publish/results.json 2>/dev/null || true
           cd /tmp/qa-publish
           git init -q
+          git config user.name "phase14-qa-bot"
+          git config user.email "phase14-qa-bot@users.noreply.github.com"
           git checkout -q -b qa/phase14-results
           git add -A
           git commit -q -m "Phase 14 QA run results"
